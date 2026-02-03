@@ -34,6 +34,9 @@ class SheetsClient:
                      decoded = base64.b64decode(creds_content).decode('utf-8')
                      creds_dict = json.loads(decoded)
                 
+                # DEBUG: Print the email we are using
+                print(f"[DEBUG] Using Service Account Email: {creds_dict.get('client_email', 'UNKNOWN')}")
+                
                 # Create credentials object explicitly (More robust)
                 from google.oauth2.service_account import Credentials
                 creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)

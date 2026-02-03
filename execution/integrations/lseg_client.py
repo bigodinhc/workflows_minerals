@@ -68,7 +68,7 @@ class LSEGClient:
         Fetches snapshot of SGX Iron Ore futures 1-12 months.
         Returns list of dicts: { month, price, change, pct_change }
         """
-        MAX_CONTRACTS = 12
+        MAX_CONTRACTS = 6  # Apenas primeiros 6 meses
         MONTH_CODES = {1:"F", 2:"G", 3:"H", 4:"J", 5:"K", 6:"M", 7:"N", 8:"Q", 9:"U", 10:"V", 11:"X", 12:"Z"}
         FIELDS = ["TRDPRC_1", "SETTLE", "NETCHNG_1", "PCTCHNG", "EXPIR_DATE"]
         

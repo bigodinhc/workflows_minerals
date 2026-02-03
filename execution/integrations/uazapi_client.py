@@ -23,16 +23,18 @@ class UazapiClient:
         """
         url = f"{self.base_url}/send/text"
         headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json"
+            "token": self.token
+            # Não precisa Content-Type pois requests seta automaticamente para form
         }
+        # Enviar como form data (não JSON) - igual ao n8n
         payload = {
-            "number": number,
-            "text": text
+            "number": str(number),
+            "text": str(text)
         }
         
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            # Usar data= para form data (igual ao n8n)
+            response = requests.post(url, headers=headers, data=payload, timeout=10)
             
             # Debug: print response for 4xx errors
             if response.status_code >= 400:

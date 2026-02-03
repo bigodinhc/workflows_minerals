@@ -132,10 +132,19 @@ def main():
         logger.info(f"Starting broadcast to {len(contacts)} contacts...")
         
         for contact in contacts:
-            phone = contact.get('Evolution-api') or contact.get('Telefone') or contact.get('Phone')
+            # Try to get phone from multiple convenient columns (Sheet Screenshot shows 'From')
+            raw_phone = (
+                contact.get('Evolution-api') or 
+                contact.get('Telefone') or 
+                contact.get('Phone') or 
+                contact.get('From')
+            )
             
-            if not phone:
+            if not raw_phone:
                 continue
+                
+            # Clean phone number (remove 'whatsapp:' prefix if present)
+            phone = str(raw_phone).replace("whatsapp:", "").strip()
             
             if args.dry_run:
                 logger.info(f"[DRY RUN] Would send to {phone}")

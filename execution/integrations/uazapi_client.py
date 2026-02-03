@@ -23,7 +23,7 @@ class UazapiClient:
         """
         url = f"{self.base_url}/send/text"
         headers = {
-            "token": self.token,
+            "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
         }
         payload = {

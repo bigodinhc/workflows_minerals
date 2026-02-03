@@ -33,6 +33,12 @@ class UazapiClient:
         
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=10)
+            
+            # Debug: print response for 4xx errors
+            if response.status_code >= 400:
+                print(f"[DEBUG] Response Status: {response.status_code}")
+                print(f"[DEBUG] Response Body: {response.text[:500]}")
+            
             response.raise_for_status()
             return response.json()
         except Exception as e:

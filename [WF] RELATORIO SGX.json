@@ -1,0 +1,638 @@
+{
+  "name": "[WF] RELATORIO SGX",
+  "nodes": [
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0",
+          "mode": "list",
+          "cachedResultName": "EVOLUTION-API",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Página1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ButtonPayload",
+              "lookupValue": "Big"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Get WhatsApp Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        688,
+        272
+      ],
+      "typeVersion": 4.5,
+      "id": "c413e03e-e1e4-48b6-8f05-bea6c3d60695",
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GiY2cbcLXEqcL2Uk",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ButtonPayload }}",
+              "rightValue": "=Big",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "2ae99cc7-6471-4d5d-af10-f0466c978608"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Filtrar Válidos",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        976,
+        272
+      ],
+      "typeVersion": 2,
+      "id": "e000ec2a-3135-4a12-af9b-e954b1a98edd"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1488,
+        464
+      ],
+      "id": "4a3e0be8-4fae-4df3-965b-060a65e53e76",
+      "name": "Loop Over Items2"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1264,
+        464
+      ],
+      "id": "92c2456e-f5ca-4272-bc92-8a1ca3cd1e3d",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1936,
+        544
+      ],
+      "id": "4478c60c-ce12-4130-bd68-1e17997803bd",
+      "name": "Wait",
+      "webhookId": "12631bb8-ddc9-4155-8057-b5f479c31161"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1712,
+        272
+      ],
+      "id": "53c296e5-ebc0-4569-9ff1-2caf0c3073e1",
+      "name": "No Operation, do nothing1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "purpose",
+              "value": "ocr"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16,
+        688
+      ],
+      "id": "38b0ab33-9495-4dad-b4c0-00ea27226a1a",
+      "name": "HTTP Request3",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QJxcsIKvTgN1o4hf",
+          "name": "Mistral OCR"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.mistral.ai/v1/files/{{ $json.id }}/url",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "expiry",
+              "value": "24"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        688
+      ],
+      "id": "b269126f-4752-4484-b312-48362abfe608",
+      "name": "HTTP Request4",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QJxcsIKvTgN1o4hf",
+          "name": "Mistral OCR"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/ocr",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral-ocr-latest\",\n  \"document\": {\n    \"type\": \"document_url\",\n    \"document_url\": \"{{ $json.url }}\"\n  },\n  \"include_image_base64\": true\n}\n\n\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        464,
+        688
+      ],
+      "id": "b1ff4c7c-612f-4335-b4d4-0d71f09e9d1f",
+      "name": "HTTP Request5",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "QJxcsIKvTgN1o4hf",
+          "name": "Mistral OCR"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -208,
+        688
+      ],
+      "id": "ef2e8715-75f0-4fe0-9c88-5e9844d73b8a",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "OSTjYQYR8TMldmsN",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "=1dipa4T17Kd2aTuGwbfW6Jsp-YOPsksoN",
+          "mode": "id"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -432,
+        464
+      ],
+      "id": "24918404-967e-47f0-922a-f4418066e508",
+      "name": "Google Drive Trigger",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "OSTjYQYR8TMldmsN",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Reformate esta tabela markdown para WhatsApp monoespaçado:\n\n{{ $json.pages[0].markdown }}\n\nData atual e hora: {{ $json.currentDate }}\nUse formato de código (```) para fonte monoespaçada.\nAlinhe os números em colunas.\nAdicione 🟢 ou 🔴 no final de cada linha conforme variação.",
+        "options": {
+          "systemMessage": "=Você é um formatador de dados de minério de ferro. Sua ÚNICA função é extrair dados de tabelas markdown e reformatá-los para WhatsApp em formato monoespaçado.\n\nREGRAS RÍGIDAS:\n1. NUNCA invente dados\n2. NUNCA faça análises ou previsões\n3. APENAS extraia e reformate os dados fornecidos\n4. Use EXATAMENTE os valores da tabela\n5. Use formato monoespaçado do WhatsApp (entre ```)\n\nFORMATO DE SAÍDA FIXO:\n\n📈 MINERALS TRADING - [DATA (DD/MM/YY) - HORA]\nSGX IRON ORE 62% FE FUTURES\n────────────────────────────\nEXP    | PRICE  | CHG   | %\n────────────────────────────\nSEP/25 | 105.40 | +0.10 | +0.09\nOCT/25 | 103.20 | -0.35 | -0.34\nNOV/25 | 103.10 | -0.30 | -0.29\n\nINDICADORES NO FINAL DE CADA LINHA:\n- Adicione 🟢 para positivo\n- Adicione 🔴 para negativo\n- Nada para zero\n\nALINHAMENTO:\n- MÊS/ANO: 7 caracteres (esquerda)\n- PRICE: 6 caracteres (direita)\n- CHG: 6 caracteres (direita com sinal)\n- %: 6 caracteres (direita com sinal)\n\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        912,
+        592
+      ],
+      "id": "fcc2897d-7482-4393-8e7a-db38c53de012",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-opus-4-20250514",
+          "mode": "list",
+          "cachedResultName": "Claude Opus 4"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        928,
+        816
+      ],
+      "id": "27dab248-72f3-42d7-928d-0b13ed06ed30",
+      "name": "Anthropic Chat Model1",
+      "retryOnFail": true,
+      "credentials": {
+        "anthropicApi": {
+          "id": "fjN5QtG5xAcoiOWE",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1.1,
+      "position": [
+        1056,
+        816
+      ],
+      "id": "f5fac870-f4c3-40cc-9e36-7f9b4c84c9f0",
+      "name": "Think1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dateTime",
+      "typeVersion": 2,
+      "position": [
+        464,
+        496
+      ],
+      "id": "35c7b4a9-bc51-4817-84d7-897083385a78",
+      "name": "Date & Time"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        240,
+        352
+      ],
+      "id": "cc8f5585-e8d7-4893-b1fa-4f1938030fab",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        688,
+        592
+      ],
+      "id": "16304a7a-3a7a-4b14-b852-08fcf3c34d23",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mineralstrading.uazapi.com/send/text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "=e6591b90-1ff0-4e57-ac80-9074770351fa"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $json['Evolution-api'] }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.output }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1712,
+        496
+      ],
+      "id": "7c8c4d95-3b8f-4e1c-ad46-b3d21556ec59",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get WhatsApp Contacts": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Válidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Válidos": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items2": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Think1": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request5": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing": {
+      "main": [
+        [
+          {
+            "node": "Date & Time",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get WhatsApp Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date & Time": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "c34b7e28-62c9-48e2-939f-0f692df98487",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3ddfe059a73966551adef0c3115547780518822b2c26e44ce57a0aa0c6ec2099"
+  },
+  "id": "zxxd71r9kk1fp6Ut",
+  "tags": []
+}

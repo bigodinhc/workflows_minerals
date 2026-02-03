@@ -1,0 +1,44 @@
+name: "Daily SGX Report"
+
+on:
+  schedule:
+    # Seg-Sex: 05, 07, 09, 12, 16h BRT (+3h UTC)
+    - cron: '0 8,10,12,15,19 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run (sem envio)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Report
+        env:
+          LSEG_APP_KEY: ${{ secrets.LSEG_APP_KEY }}
+          LSEG_USERNAME: ${{ secrets.LSEG_USERNAME }}
+          LSEG_PASSWORD: ${{ secrets.LSEG_PASSWORD }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          UAZAPI_URL: ${{ vars.UAZAPI_URL }}
+          UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            python execution/scripts/send_daily_report.py --dry-run
+          else
+            python execution/scripts/send_daily_report.py
+          fi

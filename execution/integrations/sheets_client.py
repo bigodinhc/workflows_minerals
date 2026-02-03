@@ -83,9 +83,14 @@ class SheetsClient:
             return valid_contacts
             
         except Exception as e:
-            # FORCE PRINT ERROR TO CONSOLE
-            print(f"\n[ERROR] CRITICAL SHEETS FAILURE: {str(e)}")
+            # FORCE PRINT ERROR TO CONSOLE WITH TRACEBACK
+            import traceback
+            tb = traceback.format_exc()
+            print(f"\n[ERROR] CRITICAL SHEETS FAILURE: {repr(e)}")
+            print(f"[DEBUG] Traceback:\n{tb}")
+            
             if "PERMISSION_DENIED" in str(e).upper():
                 print(">>> HINT: Did you share the Google Sheet with the Service Account email?")
-            self.logger.error("Failed to fetch contacts", {"error": str(e)})
+            
+            self.logger.error("Failed to fetch contacts", {"error": str(e), "traceback": tb})
             raise e

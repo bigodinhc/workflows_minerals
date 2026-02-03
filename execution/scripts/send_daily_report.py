@@ -11,11 +11,6 @@ import argparse
 from datetime import datetime
 
 # Adjust path to allow imports from root
-sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
-
-from execution.integrations.lseg_client import LSEGClient
-from execution.integrations.sheets_client import SheetsClient
-from execution.integrations.uazapi_client import UazapiClient
 from execution.core.logger import WorkflowLogger
 
 # CONFIG
@@ -41,36 +36,46 @@ def format_price_message(prices):
     lines.append("────────────────────────────")
     
     for p in prices:
-        # Determine dot color
+        # Determine dot color and sign
         change_val = float(p.get('change', 0))
+        pct_val = float(p.get('pct_change', 0))
+        
         if change_val > 0:
             emoji = "🟢"
             sign = "+"
+            pct_sign = "+"
         elif change_val < 0:
             emoji = "🔴"
-            sign = ""
+            sign = ""  # Negative numbers already have '-'
+            pct_sign = ""
         else:
             emoji = ""
-            sign = ""
+            sign = "+" # Zero usually has no sign or + space holder? Let's assume +0.00 to match alignment
+            pct_sign = "+"
             
         # Format columns fixed width
-        month = str(p.get('month', '???')).ljust(6)
-        price = f"{float(p.get('price', 0)):.2f}".rjust(6)
+        # MÊS/ANO: 7 (left)
+        month = str(p.get('month', '???')).upper().ljust(7)
         
-        # Format change with sign
-        chg_fmt = f"{sign}{change_val:.2f}".rjust(6)
+        # PRICE: 6 (right)
+        price_float = float(p.get('price', 0))
+        price = f"{price_float:.2f}".rjust(6)
         
-        # Format pct (ensure sign is handled)
-        pct_val = float(p.get('pct_change', 0))
-        # If pct is already signed/abs, handle logic. Assuming raw value.
-        # LSEG might give 0.1 for 0.1%. Let's assume input is % number.
-        pct_sign = "+" if pct_val > 0 else ""
-        pct_fmt = f"{pct_sign}{pct_val:.2f}".rjust(6)
+        # CHG: 6 (right with sign)
+        # Only add + manually if positive, negative numbers have it naturally
+        # But we need to ensure the width is correct including the sign.
+        chg_str = f"{sign}{change_val:.2f}" if change_val >= 0 else f"{change_val:.2f}"
+        chg = chg_str.rjust(6)
         
-        line = f"{month} | {price} | {chg_fmt} | {pct_fmt} {emoji}"
+        # %: 6 (right with sign)
+        pct_str = f"{pct_sign}{pct_val:.2f}" if pct_val >= 0 else f"{pct_val:.2f}"
+        pct = pct_str.rjust(6)
+        
+        line = f"{month}| {price} | {chg} | {pct} {emoji}"
         lines.append(line)
         
-    return "\n".join(lines)
+    # Wrap in code block for WhatsApp mono
+    return "```\n" + "\n".join(lines) + "\n```"
 
 
 def main():
@@ -84,6 +89,9 @@ def main():
     lseg = None
     
     try:
+        # Import here to avoid dependency issues when testing format function
+        from execution.integrations.lseg_client import LSEGClient
+        
         # 1. Fetch Prices (LSEG)
         logger.info("Connecting to LSEG...")
         lseg = LSEGClient()
@@ -106,6 +114,7 @@ def main():
         
         # 3. Fetch Contacts
         logger.info("Fetching contacts from Sheets...")
+        from execution.integrations.sheets_client import SheetsClient
         sheets = SheetsClient()
         contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME)
         
@@ -115,6 +124,7 @@ def main():
             return
 
         # 4. Send Messages
+        from execution.integrations.uazapi_client import UazapiClient
         uazapi = UazapiClient()
         success_count = 0
         fail_count = 0

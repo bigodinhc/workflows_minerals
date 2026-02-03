@@ -6,7 +6,8 @@ from ..core.retry import retry_with_backoff
 
 class UazapiClient:
     def __init__(self):
-        self.base_url = os.environ.get("UAZAPI_URL", "https://mineralstrading.uazapi.com")
+        # Fallback robusto: se env var vazia ou não definida, usa default
+        self.base_url = os.environ.get("UAZAPI_URL") or "https://mineralstrading.uazapi.com"
         self.token = os.environ.get("UAZAPI_TOKEN")
         
         if not self.token:

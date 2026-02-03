@@ -27,7 +27,11 @@ def format_price_message(prices):
     Formats the price list into the monospaced WhatsApp table.
     Expects 'prices' to be a list of dicts: {month, price, change, pct_change}
     """
-    now = datetime.now().strftime("%d/%m/%y - %H:%M")
+    from datetime import timezone, timedelta
+    
+    # Horário de Brasília (UTC-3)
+    BRT = timezone(timedelta(hours=-3))
+    now = datetime.now(BRT).strftime("%d/%m/%y - %H:%M")
     
     lines = []
     lines.append(f"📈 MINERALS TRADING - [{now}]")

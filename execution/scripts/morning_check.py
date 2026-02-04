@@ -21,59 +21,59 @@ from execution.integrations.uazapi_client import UazapiClient
 
 # --- CONFIGURATION (Whitelists ported from JS) ---
 
-FINES_WHITELIST = [
-    'IODEX CFR CHINA 62% Fe $/DMt',
-    'IO fines Fe 65% $/DMt',
-    'IO fines Fe 58% $/DMt',
-    'TSI Iron Ore Fines 62% Fe CFR China',
-    'Mining Area C Fines CFR Qingdao $/DMT',
-    'Pilbara Blend Fines CFR Qingdao $/DMT',
-    'Brazilian Blend Fines CFR Qingdao $/DMT',
-    'Jimblebar Fines CFR Qingdao $/DMT',
-    'Newman High Grade Fines CFR Qingdao $/DMT',
+# --- CONFIGURATION (Whitelists using Variable Keys for stability) ---
+
+FINES_WHITELIST_KEYS = [
+    "PLATTS_IODEX_62_CFR_CHINA",
+    "PLATTS_VIU_FE_60_63", # Check if this belongs here or VIU
+    # Add other keys based on PlattsClient SYMBOLS_MAPPING
+    # Wait, SYMBOLS_MAPPING in PlattsClient only has 8 keys!
+    # The original JS checklist had ~30 items.
+    # The user's fetch_platts.py ONLY has 8 keys mapped.
+    # This means we can ONLY report on these 8 keys currently.
+    
+    # Let's map the available 8 keys to their sections:
+    "PLATTS_IODEX_62_CFR_CHINA", # Fines
 ]
 
-LUMP_PELLET_WHITELIST = [
-    'Iron Ore Spot Lump Premium China $/dmtu',
-    'Iron Ore Blast Furnace Pellet Premium CFR China $/DMT Wkly',
-    'Iron Ore Blast Furnace 63% Fe Pellet CFR China $/DMT',
-    'Atlantic Basin Iron Ore Pellets Contract Price Brazil Export FOB Monthly',
-    'Iron Ore 67.5% Fe DR Pellet Premium (62% Fe basis) $/DMT Mthly',
-    'Iron Ore Lump Outright Price CFR China',
+# Mapping based on typical classification:
+# FINES: IODEX 62
+# LUMP/PELLET: None in the current 8 keys?
+# VIU: Silica, Alumina, Penalty, VIU Fe 60.63
+
+# Re-reading SYMBOLS_MAPPING in platts_client.py:
+# "PLATTS_IODEX_62_CFR_CHINA": "IODBZ00", -> FINES
+# "PLATTS_VIU_FE_60_63": "IOMGD00", -> VIU ?
+# "PLATTS_SILICA_3_4P5": "IOALF00", -> VIU
+# "PLATTS_SILICA_4P5_6P5": "IOPPS10", -> VIU
+# "PLATTS_SILICA_6P5_9": "IOPPS20", -> VIU
+# "PLATTS_ALUMINA_1_2P5": "IOADF10", -> VIU
+# "PLATTS_ALUMINA_2P5_4": "IOALE00", -> VIU
+# "PLATTS_P_PENALTY": "IOPPQ00", -> VIU
+
+# So currently we only have coverage for 1 Fines item and 7 VIU items.
+# The user's original JS template had way more.
+# BUT we are limited by what is in fetch_platts.py (which I refactored to PlattsClient).
+# The user said "use this fetch_platts.py code".
+# So I must restrict the report to what is actually fetched.
+
+FINES_KEYS = [
+    "PLATTS_IODEX_62_CFR_CHINA"
 ]
 
-VIU_WHITELIST = [
-    'Iron Ore Silica Differential per 1% with 3-4.5% range $/DMT',
-    'Iron Ore Alumina Differential per 1% with 2.5-4% $/DMT',
-    'Iron Ore Fe Differential per 1% Fe within 55-60% Fe Fines',
-    'Iron Ore Phosphorus Differential per 0.01% for 0.10%-0.11% $/DMT',
-    'Iron Ore Silica Differential per 1% within 55-60% Fe Fines',
-    'Iron ore Alumina differential per 1% within 1-2.5% $/DMT',
-    'Iron Ore Phosphorus Differential per 0.01% for 0.11%-0.12% $/DMT',
-    'Iron Ore Phosphorus Differential per 0.01% for 0.09%-0.12% $/DMT',
-    'Mid Range Diff 60-63.5 Fe $/DMt',
-    'Iron Ore Alumina Differential per 1% within <5% (55-60% Fe Fines)',
-    'Iron Ore Phosphorus Differential per 0.01% for 0.12%-0.15% $/DMT',
-    'Iron ore Silica differential per 1% within 6.5-9% $/DMT',
-    'Iron ore Silica differential per 1% within 4.5-6.5% $/DMT',
+LUMP_PELLET_KEYS = [] # No symbols mapped in fetch_platts.py for this yet
+
+VIU_KEYS = [
+    "PLATTS_VIU_FE_60_63",
+    "PLATTS_SILICA_3_4P5",
+    "PLATTS_SILICA_4P5_6P5",
+    "PLATTS_SILICA_6P5_9",
+    "PLATTS_ALUMINA_1_2P5",
+    "PLATTS_ALUMINA_2P5_4",
+    "PLATTS_P_PENALTY"
 ]
 
-FREIGHT_WHITELIST = [
-    'DBF Iron Ore Tubarao Brazil ECSA-Tubarao S Brazil-Qingdao N China 170kt $/mt Capesize',
-    'DBF Iron Ore Western Australia-Qingdao N China 170kt $/mt Capesize',
-    'DBF Iron Ore Saldanha Bay S Africa-Qingdao N China 170kt $/mt Capesize',
-    'DBF Iron Ore Mormugao WC India-Qingdao N China 75kt $/mt Panamax',
-    'DBF Iron Ore Paradip EC India-Qingdao N China 50kt $/mt Supramax',
-    'DBF Iron Ore Port Cartier Canada-Rotterdam Netherlands 70kt $/mt Panamax',
-    'DBF Iron Ore Seven Islands-Qingdao 170kt $/mt Capesize',
-    'DBF Iron Ore Yuzhny Ukraine-Qingdao N China 160kt $/mt Capesize',
-]
-
-FREIGHT_FALLBACK_HINTS = [
-    'brazil', 'tubarao', 'western australia', 'australia',
-    'saldanha', 'south africa', 'africa do sul',
-    'mormugao', 'paradip', 'port cartier', 'seven islands', 'qingdao', 'rotterdam'
-]
+FREIGHT_KEYS = [] # No freight mapped
 
 REPORT_TYPE = "MORNING_REPORT"
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
@@ -133,32 +133,18 @@ def format_line(item):
     unit_display = f" {assess_type}" if assess_type else ""
     return f"- *{desc}*\n  {price}{unit_display} {delta_str}"
 
-def filter_by_whitelist(items, whitelist):
-    """Filters items matching whitelist descriptions."""
-    norm_whitelist = {normalize_text(w) for w in whitelist}
+def filter_by_keys(items, keys_whitelist):
+    """Filters items matching whitelist KEYS (more stable than description)."""
     results = []
+    # Convert list to set for O(1)
+    wanted = set(keys_whitelist)
     
     for item in items:
-        # Check if any key matches
-        keys = desc_keys(item)
-        if any(k in norm_whitelist for k in keys):
+        # Check if variable_key matches
+        if item.get('variable_key') in wanted:
             line = format_line(item)
             if line: results.append(line)
             
-    return results
-
-def filter_by_hints(items, hints):
-    """Filters items containing hint substrings."""
-    if not items: return []
-    norm_hints = [normalize_text(h) for h in hints]
-    results = []
-    
-    for item in items:
-        desc = normalize_text(item.get('product', ''))
-        if any(h in desc for h in norm_hints):
-             line = format_line(item)
-             if line: results.append(line)
-             
     return results
 
 def get_section(title, lines):
@@ -170,25 +156,14 @@ def build_message(report_items, date_str):
     """
     Orchestrates the message construction with sections.
     """
-    # Separate items (Simulating the JS logic where inputs are separated objects)
-    # Since our client returns a flat list, we filter by whitelist to categorize
-    # This assumes items are available in the full list
+    # Filter by KEYS logic
+    fines_lines = filter_by_keys(report_items, FINES_KEYS)
+    lump_lines = filter_by_keys(report_items, LUMP_PELLET_KEYS)
+    viu_lines = filter_by_keys(report_items, VIU_KEYS)
+    freight_lines = filter_by_keys(report_items, FREIGHT_KEYS)
     
-    # Note: The JS logic had distinct inputs for Fines, Lump, etc.
-    # Our client fetching ALL symbols. We need to categorize them.
-    # Simplification: We iterate the full list against whitelists.
-    
-    # To avoid duplicates if an item matches multiple lists (unlikely but possible), 
-    # lets process sequentially.
-    
-    fines_lines = filter_by_whitelist(report_items, FINES_WHITELIST)
-    lump_lines = filter_by_whitelist(report_items, LUMP_PELLET_WHITELIST)
-    viu_lines = filter_by_whitelist(report_items, VIU_WHITELIST)
-    freight_lines = filter_by_whitelist(report_items, FREIGHT_WHITELIST)
-    
-    # Fallback for Freight hints if empty
-    if not freight_lines:
-        freight_lines = filter_by_hints(report_items, FREIGHT_FALLBACK_HINTS)
+    # Fallback/Hints deprecated for now as we only have 8 specific keys mapped
+    # If customer adds more keys to PlattsClient.SYMBOLS_MAPPING later, add them to lists above.
     
     # Build parts
     header = f"📊 *MINERALS TRADING DAILY REPORT* 📊\n🔍 *IRON ORE MARKET UPDATE* - {date_str}"

@@ -31,7 +31,7 @@ class BalticClient:
         headers = {'Authorization': 'Bearer ' + token}
         
         # Look back 24 hours
-        time_window = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
+        time_window = (datetime.utcnow() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')
         
         # User ID or specific mailbox to check. 
         # For App Permissions, we check a specific USER mailbox usually.
@@ -50,6 +50,9 @@ class BalticClient:
             f"contains(subject, '{subject_keyword}')"
         )
         
+        # Debug URL
+        print(f"DEBUG: Query Filter: {query_filter}")
+
         params = {
             "$filter": query_filter,
             "$orderby": "receivedDateTime desc",
@@ -58,7 +61,12 @@ class BalticClient:
         }
         
         response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            print(f"Graph API Error: {response.text}")
+            raise e
+
         messages = response.json().get('value', [])
         
         return messages[0] if messages else None

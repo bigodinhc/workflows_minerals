@@ -13,15 +13,41 @@ except ImportError:
 
 class PlattsClient:
     # Mapeamento estático (Constant)
+    # Mapeamento expandido (Baseado no JSON/Output desejado pelo usuário)
+    # Key = Variavel interna (usaremos o proprio symbol para facilitar ou uma chave descritiva)
+    # Value = Symbol da API Platts
     SYMBOLS_MAPPING = {
-        "PLATTS_IODEX_62_CFR_CHINA": "IODBZ00",
-        "PLATTS_VIU_FE_60_63": "IOMGD00",
-        "PLATTS_SILICA_3_4P5": "IOALF00",
-        "PLATTS_SILICA_4P5_6P5": "IOPPS10",
-        "PLATTS_SILICA_6P5_9": "IOPPS20",
-        "PLATTS_ALUMINA_1_2P5": "IOADF10",
-        "PLATTS_ALUMINA_2P5_4": "IOALE00",
-        "PLATTS_P_PENALTY": "IOPPQ00",
+        # --- FINES ---
+        "IOBBA00": "IOBBA00", # Brazilian Blend Fines CFR Qingdao
+        "IODFE00": "IODFE00", # IO fines Fe 58%
+        "IOPRM00": "IOPRM00", # IO fines Fe 65%
+        "IOJBA00": "IOJBA00", # Jimblebar Fines CFR Qingdao
+        "IOMAA00": "IOMAA00", # Mining Area C Fines CFR Qingdao
+        "IONHA00": "IONHA00", # Newman High Grade Fines CFR Qingdao
+        "IOPBQ00": "IOPBQ00", # Pilbara Blend Fines CFR Qingdao
+        "IODBZ00": "IODBZ00", # IODEX CFR CHINA 62% Fe
+        "TS01021": "TS01021", # TSI Iron Ore Fines 62% Fe CFR China
+        
+        # --- LUMP & PELLET ---
+        "IODRP00": "IODRP00", # Iron Ore 67.5% Fe DR Pellet Premium
+        "IOCQR04": "IOCQR04", # Iron Ore Blast Furnace 63% Fe Pellet CFR China
+        "IOBFC04": "IOBFC04", # Iron Ore Blast Furnace Pellet Premium CFR China Wkly
+        "IOCLS00": "IOCLS00", # Iron Ore Lump Outright Price CFR China
+        
+        # --- VIU DIFFERENTIALS ---
+        "IOALE00": "IOALE00", # Alumina Diff 2.5-4%
+        "TSIAF00": "TSIAF00", # Alumina Diff <5% (55-60% Fe)
+        "TSIAD00": "TSIAD00", # Fe Diff within 55-60% Fe
+        "IOPPQ00": "IOPPQ00", # Phos Diff 0.09-0.12%
+        "IOPPT00": "IOPPT00", # Phos Diff 0.10-0.11%
+        "IOPPU00": "IOPPU00", # Phos Diff 0.11-0.12%
+        "IOPPV00": "IOPPV00", # Phos Diff 0.12-0.15%
+        "IOALF00": "IOALF00", # Silica Diff 3-4.5%
+        "TSIAI00": "TSIAI00", # Silica Diff 55-60% Fe
+        "IOADF10": "IOADF10", # Alumina Diff 1-2.5%
+        "IOPPS10": "IOPPS10", # Silica Diff 4.5-6.5%
+        "IOPPS20": "IOPPS20", # Silica Diff 6.5-9%
+        "IOMGD00": "IOMGD00", # Mid Range Diff 60-63.5 Fe
     }
     
     SYMBOL_BATE_OVERRIDE = {

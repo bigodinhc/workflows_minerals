@@ -11,6 +11,8 @@ import argparse
 from datetime import datetime
 
 # Adjust path to allow imports from root
+sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
+
 from execution.core.logger import WorkflowLogger
 
 # CONFIG

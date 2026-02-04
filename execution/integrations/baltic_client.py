@@ -43,11 +43,11 @@ class BalticClient:
 
         url = f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/messages"
         
-        # OData filter
+        # OData filter - SIMPLIFIED to avoid InefficientFilter error
+        # We only filter by Sender and Date, then check Subject in Python
         query_filter = (
             f"from/emailAddress/address eq '{sender}' and "
-            f"receivedDateTime ge {time_window} and "
-            f"contains(subject, '{subject_keyword}')"
+            f"receivedDateTime ge {time_window}"
         )
         
         # Debug URL
@@ -56,7 +56,7 @@ class BalticClient:
         params = {
             "$filter": query_filter,
             "$orderby": "receivedDateTime desc",
-            "$top": 1,
+            "$top": 10, # Fetch a few to find the right one
             "$select": "id,subject,receivedDateTime,hasAttachments"
         }
         
@@ -69,7 +69,13 @@ class BalticClient:
 
         messages = response.json().get('value', [])
         
-        return messages[0] if messages else None
+        # Client-side filtering for Subject
+        for msg in messages:
+            subject = msg.get("subject", "")
+            if subject_keyword.lower() in subject.lower():
+                return msg
+                
+        return None
 
     def get_pdf_attachment(self, message_id, target_mailbox=None):
         """Downloads the first PDF attachment from the message."""

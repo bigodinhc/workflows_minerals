@@ -97,3 +97,50 @@ class SheetsClient:
             
             self.logger.error("Failed to fetch contacts", {"error": str(e), "traceback": tb})
             raise e
+
+    def _get_or_create_control_sheet(self, sheet_id):
+        """Helper to get Control sheet, creating if likely missing."""
+        try:
+            sh = self.gc.open_by_key(sheet_id)
+            try:
+                return sh.worksheet("Controle")
+            except gspread.WorksheetNotFound:
+                self.logger.info("Sheet 'Controle' not found. Creating...")
+                # Create with header
+                ws = sh.add_worksheet(title="Controle", rows=1000, cols=3)
+                ws.append_row(["Date", "Type", "Status"])
+                return ws
+        except Exception as e:
+            self.logger.error("Failed to get Control sheet", {"error": str(e)})
+            raise e
+
+    def check_daily_status(self, sheet_id, check_date: str, report_type: str) -> bool:
+        """
+        Check if a report was already sent today.
+        Returns True if ALREADY SENT.
+        """
+        try:
+            ws = self._get_or_create_control_sheet(sheet_id)
+            records = ws.get_all_records()
+            
+            # Check for matching row
+            for r in records:
+                # Adjust column names to match what we created (Date, Type, Status)
+                if str(r.get("Date")) == check_date and str(r.get("Type")) == report_type and str(r.get("Status")) == "SENT":
+                    return True
+            
+            return False
+        except Exception as e:
+            self.logger.error("Error checking status", {"error": str(e)})
+            return False # Fail safe: try to send if check fails? Or block? Let's say False to retry.
+
+    def mark_daily_status(self, sheet_id, check_date: str, report_type: str):
+        """Marks the report as sent for the day."""
+        try:
+            ws = self._get_or_create_control_sheet(sheet_id)
+            ws.append_row([check_date, report_type, "SENT"])
+            self.logger.info(f"Marked {report_type} as SENT for {check_date}")
+        except Exception as e:
+            self.logger.error("Error marking status", {"error": str(e)})
+            # Don't raise, just log. Sending succeeded, marking failed.
+

@@ -1,0 +1,1006 @@
+{
+  "name": "WF010_baltic_email_ingestion_v2",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// ================================================\n// EXTRAIR LINK DO PDF DO BDI DO EMAIL\n// ================================================\n\nconst item = $input.first();\nconst emailData = item.json;\nconst htmlBody = emailData.body?.content || '';\nconst subject = emailData.subject || '';\nconst receivedDate = emailData.receivedDateTime || '';\n\n// Extrair data do email\nconst dateMatch = receivedDate.match(/(\\d{4}-\\d{2}-\\d{2})/);\nconst reportDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];\n\n// Extrair link do PDF do BDI\nlet pdfUrl = null;\n\n// Padrao 1: Link direto com texto BDI\nconst bdiLinkMatch = htmlBody.match(/<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>[^<]*BDI[^<]*<\\/a>/i);\nif (bdiLinkMatch) {\n  pdfUrl = bdiLinkMatch[1];\n}\n\n// Padrao 2: Link para PDF do Baltic Exchange\nif (!pdfUrl) {\n  const pdfMatch = htmlBody.match(/<a[^>]+href=[\"']([^\"']*(?:baltic|freight|index)[^\"']*\\.pdf)[\"']/i);\n  if (pdfMatch) {\n    pdfUrl = pdfMatch[1];\n  }\n}\n\n// Padrao 3: Qualquer link de tracking do MID-SHIP\nif (!pdfUrl) {\n  const trackingMatch = htmlBody.match(/<a[^>]+href=[\"']([^\"']*midship[^\"']*)[\"'][^>]*>.*?(?:CAPESIZE|BDI|INDEX)/i);\n  if (trackingMatch) {\n    pdfUrl = trackingMatch[1];\n  }\n}\n\n// Extrair valores do HTML como backup\nconst htmlValues = {};\nconst bdiMatch = htmlBody.match(/BDI[^>]*>?\\s*(?:is\\s*at\\s*)?(\\d+)\\s*(UP|DOWN)\\s*(\\d+)/i);\nif (bdiMatch) {\n  htmlValues.bdi = {\n    value: parseInt(bdiMatch[1]),\n    direction: bdiMatch[2].toUpperCase(),\n    change: bdiMatch[2].toUpperCase() === 'DOWN' ? -parseInt(bdiMatch[3]) : parseInt(bdiMatch[3])\n  };\n}\n\nreturn {\n  json: {\n    report_date: reportDate,\n    email_id: emailData.id,\n    email_subject: subject,\n    pdf_url: pdfUrl,\n    has_pdf_link: !!pdfUrl,\n    html_backup: htmlValues,\n    processed_at: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3568,
+        192
+      ],
+      "id": "0c3c724e-2e39-463e-8d05-cf49d0419b50",
+      "name": "EXTRAIR LINK PDF"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-success",
+              "leftValue": "={{ $json.extraction_success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2672,
+        192
+      ],
+      "id": "7e2dedf0-b094-490b-9dfc-6b6a2d5bbf8c",
+      "name": "EXTRACAO OK?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ================================================\n// PREPARAR DADOS PARA SUPABASE (COM ROTAS)\n// ================================================\n\nconst item = $input.first();\nconst data = item.json;\nconst indices = data.indices || {};\nconst routes = indices.routes || [];\n\n// Extrair rotas específicas\nconst c5tc = routes.find(r => r.code === 'C5TC');\nconst c3 = routes.find(r => r.code === 'C3');\nconst c5 = routes.find(r => r.code === 'C5');\n\nreturn {\n  json: {\n    report_date: data.report_date,\n    \n    // BDI\n    bdi_value: indices.bdi?.value || null,\n    bdi_change: indices.bdi?.change || null,\n    bdi_direction: indices.bdi?.direction || null,\n    \n    // Capesize\n    capesize_value: indices.capesize?.value || null,\n    capesize_change: indices.capesize?.change || null,\n    capesize_direction: indices.capesize?.direction || null,\n    \n    // Panamax\n    panamax_value: indices.panamax?.value || null,\n    panamax_change: indices.panamax?.change || null,\n    panamax_direction: indices.panamax?.direction || null,\n    \n    // Supramax\n    supramax_value: indices.supramax?.value || null,\n    supramax_change: indices.supramax?.change || null,\n    supramax_direction: indices.supramax?.direction || null,\n    \n    // Handysize\n    handysize_value: indices.handysize?.value || null,\n    handysize_change: indices.handysize?.change || null,\n    handysize_direction: indices.handysize?.direction || null,\n    \n    // Rotas principais (minério de ferro)\n    c5tc_value: c5tc?.value || null,\n    c5tc_change: c5tc?.change || null,\n    c3_value: c3?.value || null,\n    c3_change: c3?.change || null,\n    c5_value: c5?.value || null,\n    c5_change: c5?.change || null,\n    \n    // Todas as rotas em JSON\n    routes: routes.length > 0 ? routes : null,\n    \n    // Metadata\n    email_id: data.email_id,\n    raw_response: data\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2448,
+        96
+      ],
+      "id": "7b6f080a-83fc-445d-aeaa-59253bd43b97",
+      "name": "PREPARAR SUPABASE"
+    },
+    {
+      "parameters": {
+        "tableId": "07_mkt_baltic_indices",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "report_date",
+              "fieldValue": "={{ $json.report_date }}"
+            },
+            {
+              "fieldId": "bdi_value",
+              "fieldValue": "={{ $json.bdi_value }}"
+            },
+            {
+              "fieldId": "bdi_change",
+              "fieldValue": "={{ $json.bdi_change }}"
+            },
+            {
+              "fieldId": "bdi_direction",
+              "fieldValue": "={{ $json.bdi_direction }}"
+            },
+            {
+              "fieldId": "capesize_value",
+              "fieldValue": "={{ $json.capesize_value }}"
+            },
+            {
+              "fieldId": "capesize_change",
+              "fieldValue": "={{ $json.capesize_change }}"
+            },
+            {
+              "fieldId": "capesize_direction",
+              "fieldValue": "={{ $json.capesize_direction }}"
+            },
+            {
+              "fieldId": "panamax_value",
+              "fieldValue": "={{ $json.panamax_value }}"
+            },
+            {
+              "fieldId": "panamax_change",
+              "fieldValue": "={{ $json.panamax_change }}"
+            },
+            {
+              "fieldId": "panamax_direction",
+              "fieldValue": "={{ $json.panamax_direction }}"
+            },
+            {
+              "fieldId": "supramax_value",
+              "fieldValue": "={{ $json.supramax_value }}"
+            },
+            {
+              "fieldId": "supramax_change",
+              "fieldValue": "={{ $json.supramax_change }}"
+            },
+            {
+              "fieldId": "supramax_direction",
+              "fieldValue": "={{ $json.supramax_direction }}"
+            },
+            {
+              "fieldId": "handysize_value",
+              "fieldValue": "={{ $json.handysize_value }}"
+            },
+            {
+              "fieldId": "handysize_change",
+              "fieldValue": "={{ $json.handysize_change }}"
+            },
+            {
+              "fieldId": "handysize_direction",
+              "fieldValue": "={{ $json.handysize_direction }}"
+            },
+            {
+              "fieldId": "c5tc_value",
+              "fieldValue": "={{ $json.c5tc_value }}"
+            },
+            {
+              "fieldId": "c5tc_change",
+              "fieldValue": "={{ $json.c5tc_change }}"
+            },
+            {
+              "fieldId": "c3_value",
+              "fieldValue": "={{ $json.c3_value }}"
+            },
+            {
+              "fieldId": "c3_change",
+              "fieldValue": "={{ $json.c3_change }}"
+            },
+            {
+              "fieldId": "c5_value",
+              "fieldValue": "={{ $json.c5_value }}"
+            },
+            {
+              "fieldId": "c5_change",
+              "fieldValue": "={{ $json.c5_change }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -2224,
+        240
+      ],
+      "id": "84e4985e-9769-43bc-b486-88cbebc6d06e",
+      "name": "SALVAR SUPABASE",
+      "credentials": {
+        "supabaseApi": {
+          "id": "04rdCJqTixOtwak5",
+          "name": "blogging"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "8375309778",
+        "text": "=⚠️ *Baltic Exchange - Extracao Incompleta*\n\n📅 Data: {{ $json.report_date }}\n📧 Email: {{ $json.email_subject }}\n\n❌ Apenas {{ $json.indices_count }} indices extraidos\n\nVerifique o email manualmente.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -2448,
+        288
+      ],
+      "id": "f7c0e359-612a-420f-9389-00b64bd3defc",
+      "name": "NOTIFICAR ERRO",
+      "webhookId": "d0b7303e-26b0-4a67-ad39-825919e3c1bc",
+      "credentials": {
+        "telegramApi": {
+          "id": "wuMTVqE3TWH1tFbK",
+          "name": "MktStatus Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.pdf_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "acf080c1-f80a-4bb3-af75-00ad71978e76",
+      "name": "DOWNLOAD PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3344,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ================================================\n// PARSE RESPOSTA DO ANTHROPIC NODE\n// ================================================\n\nconst item = $input.first();\nconst prevData = $('EXTRAIR LINK PDF').first().json;\n\n// O node Anthropic retorna em content[0].text\nlet extractedText = '';\n\n// Tentar diferentes estruturas de resposta\nif (item.json.content && Array.isArray(item.json.content)) {\n  // Formato: { content: [{ type: 'text', text: '...' }] }\n  extractedText = item.json.content[0]?.text || '';\n} else if (item.json.text) {\n  // Formato simplificado: { text: '...' }\n  extractedText = item.json.text;\n} else if (typeof item.json === 'string') {\n  extractedText = item.json;\n}\n\nlet indices = null;\nlet parseSuccess = false;\n\ntry {\n  let jsonText = extractedText;\n  \n  // Limpar markdown se houver\n  const jsonMatch = extractedText.match(/```json\\s*([\\s\\S]*?)\\s*```/);\n  if (jsonMatch) {\n    jsonText = jsonMatch[1];\n  } else {\n    // Tentar encontrar JSON direto\n    const directJson = extractedText.match(/\\{[\\s\\S]*\\}/);\n    if (directJson) {\n      jsonText = directJson[0];\n    }\n  }\n  \n  indices = JSON.parse(jsonText);\n  parseSuccess = true;\n} catch (e) {\n  // Fallback para valores do HTML se disponivel\n  if (prevData.html_backup && prevData.html_backup.bdi) {\n    indices = prevData.html_backup;\n    parseSuccess = true;\n  }\n}\n\n// Contar indices extraidos\nconst indicesCount = indices ? Object.keys(indices).filter(k => \n  ['bdi', 'capesize', 'panamax', 'supramax', 'handysize'].includes(k) && indices[k]\n).length : 0;\n\n// Contar rotas extraidas\nconst routesCount = indices?.routes?.length || 0;\n\nconst success = parseSuccess && indicesCount >= 1;\n\nreturn {\n  json: {\n    report_date: indices?.report_date || prevData.report_date,\n    email_id: prevData.email_id,\n    email_subject: prevData.email_subject,\n    indices: indices,\n    indices_count: indicesCount,\n    routes_count: routesCount,\n    extraction_success: success,\n    extraction_confidence: indices?.extraction_confidence || 'low',\n    processed_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "06e014cf-b5ff-4fab-b05d-1f6ec5a89bda",
+      "name": "PARSE RESPOSTA CLAUDE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "document",
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-4-20250514"
+        },
+        "text": "Voce e um especialista em extracao de dados de documentos financeiros do Baltic Exchange.\n\nANALISE CUIDADOSAMENTE TODAS AS TABELAS do PDF, nao apenas o texto corrido.\n\nExtraia TODOS os dados das tabelas de rotas (Routes), incluindo:\n- BCI (Baltic Capsize Index)\n- C5TC (Timecharter Average)\n- Rotas C2, C3, C5, C7, C8, C9, C10, C14, C16, C17\n\nRetorne APENAS um JSON valido no formato:\n{\n  \"report_date\": \"YYYY-MM-DD\",\n  \"bdi\": {\"value\": 2017, \"change\": -29, \"direction\": \"DOWN\"},\n  \"capesize\": {\"value\": 2884, \"change\": -105, \"direction\": \"DOWN\"},\n  \"panamax\": {\"value\": 1874, \"change\": 0, \"direction\": \"FLAT\"},\n  \"supramax\": {\"value\": 1461, \"change\": 14, \"direction\": \"UP\"},\n  \"handysize\": {\"value\": 753, \"change\": 8, \"direction\": \"UP\"},\n  \"routes\": [\n    {\"code\": \"BCI\", \"description\": \"Baltic Capsize Index\", \"value\": 2884, \"change\": -105},\n    {\"code\": \"C5TC\", \"description\": \"Capesize Timecharter Average\", \"value\": 23918, \"change\": -868, \"unit\": \"USD/day\"},\n    {\"code\": \"C2\", \"description\": \"Tubarao to Rotterdam\", \"type\": \"160,000 LT\", \"value\": 11.7, \"change\": -0.186, \"unit\": \"USD/ton\"},\n    {\"code\": \"C3\", \"description\": \"Tubarao to Qingdao\", \"type\": \"160,000 or 170,000 MT\", \"value\": 24.435, \"change\": -0.275, \"unit\": \"USD/ton\"},\n    {\"code\": \"C5\", \"description\": \"West Australia to Qingdao\", \"type\": \"160,000 or 170,000 MT\", \"value\": 10.025, \"change\": -0.3, \"unit\": \"USD/ton\"}\n  ],\n  \"extraction_confidence\": \"high\"\n}\n\nIMPORTANTE:\n- Extraia TODAS as rotas da tabela, nao apenas as do exemplo\n- Use numeros decimais para valores de frete (ex: 24.435)\n- Use numeros inteiros para indices (ex: 2884)\n- Inclua o tipo de carga (Type) quando disponivel\n- Change pode ser negativo ou positivo\n- Se nao encontrar tabelas, defina extraction_confidence como \"low\"",
+        "inputType": "binary",
+        "options": {
+          "maxTokens": 4096
+        }
+      },
+      "id": "9f71158c-d24e-4a09-bc0f-5c0f4b825438",
+      "name": "ANTHROPIC ANALYZE PDF",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        -3120,
+        192
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "fjN5QtG5xAcoiOWE",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ================================================\n// PREPARAR ROTAS PARA TABELA NORMALIZADA\n// ================================================\n\n// Buscar dados do node PREPARAR SUPABASE (que tem as rotas)\nconst prepData = $('PREPARAR SUPABASE').first().json;\nconst routes = prepData.routes || [];\nconst reportDate = prepData.report_date;\n\n// Funcao para detectar categoria baseado no codigo\nfunction detectCategory(code) {\n  if (code.startsWith('C') || code === 'BCI') return 'capesize';\n  if (code.startsWith('P') || code === 'BPI') return 'panamax';\n  if (code.startsWith('S') || code === 'BSI') return 'supramax';\n  if (code.startsWith('H') || code === 'BHSI') return 'handysize';\n  return null;\n}\n\n// Transformar cada rota em um item separado\nconst routeItems = routes.map(route => ({\n  json: {\n    report_date: reportDate,\n    route_code: route.code,\n    route_category: detectCategory(route.code),\n    description: route.description || null,\n    vessel_type: route.type || null,\n    value: route.value,\n    change: route.change || null,\n    unit: route.unit || null\n  }\n}));\n\nreturn routeItems;"
+      },
+      "id": "2f1e703b-8913-4494-a8cb-078d5288001d",
+      "name": "PREPARAR ROTAS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2000,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "07_mkt_baltic_routes",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "report_date",
+              "fieldValue": "={{ $json.report_date }}"
+            },
+            {
+              "fieldId": "route_code",
+              "fieldValue": "={{ $json.route_code }}"
+            },
+            {
+              "fieldId": "route_category",
+              "fieldValue": "={{ $json.route_category }}"
+            },
+            {
+              "fieldId": "description",
+              "fieldValue": "={{ $json.description }}"
+            },
+            {
+              "fieldId": "vessel_type",
+              "fieldValue": "={{ $json.vessel_type }}"
+            },
+            {
+              "fieldId": "value",
+              "fieldValue": "={{ $json.value }}"
+            },
+            {
+              "fieldId": "change",
+              "fieldValue": "={{ $json.change }}"
+            },
+            {
+              "fieldId": "unit",
+              "fieldValue": "={{ $json.unit }}"
+            }
+          ]
+        }
+      },
+      "id": "25c37e84-01af-4e8e-a90e-cfe4908444f7",
+      "name": "SALVAR ROTAS",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1776,
+        240
+      ],
+      "executeOnce": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "04rdCJqTixOtwak5",
+          "name": "blogging"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "18lemFq6avlYPP_aPAcK4CS8RwpuG4pB-wwTG_5Q137M",
+          "mode": "list",
+          "cachedResultName": "fluxo_n8n_baltic",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18lemFq6avlYPP_aPAcK4CS8RwpuG4pB-wwTG_5Q137M/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Página1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18lemFq6avlYPP_aPAcK4CS8RwpuG4pB-wwTG_5Q137M/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ButtonPayload",
+              "lookupValue": "Big"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Get WhatsApp Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        -1104,
+        240
+      ],
+      "typeVersion": 4.5,
+      "id": "d987bca6-f257-41d7-b755-0d7f1c11ef25",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GiY2cbcLXEqcL2Uk",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ButtonPayload }}",
+              "rightValue": "=Big",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "2ae99cc7-6471-4d5d-af10-f0466c978608"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Filtrar Válidos",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        -880,
+        240
+      ],
+      "typeVersion": 2,
+      "id": "9f18625e-aa98-4c59-b556-17441164cb29"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -432,
+        240
+      ],
+      "id": "c9eeb795-e864-4c67-bb33-fade6ec7ec4d",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        16,
+        288
+      ],
+      "id": "d68d664e-704f-4b4f-8287-6aeab64e1b3a",
+      "name": "Wait3",
+      "webhookId": "5db6834a-9562-4933-a574-8885cf8c1a61"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        80
+      ],
+      "id": "ef4883ee-4cb4-4745-8121-83e89ab0bd73",
+      "name": "No Operation, do nothing2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1328,
+        240
+      ],
+      "id": "e75686e4-859a-4eca-bddd-030df2818336",
+      "name": "No Operation, do nothing1",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -624,
+        64
+      ],
+      "id": "200e6ade-5848-4617-8e3d-2c747f62009a",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mineralstrading.uazapi.com/send/text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "=e6591b90-1ff0-4e57-ac80-9074770351fa"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $json['Evolution-api'] }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.whatsapp_message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -208,
+        272
+      ],
+      "id": "d3281310-4eb2-4a95-b5e0-02ec8d7904ff",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('PREPARAR SUPABASE').first().json;\nconst routes = data.routes || [];\n\n// Helper functions\nfunction getEmoji(direction) {\n  if (direction === 'UP') return '📈';\n  if (direction === 'DOWN') return '📉';\n  return '➡️';\n}\n\nfunction formatChange(change, decimals = 0) {\n  if (change === 0 || change === null) return '0';\n  const sign = change > 0 ? '+' : '';\n  return decimals > 0 ? `${sign}${change.toFixed(decimals)}` : `${sign}${change}`;\n}\n\nfunction getRoute(code) {\n  return routes.find(r => r.code === code) || {};\n}\n\n// Get routes\nconst c2 = getRoute('C2');\nconst c3 = getRoute('C3');\nconst c5 = getRoute('C5');\nconst c7 = getRoute('C7');\nconst c8 = getRoute('C8');\n\n// Determine emoji for route change\nfunction routeEmoji(change) {\n  if (change > 0) return '📈';\n  if (change < 0) return '📉';\n  return '➡️';\n}\n\nconst message = `\\`\\`\\`\n📊 Minerals Trading\nBaltic Exchange Daily Report\n📅 ${data.report_date}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🌊 BALTIC DRY INDEX (BDI)\n   ${data.bdi_value} ${getEmoji(data.bdi_direction)} (${formatChange(data.bdi_change)})\n   \n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚓ ROTAS CAPESIZE\n\n🇧🇷 C2 Tubarao → Rotterdam\n   $${c2.value?.toFixed(2) || '0'}/ton ${routeEmoji(c2.change)} (${formatChange(c2.change, 2)})\n\n🇧🇷 C3 Tubarao → Qingdao\n   $${c3.value?.toFixed(2) || '0'}/ton ${routeEmoji(c3.change)} (${formatChange(c3.change, 2)})\n\n🇦🇺 C5 W.Australia → Qingdao\n   $${c5.value?.toFixed(2) || '0'}/ton ${routeEmoji(c5.change)} (${formatChange(c5.change, 2)})\n\n🌎 C7 Bolivar → Rotterdam\n   $${c7.value?.toFixed(2) || '0'}/ton ${routeEmoji(c7.change)} (${formatChange(c7.change, 2)})\n\n🌊 C8 Atlantico T/C\n   $${c8.value?.toLocaleString() || '0'}/dia ${routeEmoji(c8.change)} (${formatChange(c8.change)})\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🚢 INDICES POR TIPO DE NAVIO\n\n🔷 Capesize (100k+ DWT)\n   ${data.capesize_value} ${getEmoji(data.capesize_direction)} (${formatChange(data.capesize_change)})\n\n🔶 Panamax (60-80k DWT)\n   ${data.panamax_value} ${getEmoji(data.panamax_direction)} (${formatChange(data.panamax_change)})\n\n🔸 Supramax (45-60k DWT)\n   ${data.supramax_value} ${getEmoji(data.supramax_direction)} (${formatChange(data.supramax_change)})\n\n▫️ Handysize (15-35k DWT)\n   ${data.handysize_value} ${getEmoji(data.handysize_direction)} (${formatChange(data.handysize_change)})\n   \n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\\`\\`\\``;\n\nreturn { json: { whatsapp_message: message } };"
+      },
+      "id": "63f85942-e39e-46ef-a0ff-bf048af0577a",
+      "name": "PREPARAR WHATSAPP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1568,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 9-11 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "9e94fb4e-4c59-4b2d-adcf-0ceb4eea8796",
+      "name": "TRIGGER SCHEDULE",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -4240,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 5,
+        "output": "raw",
+        "filtersUI": {
+          "values": {
+            "filters": {
+              "custom": "=from/emailAddress/address eq 'DailyReports@midship.com' and receivedDateTime ge {{ $now.minus({ hours: 24 }) }} and contains(subject, 'Exchange')\n"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "ed858225-a7f1-49d4-a503-673000e629fc",
+      "name": "GET MESSAGES BACKUP",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        -4016,
+        192
+      ],
+      "webhookId": "fffbef69-703e-475c-8a13-82bab6467558",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "tkL7Q9IsKfYhlPae",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.id }}",
+        "options": {
+          "scope": "node"
+        }
+      },
+      "id": "a4e111ae-5c57-4d65-a46d-9541d59527f2",
+      "name": "DEDUPE",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        -3792,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://merry-adaptation-production.up.railway.app/ingest/price  ",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "ironmkt_WUbuYLe4m06GTiYos_fVwvBfNa2l8GWoJtE9K8MJFCY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={                                                 \n    \"variable_key\": \"FREIGHT_C3_BALTIC\",       \n    \"value\": {{ $json.value }},                              \n    \"source\": \"baltic_morning_email\"         \n  }",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "318e7268-b82e-414e-a197-5a52c7f84262",
+      "name": "INGEST IRONMARKET API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        688,
+        -48
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "=routes",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -48
+      ],
+      "id": "fc583e5e-663a-4b61-a9e4-2d6359b23d1b",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "97bbe092-2323-4762-ab6f-5d7e75bbeea8",
+              "leftValue": "={{ $json.code }}",
+              "rightValue": "C3",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        464,
+        -48
+      ],
+      "id": "fbd0a904-a02e-4ab2-994e-5034838b9155",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 2
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        16,
+        -48
+      ],
+      "id": "ac5e960d-c829-4cf0-8f7a-bae2c79de5fa",
+      "name": "Merge1",
+      "executeOnce": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "EXTRAIR LINK PDF": {
+      "main": [
+        [
+          {
+            "node": "DOWNLOAD PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXTRACAO OK?": {
+      "main": [
+        [
+          {
+            "node": "PREPARAR SUPABASE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NOTIFICAR ERRO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPARAR SUPABASE": {
+      "main": [
+        [
+          {
+            "node": "SALVAR SUPABASE",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "SALVAR SUPABASE": {
+      "main": [
+        [
+          {
+            "node": "PREPARAR ROTAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PARSE RESPOSTA CLAUDE": {
+      "main": [
+        [
+          {
+            "node": "EXTRACAO OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DOWNLOAD PDF": {
+      "main": [
+        [
+          {
+            "node": "ANTHROPIC ANALYZE PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ANTHROPIC ANALYZE PDF": {
+      "main": [
+        [
+          {
+            "node": "PARSE RESPOSTA CLAUDE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPARAR ROTAS": {
+      "main": [
+        [
+          {
+            "node": "SALVAR ROTAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get WhatsApp Contacts": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Válidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Válidos": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait3": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing1": {
+      "main": [
+        [
+          {
+            "node": "Get WhatsApp Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Wait3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SALVAR ROTAS": {
+      "main": [
+        [
+          {
+            "node": "PREPARAR WHATSAPP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPARAR WHATSAPP": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing2": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TRIGGER SCHEDULE": {
+      "main": [
+        [
+          {
+            "node": "GET MESSAGES BACKUP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET MESSAGES BACKUP": {
+      "main": [
+        [
+          {
+            "node": "DEDUPE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEDUPE": {
+      "main": [
+        [
+          {
+            "node": "EXTRAIR LINK PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "INGEST IRONMARKET API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "INGEST IRONMARKET API": {
+      "main": [
+        []
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "6886ab7b-9373-4b5c-98a1-d72b0d4493f4",
+  "meta": {
+    "instanceId": "3ddfe059a73966551adef0c3115547780518822b2c26e44ce57a0aa0c6ec2099"
+  },
+  "id": "EWrKnsI0Nl1WFxCLEwSY-",
+  "tags": [
+    {
+      "updatedAt": "2025-12-19T06:50:32.061Z",
+      "createdAt": "2025-12-19T06:50:32.061Z",
+      "id": "DHYrImWfyTSyiEdZ",
+      "name": "Automacao"
+    },
+    {
+      "updatedAt": "2025-12-19T06:50:32.064Z",
+      "createdAt": "2025-12-19T06:50:32.064Z",
+      "id": "WUhHh0hRXKE3qvMh",
+      "name": "Baltic Exchange"
+    }
+  ]
+}

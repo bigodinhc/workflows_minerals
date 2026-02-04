@@ -1,0 +1,64 @@
+name: "Baltic Email Ingestion"
+
+on:
+  schedule:
+    # 09:00 - 11:45 BRT = 12:00 - 14:45 UTC
+    # Run every 15 minutes
+    - cron: '*/15 12,13,14 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run (sem envio)'
+        required: false
+        type: boolean
+        default: false
+      target_mailbox:
+        description: 'Mailbox to check (Default: env var)'
+        required: false
+        type: string
+
+jobs:
+  check-email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Baltic Ingestion
+        env:
+          # Azure Graph API
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TARGET_MAILBOX: ${{ vars.AZURE_TARGET_MAILBOX }}
+          
+          # AI
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          
+          # Control & Output
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          UAZAPI_URL: ${{ vars.UAZAPI_URL }}
+          UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
+          IRONMARKET_API_KEY: ${{ secrets.IRONMARKET_API_KEY }}
+          
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            ARGS="--dry-run"
+          fi
+          
+          # Overrides
+          if [ -n "${{ github.event.inputs.target_mailbox }}" ]; then
+            export AZURE_TARGET_MAILBOX="${{ github.event.inputs.target_mailbox }}"
+          fi
+
+          python execution/scripts/baltic_ingestion.py $ARGS

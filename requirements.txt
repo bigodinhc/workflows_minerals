@@ -13,5 +13,5 @@ supabase>=2.0.0
 gspread>=5.10.0
 google-auth>=2.0.0
 lseg-data>=1.0.0
-spgci>=1.0.0
+spgci>=0.0.70
 structlog>=20.0.0

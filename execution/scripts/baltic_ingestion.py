@@ -58,7 +58,8 @@ def route_emoji(change):
     return '➡️'
 
 def format_whatsapp_message(data):
-    """Formats the data into the requested layout."""
+    """Formats the data into the morning check style layout."""
+    from datetime import datetime
     
     # Helper to safe get
     def get_route(code):
@@ -71,6 +72,7 @@ def format_whatsapp_message(data):
     c5 = get_route('C5')
     c7 = get_route('C7')
     c8 = get_route('C8')
+    c5tc = get_route('C5TC')
     
     # Safely get values
     bdi = data.get('bdi', {})
@@ -79,54 +81,73 @@ def format_whatsapp_message(data):
     supramax = data.get('supramax', {})
     handysize = data.get('handysize', {})
     
-    msg = f"""```
-📊 Minerals Trading
-Baltic Exchange Daily Report
-📅 {data.get('report_date', 'N/A')}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🌊 BALTIC DRY INDEX (BDI)
-   {bdi.get('value', 0)} {get_emoji(bdi.get('direction'))} ({format_change(bdi.get('change'))})
-   
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚓ ROTAS CAPESIZE
-
-🇧🇷 C2 Tubarao → Rotterdam
-   ${c2.get('value', 0):.2f}/ton {route_emoji(c2.get('change'))} ({format_change(c2.get('change'), 2)})
-
-🇧🇷 C3 Tubarao → Qingdao
-   ${c3.get('value', 0):.2f}/ton {route_emoji(c3.get('change'))} ({format_change(c3.get('change'), 2)})
-
-🇦🇺 C5 W.Australia → Qingdao
-   ${c5.get('value', 0):.2f}/ton {route_emoji(c5.get('change'))} ({format_change(c5.get('change'), 2)})
-
-🌎 C7 Bolivar → Rotterdam
-   ${c7.get('value', 0):.2f}/ton {route_emoji(c7.get('change'))} ({format_change(c7.get('change'), 2)})
-
-🌊 C8 Atlantico T/C
-   ${c8.get('value', 0):,} /dia {route_emoji(c8.get('change'))} ({format_change(c8.get('change'))})
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🚢 INDICES POR TIPO DE NAVIO
-
-🔷 Capesize (100k+ DWT)
-   {capesize.get('value', 0)} {get_emoji(capesize.get('direction'))} ({format_change(capesize.get('change'))})
-
-🔶 Panamax (60-80k DWT)
-   {panamax.get('value', 0)} {get_emoji(panamax.get('direction'))} ({format_change(panamax.get('change'))})
-
-🔸 Supramax (45-60k DWT)
-   {supramax.get('value', 0)} {get_emoji(supramax.get('direction'))} ({format_change(supramax.get('change'))})
-
-▫️ Handysize (15-35k DWT)
-   {handysize.get('value', 0)} {get_emoji(handysize.get('direction'))} ({format_change(handysize.get('change'))})
-   
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-```"""
-    return msg
+    # Format date as DD/MM/YYYY
+    report_date = data.get('report_date', '')
+    try:
+        dt = datetime.strptime(report_date, '%Y-%m-%d')
+        date_formatted = dt.strftime('%d/%m/%Y')
+    except:
+        date_formatted = report_date
+    
+    def format_line(name, value, change, unit="", decimals=2, is_index=False):
+        """Format a single data line in the style of morning check."""
+        if is_index:
+            val_str = f"{int(value)}" if value else "N/A"
+            chg_str = format_change(change, 0)
+        else:
+            val_str = f"${value:.{decimals}f}" if value else "N/A"
+            chg_str = format_change(change, decimals)
+        
+        # Calculate percentage if possible
+        if value and change:
+            try:
+                pct = (float(change) / (float(value) - float(change))) * 100
+                pct_str = f"({pct:+.2f}%)"
+            except:
+                pct_str = ""
+        else:
+            pct_str = ""
+        
+        if change == 0 or not change:
+            status = "Estável"
+            return f"• *{name}*\n`{val_str}{unit}`   |  {status}"
+        else:
+            return f"• *{name}*\n`{val_str}{unit}`   |  {chg_str} {pct_str}"
+    
+    lines = []
+    
+    # Header
+    lines.append("📊 *MINERALS TRADING DAILY REPORT* 📊")
+    lines.append(f"🚢  BALTIC EXCHANGE UPDATE - {date_formatted}")
+    lines.append("")
+    
+    # BDI Section
+    lines.append("🌊 *BALTIC DRY INDEX*")
+    lines.append(format_line("BDI", bdi.get('value'), bdi.get('change'), "", 0, is_index=True))
+    lines.append("")
+    
+    # Capesize Routes
+    lines.append("⚓ *ROTAS CAPESIZE*")
+    if c3.get('value'):
+        lines.append(format_line("C3 Tubarao → Qingdao", c3.get('value'), c3.get('change'), "/ton"))
+    if c5.get('value'):
+        lines.append(format_line("C5 W.Australia → Qingdao", c5.get('value'), c5.get('change'), "/ton"))
+    if c2.get('value'):
+        lines.append(format_line("C2 Tubarao → Rotterdam", c2.get('value'), c2.get('change'), "/ton"))
+    if c7.get('value'):
+        lines.append(format_line("C7 Bolivar → Rotterdam", c7.get('value'), c7.get('change'), "/ton"))
+    if c5tc.get('value'):
+        lines.append(format_line("C5TC Timecharter Avg", c5tc.get('value'), c5tc.get('change'), "/day", 0, is_index=True))
+    lines.append("")
+    
+    # Ship Type Indices
+    lines.append("🚢 *INDICES POR TIPO*")
+    lines.append(format_line("Capesize (100k+ DWT)", capesize.get('value'), capesize.get('change'), "", 0, is_index=True))
+    lines.append(format_line("Panamax (60-80k DWT)", panamax.get('value'), panamax.get('change'), "", 0, is_index=True))
+    lines.append(format_line("Supramax (45-60k DWT)", supramax.get('value'), supramax.get('change'), "", 0, is_index=True))
+    lines.append(format_line("Handysize (15-35k DWT)", handysize.get('value'), handysize.get('change'), "", 0, is_index=True))
+    
+    return "\n".join(lines)
 
 def ingest_to_ironmarket(data):
     """Sends C3 route to IronMarket API."""

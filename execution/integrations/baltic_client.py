@@ -43,12 +43,9 @@ class BalticClient:
 
         url = f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/messages"
         
-        # OData filter - SIMPLIFIED to avoid InefficientFilter error
-        # We only filter by Sender and Date, then check Subject in Python
-        query_filter = (
-            f"from/emailAddress/address eq '{sender}' and "
-            f"receivedDateTime ge {time_window}"
-        )
+        # OData filter - ONLY receivedDateTime (indexed property)
+        # All other filtering done in Python to avoid InefficientFilter errors
+        query_filter = f"receivedDateTime ge {time_window}"
         
         # Debug URL
         print(f"DEBUG: Query Filter: {query_filter}")
@@ -56,8 +53,8 @@ class BalticClient:
         params = {
             "$filter": query_filter,
             "$orderby": "receivedDateTime desc",
-            "$top": 10, # Fetch a few to find the right one
-            "$select": "id,subject,receivedDateTime,hasAttachments"
+            "$top": 50, # Fetch more to find the right one
+            "$select": "id,subject,receivedDateTime,hasAttachments,from"
         }
         
         response = requests.get(url, headers=headers, params=params)
@@ -69,10 +66,17 @@ class BalticClient:
 
         messages = response.json().get('value', [])
         
-        # Client-side filtering for Subject
+        # Client-side filtering for Sender and Subject
         for msg in messages:
+            # Check sender
+            from_addr = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
+            if sender.lower() not in from_addr:
+                continue
+            
+            # Check subject
             subject = msg.get("subject", "")
             if subject_keyword.lower() in subject.lower():
+                print(f"DEBUG: Found matching email: {subject}")
                 return msg
                 
         return None

@@ -97,33 +97,26 @@ def format_line(item):
     pct = item.get('changePercent', 0)
     
     # Logic for Indicators & Color
-    # Up: 🔺 (Green usually implies Up)
-    # Down: 🔻
-    # Stable: ⚪️
-    
     if change > 0:
-        indicator = "🔺"
         sign_str = f"+{change:.2f}"
         pct_str = f"(+{pct:.2f}%)"
     elif change < 0:
-        indicator = "🔻"
-        sign_str = f"{change:.2f}" # change is negative, so sign is visible
-        pct_str = f"({pct:.2f}%)" # pct negative too
+        sign_str = f"{change:.2f}" # change is negative
+        pct_str = f"({pct:.2f}%)"
     else:
-        indicator = "⚪️"
         sign_str = "0.00"
         pct_str = "-"
         
-    # Hybrid Format:
+    # Hybrid Format (Clean - No Emojis):
     # - *Product Name*
-    #   ```$100.00 | 🔻 -0.50 (-0.50%)```
+    #   ```$100.00 | +0.50 (+0.50%)```
     
     price_fmt = f"${price:.2f}"
     
     if change == 0:
-         stats_block = f"{indicator} Estável"
+         stats_block = "Estável"
     else:
-         stats_block = f"{indicator} {sign_str} {pct_str}"
+         stats_block = f"{sign_str} {pct_str}"
          
     return f"- *{desc}*\n  ``` {price_fmt:<9} | {stats_block} ```"
 
@@ -163,7 +156,7 @@ def build_message(report_items, date_str):
     header = f"📊 *MINERALS TRADING DAILY REPORT* 📊\n🔍 *IRON ORE MARKET UPDATE* - {date_str}"
     parts = [header]
     
-    s1 = get_section("📈 *FINES*", fines_lines)
+    s1 = get_section("🪨 *FINES*", fines_lines)
     if s1: parts.extend(["", s1])
     
     s2 = get_section("🧱 *LUMP AND PELLET*", lump_lines)

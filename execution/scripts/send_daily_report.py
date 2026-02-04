@@ -21,7 +21,7 @@ SHEET_NAME = "Página1"
 
 def format_price_message(prices):
     """
-    Formats the price list into the monospaced WhatsApp table.
+    Formats the price list with backtick-highlighted prices.
     Expects 'prices' to be a list of dicts: {month, price, change, pct_change}
     """
     from datetime import timezone, timedelta
@@ -31,11 +31,9 @@ def format_price_message(prices):
     now = datetime.now(BRT).strftime("%d/%m/%y - %H:%M")
     
     lines = []
-    lines.append(f"📈 MINERALS TRADING - [{now}]")
-    lines.append("SGX IRON ORE 62% FE FUTURES")
-    lines.append("────────────────────────────")
-    lines.append("EXP    | PRICE  | CHG   | %")
-    lines.append("────────────────────────────")
+    lines.append(f"📈 *MINERALS TRADING* - [{now}]")
+    lines.append("*SGX IRON ORE 62% FE FUTURES*")
+    lines.append("")
     
     for p in prices:
         # Determine dot color and sign
@@ -48,34 +46,25 @@ def format_price_message(prices):
             pct_sign = "+"
         elif change_val < 0:
             emoji = "🔴"
-            sign = ""  # Negative numbers already have '-'
+            sign = ""
             pct_sign = ""
         else:
             emoji = "⚪"
             sign = ""
             pct_sign = ""
             
-        # Format columns fixed width
-        # MÊS/ANO: 7 (left)
-        month = str(p.get('month', '???')).upper().ljust(7)
-        
-        # PRICE: 6 (right)
+        month = str(p.get('month', '???')).upper()
         price_float = float(p.get('price', 0))
-        price = f"{price_float:.2f}".rjust(6)
         
-        # CHG: 6 (right with sign)
+        # Format change and pct
         chg_str = f"{sign}{change_val:.2f}" if change_val >= 0 else f"{change_val:.2f}"
-        chg = chg_str.rjust(6)
-        
-        # %: 6 (right with sign)
         pct_str = f"{pct_sign}{pct_val:.2f}" if pct_val >= 0 else f"{pct_val:.2f}"
-        pct = pct_str.rjust(6)
         
-        line = f"{month}| {price} | {chg} | {pct} {emoji}"
+        # Format: *FEB/26* | `101.90` | -0.60 | -0.59 🔴
+        line = f"*{month}* | `{price_float:.2f}` | {chg_str} | {pct_str} {emoji}"
         lines.append(line)
         
-    # Wrap in code block for WhatsApp mono
-    return "```\n" + "\n".join(lines) + "\n```"
+    return "\n".join(lines)
 
 
 def main():

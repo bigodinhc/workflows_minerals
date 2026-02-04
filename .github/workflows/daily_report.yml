@@ -2,8 +2,9 @@ name: "Daily SGX Report"
 
 on:
   schedule:
-    # Seg-Sex: 05, 07, 09, 12, 16h BRT (+3h UTC)
-    - cron: '0 8,10,12,15,19 * * 1-5'
+    # Seg-Sex: 05, 07, 12, 16h BRT (00min) e 09:30h BRT
+    - cron: '0 8,10,15,19 * * 1-5'
+    - cron: '30 12 * * 1-5'
   workflow_dispatch:
     inputs:
       dry_run:

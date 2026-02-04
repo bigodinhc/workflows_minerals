@@ -16,6 +16,10 @@ on:
         required: false
         type: boolean
         default: false
+      check_date:
+        description: 'Forçar Data (YYYY-MM-DD)'
+        required: false
+        type: string
 
 jobs:
   check-and-send:
@@ -41,8 +45,13 @@ jobs:
           UAZAPI_URL: ${{ vars.UAZAPI_URL }}
           UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
         run: |
+          DATE_ARG=""
+          if [ -n "${{ github.event.inputs.check_date }}" ]; then
+            DATE_ARG="--date ${{ github.event.inputs.check_date }}"
+          fi
+          
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
-            python execution/scripts/morning_check.py --dry-run
+            python execution/scripts/morning_check.py --dry-run $DATE_ARG
           else
-            python execution/scripts/morning_check.py
+            python execution/scripts/morning_check.py $DATE_ARG
           fi

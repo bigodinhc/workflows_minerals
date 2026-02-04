@@ -214,12 +214,20 @@ def main():
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Skip sending and saving state")
+    parser.add_argument("--date", type=str, help="Override date (YYYY-MM-DD)", default=None)
     args = parser.parse_args()
     
     # 1. Check Date (Business Day)
-    # Today's date for check. If weekend, should we run? 
-    # Usually workflow schedule handles weekdays only (Mon-Fri).
-    today = date.today()
+    if args.date:
+        try:
+            today = datetime.strptime(args.date, "%Y-%m-%d").date()
+            logger.info(f"Using manual date override: {today}")
+        except ValueError:
+            logger.error("Invalid date format. Use YYYY-MM-DD.")
+            sys.exit(1)
+    else:
+        today = date.today()
+
     date_str = today.strftime("%Y-%m-%d")
     date_fmt_br = today.strftime("%d/%m/%Y")
     

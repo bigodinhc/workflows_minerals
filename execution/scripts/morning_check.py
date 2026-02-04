@@ -82,7 +82,7 @@ def desc_keys(item):
     return keys
 
 def format_line(item):
-    """Formats a single item line: Bold logic + Prices"""
+    """Formats a single item line: Bold name + backtick price"""
     if not item: return None
     
     desc = item.get('product', 'Unknown')
@@ -104,12 +104,12 @@ def format_line(item):
         sign_str = f"{change:.2f}" # change is negative
         pct_str = f"({pct:.2f}%)"
     else:
-        sign_str = "0.00"
-        pct_str = "-"
+        sign_str = ""
+        pct_str = ""
         
-    # Hybrid Format (Clean - No Emojis):
-    # - *Product Name*
-    #   ```$100.00 | +0.50 (+0.50%)```
+    # Clean Format with single backticks:
+    # • *Product Name*
+    # `$100.00`   |  +0.50 (+0.50%)
     
     price_fmt = f"${price:.2f}"
     
@@ -118,7 +118,7 @@ def format_line(item):
     else:
          stats_block = f"{sign_str} {pct_str}"
          
-    return f"- *{desc}*\n  ``` {price_fmt:<9} | {stats_block} ```"
+    return f"• *{desc}*\n`{price_fmt}`   |  {stats_block}"
 
 def filter_by_keys(items, keys_whitelist):
     """Filters items matching whitelist KEYS (more stable than description)."""

@@ -21,63 +21,52 @@ SHEET_NAME = "Página1"
 
 def format_price_message(prices):
     """
-    Formats the price list into the monospaced WhatsApp table.
+    Formats the price list into the bullet-point WhatsApp style.
     Expects 'prices' to be a list of dicts: {month, price, change, pct_change}
     """
     from datetime import timezone, timedelta
     
     # Horário de Brasília (UTC-3)
     BRT = timezone(timedelta(hours=-3))
-    now = datetime.now(BRT).strftime("%d/%m/%y - %H:%M")
+    now = datetime.now(BRT).strftime("%d/%m/%Y")
     
     lines = []
-    lines.append(f"📈 MINERALS TRADING - [{now}]")
-    lines.append("SGX IRON ORE 62% FE FUTURES")
-    lines.append("────────────────────────────")
-    lines.append("EXP    | PRICE  | CHG   | %")
-    lines.append("────────────────────────────")
+    lines.append("📊 *MINERALS TRADING DAILY REPORT* 📊")
+    lines.append(f"📈  SGX IRON ORE 62% FE FUTURES - {now}")
+    lines.append("")
+    lines.append("⛏️ *CONTRATOS FUTUROS*")
     
     for p in prices:
-        # Determine dot color and sign
+        # Determine sign and emoji
         change_val = float(p.get('change', 0))
         pct_val = float(p.get('pct_change', 0))
         
-        if change_val > 0:
-            emoji = "🟢"
-            sign = "+"
-            pct_sign = "+"
-        elif change_val < 0:
-            emoji = "🔴"
-            sign = ""  # Negative numbers already have '-'
-            pct_sign = ""
-        else:
-            emoji = ""
-            sign = "+" # Zero usually has no sign or + space holder? Let's assume +0.00 to match alignment
-            pct_sign = "+"
-            
-        # Format columns fixed width
-        # MÊS/ANO: 7 (left)
-        month = str(p.get('month', '???')).upper().ljust(7)
-        
-        # PRICE: 6 (right)
+        month = str(p.get('month', '???')).upper()
         price_float = float(p.get('price', 0))
-        price = f"{price_float:.2f}".rjust(6)
         
-        # CHG: 6 (right with sign)
-        # Only add + manually if positive, negative numbers have it naturally
-        # But we need to ensure the width is correct including the sign.
-        chg_str = f"{sign}{change_val:.2f}" if change_val >= 0 else f"{change_val:.2f}"
-        chg = chg_str.rjust(6)
+        if change_val > 0:
+            sign_str = f"+{change_val:.2f}"
+            pct_str = f"(+{pct_val:.2f}%)"
+        elif change_val < 0:
+            sign_str = f"{change_val:.2f}"
+            pct_str = f"({pct_val:.2f}%)"
+        else:
+            sign_str = ""
+            pct_str = ""
         
-        # %: 6 (right with sign)
-        pct_str = f"{pct_sign}{pct_val:.2f}" if pct_val >= 0 else f"{pct_val:.2f}"
-        pct = pct_str.rjust(6)
+        # Format line: • *FEB25*
+        # `$102.50`   |  +0.25 (+0.24%)
+        price_fmt = f"${price_float:.2f}"
         
-        line = f"{month}| {price} | {chg} | {pct} {emoji}"
-        lines.append(line)
-        
-    # Wrap in code block for WhatsApp mono
-    return "```\n" + "\n".join(lines) + "\n```"
+        if change_val == 0:
+            stats = "Estável"
+        else:
+            stats = f"{sign_str} {pct_str}"
+            
+        lines.append(f"• *{month}*")
+        lines.append(f"`{price_fmt}`   |  {stats}")
+    
+    return "\n".join(lines)
 
 
 def main():

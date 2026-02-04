@@ -92,35 +92,40 @@ def format_line(item):
     if assess_type.lower() == item.get('unit', '').lower():
         assess_type = item.get('unit', '')
         
-    price = f"${item['price']:.2f}"
-    
+    price = item['price']
     change = item.get('change', 0)
     pct = item.get('changePercent', 0)
     
-    delta_str = "sem alteração"
+    # Logic for Indicators & Color
+    # Up: 🔺 (Green usually implies Up)
+    # Down: 🔻
+    # Stable: ⚪️
     
-    # Logic from JS:
-    # if (Number.isFinite(ch) && ch !== 0) ...
-    
-    if change != 0:
-        sign = "+" if change >= 0 else "-" # JS uses signedMoney logic which handles abs
-        # Note: In Python f"{change:+.2f}" adds sign automatically
-        price_change_str = f"{change:+.2f}"
-        pct_change_str = f"{pct:+.2f}%" if pct != 0 else ""
+    if change > 0:
+        indicator = "🔺"
+        sign_str = f"+{change:.2f}"
+        pct_str = f"(+{pct:.2f}%)"
+    elif change < 0:
+        indicator = "🔻"
+        sign_str = f"{change:.2f}" # change is negative, so sign is visible
+        pct_str = f"({pct:.2f}%)" # pct negative too
+    else:
+        indicator = "⚪️"
+        sign_str = "0.00"
+        pct_str = "-"
         
-        delta_str = f"${price_change_str}"
-        if pct_change_str:
-            delta_str += f" ({pct_change_str})"
-            
-    elif pct != 0:
-         delta_str = f"{pct:+.2f}%"
-         
-    # Final Line Format
-    # - *ProductName*
-    #   $Price Unit Changestring
+    # Hybrid Format:
+    # - *Product Name*
+    #   ```$100.00 | 🔻 -0.50 (-0.50%)```
     
-    unit_display = f" {assess_type}" if assess_type else ""
-    return f"- *{desc}*\n  {price}{unit_display} {delta_str}"
+    price_fmt = f"${price:.2f}"
+    
+    if change == 0:
+         stats_block = f"{indicator} Estável"
+    else:
+         stats_block = f"{indicator} {sign_str} {pct_str}"
+         
+    return f"- *{desc}*\n  ``` {price_fmt:<9} | {stats_block} ```"
 
 def filter_by_keys(items, keys_whitelist):
     """Filters items matching whitelist KEYS (more stable than description)."""

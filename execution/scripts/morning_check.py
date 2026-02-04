@@ -250,6 +250,13 @@ def main():
         logger.info("No data available yet from Platts. Will retry later.")
         sys.exit(0) # Exit success (so GitHub Action doesn't fail, just finishes)
         
+    # DEBUG: Print items to see why filtering failed
+    if args.dry_run:
+        logger.info("--- DEBUG: RAW ITEMS FROM PLATTS ---")
+        for i in report_items:
+            logger.info(f"Item: {i}")
+        logger.info("------------------------------------")
+
     # 4. Format Message
     message = build_message(report_items, date_fmt_br)
     

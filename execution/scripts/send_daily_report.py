@@ -28,41 +28,57 @@ def format_price_message(prices):
     
     # Horário de Brasília (UTC-3)
     BRT = timezone(timedelta(hours=-3))
-    now = datetime.now(BRT).strftime("%d/%m/%y - %H:%M")
+    now = datetime.now(BRT).strftime("%d/%m/%Y")
+    
+    # Month translation EN -> PT
+    MONTHS_PT = {
+        'JAN': 'Jan', 'FEB': 'Fev', 'MAR': 'Mar', 'APR': 'Abr',
+        'MAY': 'Mai', 'JUN': 'Jun', 'JUL': 'Jul', 'AUG': 'Ago',
+        'SEP': 'Set', 'OCT': 'Out', 'NOV': 'Nov', 'DEC': 'Dez'
+    }
+    
+    def translate_month(month_code):
+        """Converts 'FEB/26' or 'FEB26' to 'Fev/26'"""
+        month_code = month_code.upper().replace("/", "")
+        # Extract month part (first 3 chars) and year part (rest)
+        month_part = month_code[:3]
+        year_part = month_code[3:]
+        pt_month = MONTHS_PT.get(month_part, month_part)
+        return f"{pt_month}/{year_part}"
     
     lines = []
-    lines.append(f"📈 *MINERALS TRADING* - [{now}]")
-    lines.append("*SGX IRON ORE 62% FE FUTURES*")
+    lines.append("📊 *MINERALS TRADING DAILY REPORT* 📊")
+    lines.append(f"📈  SGX IRON ORE 62% FE FUTURES - {now}")
     lines.append("")
+    lines.append("⛏️ *CONTRATOS FUTUROS*")
     
     for p in prices:
-        # Determine dot color and sign
         change_val = float(p.get('change', 0))
         pct_val = float(p.get('pct_change', 0))
         
-        if change_val > 0:
-            emoji = "🟢"
-            sign = "+"
-            pct_sign = "+"
-        elif change_val < 0:
-            emoji = "🔴"
-            sign = ""
-            pct_sign = ""
-        else:
-            emoji = "⚪"
-            sign = ""
-            pct_sign = ""
-            
-        month = str(p.get('month', '???')).upper()
+        month_raw = str(p.get('month', '???'))
+        month_pt = translate_month(month_raw)
         price_float = float(p.get('price', 0))
         
-        # Format change and pct
-        chg_str = f"{sign}{change_val:.2f}" if change_val >= 0 else f"{change_val:.2f}"
-        pct_str = f"{pct_sign}{pct_val:.2f}" if pct_val >= 0 else f"{pct_val:.2f}"
+        # Format change string
+        if change_val > 0:
+            chg_str = f"+{change_val:.2f}"
+            pct_str = f"(+{pct_val:.2f}%)"
+        elif change_val < 0:
+            chg_str = f"{change_val:.2f}"
+            pct_str = f"({pct_val:.2f}%)"
+        else:
+            chg_str = ""
+            pct_str = ""
         
-        # Format: *FEB/26* | `101.90` | -0.60 | -0.59 🔴
-        line = f"*{month}* | `{price_float:.2f}` | {chg_str} | {pct_str} {emoji}"
-        lines.append(line)
+        # Format line
+        if change_val == 0:
+            stats = "Estável"
+        else:
+            stats = f"{chg_str} {pct_str}"
+            
+        lines.append(f"• *IO Swap {month_pt}*")
+        lines.append(f"`${price_float:.2f}`   |  {stats}")
         
     return "\n".join(lines)
 

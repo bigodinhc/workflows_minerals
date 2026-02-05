@@ -9,7 +9,8 @@ import {
     Users,
     Settings,
     LogOut,
-    Zap
+    Zap,
+    Boxes
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -27,6 +28,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
     { label: "Dashboard", icon: LayoutDashboard, href: "/" },
+    { label: "Workflows", icon: Boxes, href: "/workflows" },
     { label: "Executions", icon: Activity, href: "/executions" },
     { label: "Contacts", icon: Users, href: "/contacts" },
 ];

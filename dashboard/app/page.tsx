@@ -98,6 +98,13 @@ export default function Home() {
           <p className="text-muted-foreground mt-1">Monitoramento em tempo real dos workflows de trading.</p>
         </div>
         <div className="flex gap-3">
+          <Button
+            variant="secondary"
+            onClick={() => window.location.href = "/workflows"}
+            className="bg-zinc-800 hover:bg-zinc-700"
+          >
+            📊 Catálogo
+          </Button>
           {WORKFLOWS.map(wf => (
             <Button
               key={wf.id}

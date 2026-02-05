@@ -10,7 +10,8 @@ import {
     Settings,
     LogOut,
     Zap,
-    Boxes
+    Boxes,
+    Newspaper
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -29,6 +30,7 @@ interface NavItem {
 const navItems: NavItem[] = [
     { label: "Dashboard", icon: LayoutDashboard, href: "/" },
     { label: "Workflows", icon: Boxes, href: "/workflows" },
+    { label: "News Review", icon: Newspaper, href: "/news" },
     { label: "Executions", icon: Activity, href: "/executions" },
     { label: "Contacts", icon: Users, href: "/contacts" },
 ];

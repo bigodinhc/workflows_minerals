@@ -6,6 +6,10 @@ import json
 import argparse
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load env vars from project root
+load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 
 # Add project root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
@@ -100,7 +104,7 @@ def main():
             "source_date": today_br,
             "original_count": len(items),
             "ai_text": draft_text,
-            "source_summary": items[0].get('title') + "..." # Brief preview
+            "source_summary": (items[0].get('title') or "Sem Título") + "..." # Brief preview
         }
         
         if not args.dry_run:

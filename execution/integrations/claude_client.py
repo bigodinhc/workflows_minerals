@@ -87,3 +87,15 @@ IMPORTANT:
         except json.JSONDecodeError:
             print(f"Failed to parse JSON from Claude: {content}")
             return None
+
+    def generate_text(self, system_prompt, user_prompt):
+        """Generates text completion based on system and user prompts."""
+        message = self.client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=4000,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        return message.content[0].text

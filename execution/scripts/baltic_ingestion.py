@@ -208,7 +208,25 @@ def main():
     if not msg:
         logger.info("No matching email found in the last 24h.")
         sys.exit(0)
+    
+    # NEW: Validate if email is actually from TODAY
+    # Graph API returns UTC ISO string: 2026-02-05T16:00:00Z
+    # We want to ensure we don't re-process yesterday's email if today's hasn't arrived
+    email_date_str = msg['receivedDateTime']
+    try:
+        # Parse ISO format (handle Z if present)
+        email_date_str_clean = email_date_str.replace("Z", "+00:00")
+        email_dt = datetime.fromisoformat(email_date_str_clean).date()
+        today_dt = datetime.utcnow().date()
         
+        if email_dt != today_dt:
+            logger.info(f"Found email but it is from {email_dt} (not today {today_dt}). Report not released yet.")
+            logger.info(f"Subject: {msg['subject']}")
+            sys.exit(0)
+            
+    except Exception as e:
+        logger.warning(f"Could not validate email date: {e}. Proceeding with caution.")
+
     logger.info(f"Found email: {msg['subject']} ({msg['receivedDateTime']})")
     
     pdf_bytes, filename = baltic.get_pdf_attachment(msg['id'])

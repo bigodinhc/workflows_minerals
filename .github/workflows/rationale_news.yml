@@ -1,0 +1,49 @@
+name: "Rationale News Ingestion"
+
+on:
+  schedule:
+    # Run once daily at 14:00 BRT (17:00 UTC) - after Platts publishes
+    - cron: '0 17 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run (sem envio)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  scrape-and-process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Rationale Ingestion
+        env:
+          # Apify
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          
+          # AI
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          
+          # Telegram
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_WEBHOOK_URL: ${{ vars.TELEGRAM_WEBHOOK_URL }}
+          
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            python execution/scripts/rationale_ingestion.py --dry-run
+          else
+            python execution/scripts/rationale_ingestion.py
+          fi

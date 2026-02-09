@@ -4,11 +4,15 @@ on:
   schedule:
     # BRT is UTC-3
     # 08:30 BRT = 11:30 UTC
+    # 08:45 BRT = 11:45 UTC
     # 09:00 BRT = 12:00 UTC
+    # 09:15 BRT = 12:15 UTC
     # 09:30 BRT = 12:30 UTC
+    # 09:45 BRT = 12:45 UTC
     # 10:00 BRT = 13:00 UTC
-    - cron: '30 11,12 * * 1-5'
-    - cron: '0 12,13 * * 1-5'
+    - cron: '30,45 11 * * 1-5'   # 08:30, 08:45 BRT
+    - cron: '0,15,30,45 12 * * 1-5'  # 09:00, 09:15, 09:30, 09:45 BRT
+    - cron: '0 13 * * 1-5'       # 10:00 BRT
   workflow_dispatch:
     inputs:
       dry_run:

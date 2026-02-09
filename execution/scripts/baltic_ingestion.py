@@ -252,13 +252,12 @@ def main():
     if args.dry_run:
         print(json.dumps(data, indent=2))
         
-    # 4. Ingest to IronMarket
-    if not args.dry_run:
-        success, err = ingest_to_ironmarket(data)
-        if success:
-            logger.info("Ingested C3 to IronMarket API.")
-        else:
-            logger.error(f"IronMarket Ingestion Failed: {err}")
+    # 4. Ingest to IronMarket (always runs, even in dry-run, for testing)
+    success, err = ingest_to_ironmarket(data)
+    if success:
+        logger.info("Ingested C3 to IronMarket API.")
+    else:
+        logger.error(f"IronMarket Ingestion Failed: {err}")
             
     # 5. Send WhatsApp
     message = format_whatsapp_message(data)

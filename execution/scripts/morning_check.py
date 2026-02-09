@@ -220,8 +220,8 @@ def main():
     
     if len(report_items) < MIN_ITEMS_EXPECTED:
         logger.warning(f"⚠️ INCOMPLETE DATA: Only {len(report_items)}/{TOTAL_SYMBOLS} items collected!")
-        logger.warning(f"   Threshold is {MIN_ITEMS_EXPECTED}. Report may be incomplete.")
-        # Note: Still sending for now, but user is warned
+        logger.warning(f"   Threshold is {MIN_ITEMS_EXPECTED}. Skipping send, will retry on next scheduled run.")
+        sys.exit(0)  # Exit gracefully - next scheduled action will retry
         
     # DEBUG: Print items to see why filtering failed
     if args.dry_run:

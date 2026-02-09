@@ -211,6 +211,17 @@ def main():
     if not report_items:
         logger.info("No data available yet from Platts. Will retry later.")
         sys.exit(0) # Exit success (so GitHub Action doesn't fail, just finishes)
+    
+    # --- VALIDATION: Check minimum items collected ---
+    MIN_ITEMS_EXPECTED = 10  # Threshold - should collect at least 10 symbols
+    TOTAL_SYMBOLS = 26  # Total configured in SYMBOLS_DETAILS
+    
+    logger.info(f"Items collected: {len(report_items)}/{TOTAL_SYMBOLS}")
+    
+    if len(report_items) < MIN_ITEMS_EXPECTED:
+        logger.warning(f"⚠️ INCOMPLETE DATA: Only {len(report_items)}/{TOTAL_SYMBOLS} items collected!")
+        logger.warning(f"   Threshold is {MIN_ITEMS_EXPECTED}. Report may be incomplete.")
+        # Note: Still sending for now, but user is warned
         
     # DEBUG: Print items to see why filtering failed
     if args.dry_run:

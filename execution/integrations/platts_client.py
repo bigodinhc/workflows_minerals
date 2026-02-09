@@ -112,10 +112,15 @@ class PlattsClient:
         p_str = prev_date.strftime("%Y-%m-%d")
         
         self.logger.info(f"Fetching Report Data: Target={t_str}, Prev={p_str}")
+        self.logger.info(f"Total symbols to fetch: {len(self.SYMBOLS_DETAILS)}")
         
         # Coletar dados dos dois dias
         current_data = {}
         prev_data = {}
+        
+        # Track success/failure per symbol
+        success_symbols = []
+        failed_symbols = []
         
         # Buscar para todos os símbolos mapeados
         for symbol, description in self.SYMBOLS_DETAILS.items():
@@ -125,20 +130,31 @@ class PlattsClient:
                 # Assume última linha é a mais recente
                 row = df_curr.iloc[-1]
                 
-                # Check column debug if needed
-                # columns: symbol, assessDate, value, currency, uom, ...
-                
                 current_data[symbol] = {
                     "price": float(row.get("value", 0)),
-                    "desc": description, # ALWAYS USE STATIC DESCRIPTION
+                    "desc": description,
                     "uom": row.get("uom", "")
                 }
+                success_symbols.append(symbol)
+                self.logger.info(f"  ✓ {symbol}: {description[:40]}... = ${row.get('value', 0)}")
+            else:
+                failed_symbols.append(symbol)
+                self.logger.warning(f"  ✗ {symbol}: {description[:40]}... (no data)")
             
-            # Previous
+            # Previous (silent - only for change calculation)
             df_prev = self.fetch_symbol_data(symbol, p_str)
             if not df_prev.empty:
                 row = df_prev.iloc[-1]
                 prev_data[symbol] = float(row.get("value", 0))
+        
+        # Summary logging
+        total = len(self.SYMBOLS_DETAILS)
+        self.logger.info(f"=== COLLECTION SUMMARY ===")
+        self.logger.info(f"  ✓ Success: {len(success_symbols)}/{total}")
+        self.logger.info(f"  ✗ Failed:  {len(failed_symbols)}/{total}")
+        
+        if failed_symbols:
+            self.logger.warning(f"  Missing symbols: {', '.join(failed_symbols)}")
                 
         if not current_data:
             self.logger.warning(f"No data found for target date {t_str}")

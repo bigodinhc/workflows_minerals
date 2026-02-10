@@ -245,36 +245,46 @@ Now synthesize this into a clear, concise narrative following your defined frame
         return self.claude.generate_text(system_prompt, user_prompt)
         
     def _run_localizer(self, synthesis, analysis, original, date_str):
-        system_prompt = """Você é um especialista em mercado financeiro brasileiro. Adapte a análise para traders brasileiros.
+        system_prompt = """Você é um especialista em comunicação para o mercado de commodities brasileiro. Sua função é criar a MENSAGEM FINAL para envio via WhatsApp a traders de minério de ferro.
 
-CRITICALLY IMPORTANT RULES:
-1. CURRENCY: NEVER CONVERT TO BRL. KEEP ALL PRICES IN USD ($).
-   - Correct: "Minério a $130.50"
-   - Incorrect: "Minério a R$ 750,00"
+REGRAS CRÍTICAS:
 
-2. CONTENT:
-   - Adaptar, não traduzir cegamente.
-   - Contexto Brasil (Vale, CSN, impactos locais).
-   - Se uma seção estiver vazia ou genérica (ex: "Sem dados"), NÃO a inclua. OMITE-A.
-   - Se o texto total for irrelevante, retorne apenas: "Sem destaques relevantes para hoje."
+1. MOEDA: NUNCA converta para BRL. SEMPRE mantenha preços em USD ($).
+   - Correto: "Minério a $130,50/dmt"
+   - Errado: "Minério a R$ 750,00"
 
-REGRAS DE FORMATAÇÃO WHATSAPP:
-1. Iniciar e terminar com ```
-2. Título: 📊 MINERALS TRADING // [TÍTULO DINÂMICO] // [DATA]
-3. Use ### para seções
-4. Números: vírgula para decimais (105,15) mas SEMPRE EM USD.
-5. Máximo 1500 chars"""
+2. CONTEÚDO - O QUE INCLUIR:
+   - Resumo do mercado em texto corrido (narrativa fluida)
+   - Preços-chave com valores exatos
+   - Destaques de negociação
+   - Perspectiva de curto prazo
+   
+3. CONTEÚDO - O QUE NÃO INCLUIR:
+   - NÃO inclua "Classificação", "Humor do Mercado", "Eventos Críticos"
+   - NÃO inclua seções de análise estruturada interna
+   - NÃO inclua "Síntese Narrativa" como título de seção
+   - NÃO inclua checklist, metodologia ou notas técnicas internas
+   - Se algum dado estiver vazio ou genérico, OMITA completamente
+   - Se não houver destaques, retorne apenas: "Sem destaques relevantes para hoje."
 
-        user_prompt = f"""Adapte para o Brasil (MANTENHA PREÇOS EM DOLAR):
+4. FORMATAÇÃO WHATSAPP:
+   - Iniciar e terminar com ```
+   - Primeira linha: 📊 MINERALS TRADING // [TÍTULO DINÂMICO DESCRITIVO] // [DATA]
+   - Use ### para separar seções (ex: ### RESUMO, ### PREÇOS-CHAVE, ### DESTAQUES)
+   - Números: vírgula para decimais (100,20) mas SEMPRE EM USD
+   - Máximo 1500 caracteres
+   - Texto limpo, profissional, pronto para leitura rápida por trader"""
 
-SÍNTESE NARRATIVA:
+        user_prompt = f"""Crie a mensagem FINAL para WhatsApp baseada nesta análise.
+
+IMPORTANTE: Gere APENAS a mensagem formatada para o usuário final. Não inclua metadados internos como classificação, humor do mercado, etc.
+
+SÍNTESE DO MERCADO:
 {synthesis}
-
-ANÁLISE ESTRUTURADA:
-{analysis}
 
 DATA: {date_str}
 
-Gere a mensagem final formatada."""
+Gere a mensagem final formatada para WhatsApp."""
 
         return self.claude.generate_text(system_prompt, user_prompt)
+

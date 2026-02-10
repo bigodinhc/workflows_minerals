@@ -25,31 +25,41 @@ GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 # Google Sheets for contacts
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
 
-def get_telegram_api(method, data=None):
-    """Call Telegram Bot API."""
+# Log config at startup (partial token for security)
+logger.info(f"UAZAPI_URL: {UAZAPI_URL}")
+logger.info(f"UAZAPI_TOKEN: {'SET (' + UAZAPI_TOKEN[:8] + '...)' if UAZAPI_TOKEN else 'NOT SET'}")
+logger.info(f"TELEGRAM_BOT_TOKEN: {'SET' if TELEGRAM_BOT_TOKEN else 'NOT SET'}")
+
+def telegram_api(method, data):
+    """Call Telegram Bot API and return parsed response."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}"
     try:
-        if data:
-            resp = requests.post(url, json=data, timeout=15)
-        else:
-            resp = requests.get(url, timeout=15)
-        logger.info(f"Telegram API {method}: {resp.status_code}")
-        return resp
+        resp = requests.post(url, json=data, timeout=15)
+        result = resp.json()
+        if not result.get("ok"):
+            logger.warning(f"Telegram {method} failed: {result.get('description', 'unknown')}")
+        return result
     except Exception as e:
-        logger.error(f"Telegram API error: {e}")
-        return None
+        logger.error(f"Telegram API error ({method}): {e}")
+        return {"ok": False}
 
 def answer_callback(callback_id, text):
-    """Answer callback query."""
-    get_telegram_api("answerCallbackQuery", {
+    """Answer callback query (acknowledge button press)."""
+    return telegram_api("answerCallbackQuery", {
         "callback_query_id": callback_id,
         "text": text
     })
 
+def send_telegram_message(chat_id, text):
+    """Send a new Telegram message."""
+    return telegram_api("sendMessage", {
+        "chat_id": chat_id,
+        "text": text
+    })
+
 def edit_message(chat_id, message_id, new_text):
-    """Edit message to show result."""
-    # Remove parse_mode to avoid markdown issues
-    get_telegram_api("editMessageText", {
+    """Edit existing Telegram message."""
+    return telegram_api("editMessageText", {
         "chat_id": chat_id,
         "message_id": message_id,
         "text": new_text
@@ -86,49 +96,76 @@ def send_whatsapp(phone, message):
         "text": message
     }
     try:
-        logger.info(f"Sending WhatsApp to {phone}...")
         response = requests.post(
             f"{UAZAPI_URL}/send/text",
             json=payload,
             headers=headers,
             timeout=30
         )
-        logger.info(f"WhatsApp response for {phone}: {response.status_code}")
+        if response.status_code != 200:
+            logger.error(f"WhatsApp {phone}: HTTP {response.status_code} - {response.text[:200]}")
         return response.status_code == 200
     except Exception as e:
         logger.error(f"WhatsApp send error for {phone}: {e}")
         return False
 
-def process_approval_async(chat_id, message_id, message):
-    """Process WhatsApp sending in background thread."""
+def process_approval_async(chat_id, draft_message):
+    """Process WhatsApp sending in background thread with Telegram progress updates."""
+    # Send a NEW message for progress (since original may have expired for editing)
+    progress = send_telegram_message(chat_id, "⏳ Iniciando envio para WhatsApp...")
+    progress_msg_id = progress.get("result", {}).get("message_id") if progress.get("ok") else None
+    
     try:
         contacts = get_contacts()
+        total = len(contacts)
         success_count = 0
         fail_count = 0
         
-        for contact in contacts:
+        # Update progress
+        if progress_msg_id:
+            edit_message(chat_id, progress_msg_id, 
+                f"⏳ Enviando para {total} contatos...\n0/{total} processados")
+        
+        for i, contact in enumerate(contacts):
             phone = contact.get("Evolution-api") or contact.get("Telefone")
             if not phone:
                 continue
             phone = str(phone).replace("whatsapp:", "").strip()
             
-            if send_whatsapp(phone, message):
+            if send_whatsapp(phone, draft_message):
                 success_count += 1
             else:
                 fail_count += 1
+            
+            # Update progress every 10 contacts
+            processed = success_count + fail_count
+            if progress_msg_id and processed % 10 == 0:
+                edit_message(chat_id, progress_msg_id,
+                    f"⏳ Enviando...\n{processed}/{total} processados\n✅ {success_count} OK | ❌ {fail_count} falhas")
         
-        # Update Telegram message with result
-        result_text = f"✅ APROVADO E ENVIADO\n\n📤 Enviado para {success_count} contatos."
-        if fail_count > 0:
-            result_text += f"\n⚠️ {fail_count} falha(s)."
-        result_text += f"\n\n---\n{message[:400]}..."
+        # Final result
+        result_text = f"📊 ENVIO CONCLUÍDO\n\n"
+        result_text += f"✅ Enviados: {success_count}\n"
+        result_text += f"❌ Falhas: {fail_count}\n"
+        result_text += f"📋 Total: {total}\n"
         
-        edit_message(chat_id, message_id, result_text)
+        if fail_count == total:
+            result_text += "\n⚠️ TODOS falharam! Verifique o token UAZAPI."
+        
+        if progress_msg_id:
+            edit_message(chat_id, progress_msg_id, result_text)
+        else:
+            send_telegram_message(chat_id, result_text)
+            
         logger.info(f"Approval complete: {success_count} sent, {fail_count} failed")
         
     except Exception as e:
         logger.error(f"Approval processing error: {e}")
-        edit_message(chat_id, message_id, f"❌ ERRO\n\n{str(e)}")
+        error_text = f"❌ ERRO NO ENVIO\n\n{str(e)}"
+        if progress_msg_id:
+            edit_message(chat_id, progress_msg_id, error_text)
+        else:
+            send_telegram_message(chat_id, error_text)
 
 # In-memory draft storage
 DRAFTS = {}
@@ -136,7 +173,12 @@ DRAFTS = {}
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint."""
-    return jsonify({"status": "ok", "drafts_count": len(DRAFTS)})
+    return jsonify({
+        "status": "ok", 
+        "drafts_count": len(DRAFTS),
+        "uazapi_url": UAZAPI_URL,
+        "uazapi_token_set": bool(UAZAPI_TOKEN)
+    })
 
 @app.route("/store-draft", methods=["POST"])
 def store_draft():
@@ -160,7 +202,7 @@ def store_draft():
 def telegram_webhook():
     """Handle Telegram webhook callbacks (button presses)."""
     update = request.json
-    logger.info(f"Webhook received: {json.dumps(update)[:200]}...")
+    logger.info(f"Webhook received update_id: {update.get('update_id')}")
     
     # Handle callback query (button press)
     callback_query = update.get("callback_query")
@@ -187,32 +229,33 @@ def telegram_webhook():
         draft = DRAFTS.get(draft_id)
         if not draft:
             logger.warning(f"Draft not found: {draft_id}. Available: {list(DRAFTS.keys())}")
-            answer_callback(callback_id, "❌ Draft não encontrado ou expirado")
-            edit_message(chat_id, message_id, "❌ EXPIRADO\n\nEste draft não está mais disponível.")
+            answer_callback(callback_id, "❌ Draft não encontrado")
+            send_telegram_message(chat_id, "❌ DRAFT EXPIRADO\n\nEste draft não está mais disponível. Rode o workflow novamente.")
             return jsonify({"ok": True})
         
-        message = draft["message"]
+        if draft["status"] != "pending":
+            answer_callback(callback_id, "⚠️ Já processado")
+            return jsonify({"ok": True})
+        
         draft["status"] = "approved"
         
         # Answer callback immediately
         answer_callback(callback_id, "✅ Aprovado! Enviando...")
         
-        # Update message to show processing
-        edit_message(chat_id, message_id, "⏳ PROCESSANDO...\n\nEnviando para WhatsApp...")
-        
         # Process WhatsApp in background thread
         thread = threading.Thread(
             target=process_approval_async,
-            args=(chat_id, message_id, message)
+            args=(chat_id, draft["message"])
         )
+        thread.daemon = True
         thread.start()
         
-        # Return immediately - don't wait for WhatsApp
+        # Return immediately
         return jsonify({"ok": True})
     
     elif action == "reject":
         answer_callback(callback_id, "❌ Rejeitado")
-        edit_message(chat_id, message_id, "❌ REJEITADO\n\nEste relatório foi descartado.")
+        send_telegram_message(chat_id, "❌ REJEITADO\n\nEste relatório foi descartado.")
         
         if draft_id in DRAFTS:
             DRAFTS[draft_id]["status"] = "rejected"

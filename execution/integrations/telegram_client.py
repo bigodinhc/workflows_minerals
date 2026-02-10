@@ -36,8 +36,10 @@ class TelegramClient:
         payload = {
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": parse_mode
         }
+        
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         
         if reply_markup:
             payload["reply_markup"] = json.dumps(reply_markup)
@@ -81,16 +83,21 @@ class TelegramClient:
             ]
         }
         
-        # Format message
-        header = "📰 *RATIONALE NEWS - Aguardando Aprovação*\n\n"
+        # Format message - no Markdown to avoid parsing errors with special chars
+        header = "📰 RATIONALE NEWS - Aguardando Aprovação\n\n"
         footer = "\n\n---\nClique em um botão abaixo para processar."
         
-        full_message = header + preview_text[:3500] + footer  # Telegram limit ~4096
+        # Telegram limit is 4096 chars
+        max_preview = 4096 - len(header) - len(footer) - 50
+        truncated = preview_text[:max_preview]
+        full_message = header + truncated + footer
         
+        # Send without parse_mode to avoid Markdown errors
         return self.send_message(
             text=full_message,
             chat_id=chat_id,
-            reply_markup=keyboard
+            reply_markup=keyboard,
+            parse_mode=None  # Plain text - avoids 400 errors from special chars
         )
     
     def answer_callback_query(self, callback_query_id, text="Processado!"):

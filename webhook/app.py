@@ -19,7 +19,7 @@ app = Flask(__name__)
 # Config from environment
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 UAZAPI_URL = os.getenv("UAZAPI_URL", "https://mineralstrading.uazapi.com")
-UAZAPI_TOKEN = os.getenv("UAZAPI_TOKEN")
+UAZAPI_TOKEN = (os.getenv("UAZAPI_TOKEN") or "").strip()
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 
 # Google Sheets for contacts

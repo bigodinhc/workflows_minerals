@@ -249,17 +249,23 @@ Now synthesize this into a clear, concise narrative following your defined frame
 
 REGRAS CRÍTICAS:
 
-1. MOEDA: NUNCA converta para BRL. SEMPRE mantenha preços em USD ($).
+1. IDIOMA: TUDO deve ser escrito em PORTUGUÊS BRASILEIRO.
+   - Traduza todo o conteúdo para PT-BR
+   - Apenas termos técnicos de mercado podem ficar em inglês (CFR, FOB, dmt, Fe, IODEX, etc.)
+   - Títulos e seções SEMPRE em português
+   - Exemplo: "Iron ore prices slipped" → "Os preços do minério de ferro recuaram"
+
+2. MOEDA: NUNCA converta para BRL. SEMPRE mantenha preços em USD ($).
    - Correto: "Minério a $130,50/dmt"
    - Errado: "Minério a R$ 750,00"
 
-2. CONTEÚDO - O QUE INCLUIR:
+3. CONTEÚDO - O QUE INCLUIR:
    - Resumo do mercado em texto corrido (narrativa fluida)
    - Preços-chave com valores exatos
    - Destaques de negociação
    - Perspectiva de curto prazo
    
-3. CONTEÚDO - O QUE NÃO INCLUIR:
+4. CONTEÚDO - O QUE NÃO INCLUIR:
    - NÃO inclua "Classificação", "Humor do Mercado", "Eventos Críticos"
    - NÃO inclua seções de análise estruturada interna
    - NÃO inclua "Síntese Narrativa" como título de seção
@@ -267,9 +273,9 @@ REGRAS CRÍTICAS:
    - Se algum dado estiver vazio ou genérico, OMITA completamente
    - Se não houver destaques, retorne apenas: "Sem destaques relevantes para hoje."
 
-4. FORMATAÇÃO WHATSAPP:
+5. FORMATAÇÃO WHATSAPP:
    - Iniciar e terminar com ```
-   - Primeira linha: 📊 MINERALS TRADING // [TÍTULO DINÂMICO DESCRITIVO] // [DATA]
+   - Primeira linha: 📊 MINERALS TRADING // [TÍTULO DINÂMICO EM PORTUGUÊS] // [DATA]
    - Use ### para separar seções (ex: ### RESUMO, ### PREÇOS-CHAVE, ### DESTAQUES)
    - Números: vírgula para decimais (100,20) mas SEMPRE EM USD
    - Máximo 1500 caracteres
@@ -277,14 +283,17 @@ REGRAS CRÍTICAS:
 
         user_prompt = f"""Crie a mensagem FINAL para WhatsApp baseada nesta análise.
 
-IMPORTANTE: Gere APENAS a mensagem formatada para o usuário final. Não inclua metadados internos como classificação, humor do mercado, etc.
+IMPORTANTE: 
+- Gere APENAS a mensagem formatada para o usuário final
+- TUDO EM PORTUGUÊS BRASILEIRO (exceto termos técnicos de mercado)
+- Não inclua metadados internos
 
 SÍNTESE DO MERCADO:
 {synthesis}
 
 DATA: {date_str}
 
-Gere a mensagem final formatada para WhatsApp."""
+Gere a mensagem final formatada para WhatsApp, INTEIRAMENTE EM PORTUGUÊS."""
 
         return self.claude.generate_text(system_prompt, user_prompt)
 

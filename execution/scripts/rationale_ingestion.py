@@ -142,7 +142,12 @@ def main():
                     try:
                         requests.post(
                             f"{webhook_url}/store-draft",
-                            json={"draft_id": draft_obj["id"], "message": draft_text},
+                            json={
+                                "draft_id": draft_obj["id"],
+                                "message": draft_text,
+                                "uazapi_token": os.getenv("UAZAPI_TOKEN", ""),
+                                "uazapi_url": os.getenv("UAZAPI_URL", "https://mineralstrading.uazapi.com")
+                            },
                             timeout=10
                         )
                     except Exception as store_err:

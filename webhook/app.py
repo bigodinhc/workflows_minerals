@@ -85,10 +85,12 @@ def get_contacts():
     logger.info(f"Found {len(contacts)} contacts with ButtonPayload='Big'")
     return contacts
 
-def send_whatsapp(phone, message):
+def send_whatsapp(phone, message, token=None, url=None):
     """Send WhatsApp message via Uazapi."""
+    use_token = token or UAZAPI_TOKEN
+    use_url = url or UAZAPI_URL
     headers = {
-        "token": UAZAPI_TOKEN,
+        "token": use_token,
         "Content-Type": "application/json"
     }
     payload = {
@@ -97,7 +99,7 @@ def send_whatsapp(phone, message):
     }
     try:
         response = requests.post(
-            f"{UAZAPI_URL}/send/text",
+            f"{use_url}/send/text",
             json=payload,
             headers=headers,
             timeout=30
@@ -109,7 +111,7 @@ def send_whatsapp(phone, message):
         logger.error(f"WhatsApp send error for {phone}: {e}")
         return False
 
-def process_approval_async(chat_id, draft_message):
+def process_approval_async(chat_id, draft_message, uazapi_token=None, uazapi_url=None):
     """Process WhatsApp sending in background thread with Telegram progress updates."""
     # Send a NEW message for progress (since original may have expired for editing)
     progress = send_telegram_message(chat_id, "⏳ Iniciando envio para WhatsApp...")
@@ -132,7 +134,7 @@ def process_approval_async(chat_id, draft_message):
                 continue
             phone = str(phone).replace("whatsapp:", "").strip()
             
-            if send_whatsapp(phone, draft_message):
+            if send_whatsapp(phone, draft_message, token=uazapi_token, url=uazapi_url):
                 success_count += 1
             else:
                 fail_count += 1
@@ -192,8 +194,15 @@ def store_draft():
     
     DRAFTS[draft_id] = {
         "message": message,
-        "status": "pending"
+        "status": "pending",
+        "uazapi_token": (data.get("uazapi_token") or "").strip() or None,
+        "uazapi_url": (data.get("uazapi_url") or "").strip() or None
     }
+    
+    if DRAFTS[draft_id]["uazapi_token"]:
+        logger.info(f"Draft includes UAZAPI token: {DRAFTS[draft_id]['uazapi_token'][:8]}...")
+    else:
+        logger.info(f"Draft has no UAZAPI token, will use env var")
     
     logger.info(f"Draft stored: {draft_id} ({len(message)} chars)")
     return jsonify({"success": True, "draft_id": draft_id})
@@ -245,7 +254,7 @@ def telegram_webhook():
         # Process WhatsApp in background thread
         thread = threading.Thread(
             target=process_approval_async,
-            args=(chat_id, draft["message"])
+            args=(chat_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
         )
         thread.daemon = True
         thread.start()

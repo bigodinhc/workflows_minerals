@@ -41,6 +41,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_WEBHOOK_URL: ${{ vars.TELEGRAM_WEBHOOK_URL }}
           
+          # WhatsApp (passed to webhook for sending)
+          UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
+          UAZAPI_URL: ${{ secrets.UAZAPI_URL }}
+          
         run: |
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
             python execution/scripts/rationale_ingestion.py --dry-run

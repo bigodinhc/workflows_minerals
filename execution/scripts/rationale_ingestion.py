@@ -52,6 +52,18 @@ def main():
         today_br = datetime.now().strftime("%d/%m/%Y")
         logger.info(f"Starting ingestion for date: {today_br}")
         
+        # Check if webhook already has a draft (avoid duplicate sends on retry crons)
+        webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+        if webhook_url and not args.dry_run:
+            import requests
+            try:
+                health = requests.get(f"{webhook_url}/health", timeout=5).json()
+                if health.get("drafts_count", 0) > 0:
+                    logger.info(f"Webhook already has {health['drafts_count']} draft(s). Skipping to avoid duplicate.")
+                    return
+            except Exception:
+                pass  # If webhook unreachable, continue anyway
+        
         # 2. Run Apify
         client = ApifyClient()
         logger.info(f"Targeting Apify Actor ID: {ACTOR_ID}")

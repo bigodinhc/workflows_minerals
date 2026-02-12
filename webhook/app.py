@@ -25,7 +25,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 UAZAPI_URL = os.getenv("UAZAPI_URL", "https://mineralstrading.uazapi.com")
 UAZAPI_TOKEN = (os.getenv("UAZAPI_TOKEN") or "").strip()
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 
 # Google Sheets for contacts
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
@@ -345,14 +345,24 @@ def send_whatsapp(phone, message, token=None, url=None):
 
 def call_claude(system_prompt, user_prompt):
     """Call Claude API and return text response."""
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4096,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}]
-    )
-    return message.content[0].text
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}]
+        )
+        return message.content[0].text
+    except anthropic.APIConnectionError as e:
+        logger.error(f"Anthropic connection error: {e}")
+        raise
+    except anthropic.AuthenticationError as e:
+        logger.error(f"Anthropic auth error (bad key?): {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Anthropic error ({type(e).__name__}): {e}")
+        raise
 
 def run_3_agents(raw_text):
     """Run Writer → Critique → Curator chain. Returns final formatted message."""
@@ -511,8 +521,20 @@ def health():
         "drafts_count": len(DRAFTS),
         "uazapi_token_set": bool(UAZAPI_TOKEN),
         "uazapi_url": UAZAPI_URL,
-        "anthropic_key_set": bool(ANTHROPIC_API_KEY)
+        "anthropic_key_set": bool(ANTHROPIC_API_KEY),
+        "anthropic_key_prefix": ANTHROPIC_API_KEY[:10] + "..." if ANTHROPIC_API_KEY else "NONE"
     })
+
+@app.route("/test-ai", methods=["GET"])
+def test_ai():
+    """Test Anthropic API connectivity from Railway."""
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY not set"}), 500
+    try:
+        result = call_claude("You are helpful.", "Say 'hello' in one word.")
+        return jsonify({"status": "ok", "response": result[:100]})
+    except Exception as e:
+        return jsonify({"status": "error", "error_type": type(e).__name__, "error": str(e)[:500]}), 500
 
 @app.route("/store-draft", methods=["POST"])
 def store_draft():

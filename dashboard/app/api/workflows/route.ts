@@ -18,7 +18,7 @@ export async function GET() {
         const { data: runs } = await octokit.request("GET /repos/{owner}/{repo}/actions/runs", {
             owner,
             repo,
-            per_page: 30, // Increased for executions page
+            per_page: 100, // Increased to show more history
         });
 
         // 2. Map to format

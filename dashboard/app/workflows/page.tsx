@@ -316,23 +316,23 @@ export default function WorkflowsPage() {
     }
 
     return (
-        <div className="min-h-screen bg-zinc-950 p-6">
+        <div className="min-h-screen bg-zinc-950 p-4 md:p-6">
             <div className="max-w-6xl mx-auto space-y-6">
                 {/* Header */}
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h1 className="text-2xl font-bold text-zinc-100">📊 Catálogo de Automações</h1>
-                        <p className="text-zinc-400 mt-1">
+                        <h1 className="text-xl md:text-2xl font-bold text-zinc-100">📊 Catálogo de Automações</h1>
+                        <p className="text-zinc-400 mt-1 text-sm">
                             {WORKFLOW_CATALOG.length} workflows ativos
                         </p>
                     </div>
-                    <Button variant="outline" onClick={() => window.location.href = "/"}>
+                    <Button variant="outline" size="sm" onClick={() => window.location.href = "/"}>
                         ← Voltar
                     </Button>
                 </div>
 
                 {/* Workflow Cards Grid */}
-                <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-4 md:gap-6 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
                     {WORKFLOW_CATALOG.map(workflow => (
                         <WorkflowCard
                             key={workflow.id}
@@ -347,7 +347,7 @@ export default function WorkflowsPage() {
 
                 {/* Log Viewer Sheet */}
                 <Sheet open={selectedRunId !== null} onOpenChange={() => setSelectedRunId(null)}>
-                    <SheetContent className="w-[600px] sm:max-w-[600px] bg-zinc-900 border-zinc-800">
+                    <SheetContent className="w-full sm:w-[600px] sm:max-w-[600px] bg-zinc-900 border-zinc-800">
                         <SheetHeader>
                             <SheetTitle className="text-zinc-100">Logs da Execução #{selectedRunId}</SheetTitle>
                         </SheetHeader>

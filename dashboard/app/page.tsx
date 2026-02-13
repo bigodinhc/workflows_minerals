@@ -91,18 +91,18 @@ export default function Home() {
   }).length || 0;
 
   return (
-    <div className="p-8 space-y-8 bg-background text-foreground min-h-screen">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8 bg-background text-foreground min-h-screen">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white/90">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Monitoramento em tempo real dos workflows de trading.</p>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white/90">Dashboard</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Monitoramento em tempo real dos workflows.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-2 md:gap-3">
           <Button
             variant="secondary"
             onClick={() => window.location.href = "/workflows"}
-            className="bg-zinc-800 hover:bg-zinc-700"
+            className="bg-zinc-800 hover:bg-zinc-700 text-xs md:text-sm"
           >
             📊 Catálogo
           </Button>
@@ -112,17 +112,19 @@ export default function Home() {
               onClick={() => handleTrigger(wf.id)}
               disabled={triggeringId === wf.id}
               variant="outline"
-              className={`border-primary/20 hover:bg-primary/10 transition-all ${triggeringId === wf.id ? "opacity-80" : ""}`}
+              size="sm"
+              className={`border-primary/20 hover:bg-primary/10 transition-all text-xs ${triggeringId === wf.id ? "opacity-80" : ""}`}
             >
-              {triggeringId === wf.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-              {wf.name}
+              {triggeringId === wf.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Play className="mr-1 h-3 w-3" />}
+              <span className="hidden sm:inline">{wf.name}</span>
+              <span className="sm:hidden">{wf.type}</span>
             </Button>
           ))}
         </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:gap-6 grid-cols-2 lg:grid-cols-4">
         {/* ... (Stats Cards remain same) ... */}
         <Card className="bg-card border-border shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -189,43 +191,73 @@ export default function Home() {
             <div className="p-8 text-center text-muted-foreground">Carregando dados...</div>
           ) : (
             <div className="w-full">
-              <div className="grid grid-cols-5 gap-4 p-4 text-sm font-medium text-muted-foreground border-b border-border/50">
+              <div className="hidden md:grid grid-cols-5 gap-4 p-4 text-sm font-medium text-muted-foreground border-b border-border/50">
                 <div className="col-span-2">Workflow / Commit</div>
                 <div>Status</div>
                 <div>Data</div>
                 <div className="text-right">Ação</div>
               </div>
+              {/* Mobile header */}
+              <div className="md:hidden grid grid-cols-3 gap-2 p-3 text-xs font-medium text-muted-foreground border-b border-border/50">
+                <div>Workflow</div>
+                <div>Status</div>
+                <div className="text-right">Ação</div>
+              </div>
               {runs.map((run: any) => (
-                <div key={run.id} className="grid grid-cols-5 gap-4 p-4 text-sm items-center hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0">
-                  <div className="col-span-2 font-mono truncate">
-                    <div className="font-semibold text-foreground">{run.name} #{run.run_number}</div>
+                <div key={run.id}>
+                  {/* Desktop row */}
+                  <div className="hidden md:grid grid-cols-5 gap-4 p-4 text-sm items-center hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0">
+                    <div className="col-span-2 font-mono truncate">
+                      <div className="font-semibold text-foreground">{run.name} #{run.run_number}</div>
+                    </div>
+                    <div>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
+                                      ${run.conclusion === 'success' ? 'bg-green-500/10 text-green-500' :
+                          run.conclusion === 'failure' ? 'bg-red-500/10 text-red-500' :
+                            'bg-yellow-500/10 text-yellow-500'}`}>
+                        {run.status === 'completed' ? run.conclusion : run.status}
+                      </span>
+                    </div>
+                    <div className="text-muted-foreground">
+                      {new Date(run.created_at).toLocaleString('pt-BR')}
+                    </div>
+                    <div className="text-right flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleViewLogs(run.id)}
+                        className="text-primary hover:text-primary/80 hover:bg-primary/10 h-8 px-2"
+                      >
+                        <FileText className="h-4 w-4 mr-1" />
+                        Ver Log
+                      </Button>
+                    </div>
                   </div>
-                  <div>
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
-                                    ${run.conclusion === 'success' ? 'bg-green-500/10 text-green-500' :
-                        run.conclusion === 'failure' ? 'bg-red-500/10 text-red-500' :
-                          'bg-yellow-500/10 text-yellow-500'}`}>
-                      {run.status === 'completed' ? run.conclusion : run.status}
-                    </span>
-                  </div>
-                  <div className="text-muted-foreground">
-                    {new Date(run.created_at).toLocaleString('pt-BR')}
-                  </div>
-                  <div className="text-right flex justify-end gap-2">
-                    {/* 
-                     <a href={run.html_url} target="_blank" className="text-muted-foreground hover:text-primary transition-colors">
-                       <ExternalLink className="h-4 w-4" />
-                     </a>
-                     */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleViewLogs(run.id)}
-                      className="text-primary hover:text-primary/80 hover:bg-primary/10 h-8 px-2"
-                    >
-                      <FileText className="h-4 w-4 mr-1" />
-                      Ver Log
-                    </Button>
+                  {/* Mobile row */}
+                  <div className="md:hidden grid grid-cols-3 gap-2 p-3 text-xs items-center border-b border-border/50 last:border-0">
+                    <div className="truncate">
+                      <div className="font-semibold text-foreground truncate">{run.name}</div>
+                      <div className="text-muted-foreground text-[10px]">{new Date(run.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                    <div>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium capitalize
+                                      ${run.conclusion === 'success' ? 'bg-green-500/10 text-green-500' :
+                          run.conclusion === 'failure' ? 'bg-red-500/10 text-red-500' :
+                            'bg-yellow-500/10 text-yellow-500'}`}>
+                        {run.status === 'completed' ? run.conclusion : run.status}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleViewLogs(run.id)}
+                        className="text-primary h-7 px-2 text-[10px]"
+                      >
+                        <FileText className="h-3 w-3 mr-1" />
+                        Log
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -236,7 +268,7 @@ export default function Home() {
 
       {/* Logs Sheet */}
       <Sheet open={!!selectedRunId} onOpenChange={(open) => !open && setSelectedRunId(null)}>
-        <SheetContent className="w-[800px] sm:max-w-[90vw] flex flex-col h-full bg-card border-l border-border">
+        <SheetContent className="w-full sm:w-[800px] sm:max-w-[90vw] flex flex-col h-full bg-card border-l border-border">
           <SheetHeader className="mb-4">
             <SheetTitle>Logs de Execução #{selectedRunId}</SheetTitle>
             <SheetDescription>

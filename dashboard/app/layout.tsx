@@ -26,11 +26,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         <SideNav />
-        <main className="pl-16 min-h-screen">
+        <main className="md:pl-16 pb-20 md:pb-0 min-h-screen">
           {children}
         </main>
       </body>

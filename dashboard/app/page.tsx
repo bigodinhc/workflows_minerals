@@ -15,7 +15,8 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 const WORKFLOWS = [
   { id: "morning_check.yml", name: "Morning Check (Platts)", type: "Morning" },
   { id: "baltic_ingestion.yml", name: "Baltic Ingestion (Email)", type: "Mid-Day" },
-  { id: "daily_report.yml", name: "Daily Report (SGX)", type: "Afternoon" }
+  { id: "daily_report.yml", name: "Daily Report (SGX)", type: "Afternoon" },
+  { id: "rationale_news.yml", name: "Rationale News (Telegram)", type: "On-Demand" }
 ];
 
 export default function Home() {

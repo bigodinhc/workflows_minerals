@@ -1,9 +1,5 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Search, Users, Loader2 } from "lucide-react";
 import useSWR from "swr";
 import { useState } from "react";
@@ -15,85 +11,83 @@ export default function ContactsPage() {
     const [search, setSearch] = useState("");
 
     const filteredContacts = contacts?.filter((contact: any) => {
-        // Create searchable string from all values
         const searchStr = Object.values(contact).join(" ").toLowerCase();
         return searchStr.includes(search.toLowerCase());
     }) || [];
 
     return (
-        <div className="p-8 space-y-8 bg-background text-foreground min-h-screen">
+        <div className="p-4 md:p-6 space-y-6 bg-black text-[#e0e0e0] min-h-screen">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between py-4 gap-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-white/90">Contatos</h1>
-                    <p className="text-muted-foreground mt-1">Gerencie a lista de distribuição do relatório.</p>
+                    <p className="text-[10px] text-[#00FF41] uppercase tracking-[0.3em] mb-1">/ CONTACTS</p>
+                    <h1 className="text-xl md:text-2xl font-bold uppercase tracking-tight text-white">
+                        DISTRIBUTION LIST
+                    </h1>
+                    <p className="text-[10px] text-[#555] mt-1 uppercase">WHATSAPP REPORT RECIPIENTS</p>
                 </div>
 
-                <div className="relative w-full md:w-96">
-                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                        placeholder="Buscar por nome, telefone..."
-                        className="pl-8 bg-card border-border"
+                {/* Search */}
+                <div className="relative w-full md:w-80">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-[#00FF41]/50 font-mono">grep:</span>
+                    <input
+                        placeholder="search..."
+                        className="w-full bg-[#0a0a0a] border border-[#1a1a1a] text-xs text-white pl-12 pr-3 py-2 font-mono
+                          focus:outline-none focus:border-[#00FF41]/30 transition-colors placeholder:text-[#333] uppercase"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                     />
                 </div>
             </div>
 
-            {/* Main Content */}
-            <Card className="bg-card border-border">
-                <CardHeader>
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <CardTitle>Base de Contatos</CardTitle>
-                            <Badge variant="secondary" className="ml-2 font-mono">
-                                {isLoading ? "..." : filteredContacts.length} total
-                            </Badge>
-                        </div>
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <CardDescription>
-                        Dados sincronizados da planilha Google Sheets.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {isLoading ? (
-                        <div className="flex items-center justify-center py-20 text-muted-foreground">
-                            <Loader2 className="h-8 w-8 animate-spin" />
-                        </div>
-                    ) : error ? (
-                        <div className="flex items-center justify-center py-20 text-red-400">
-                            Erro ao carregar dados: {error.message || "Verifique o console"}
-                        </div>
-                    ) : (
-                        <div className="rounded-md border border-border">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow className="border-border hover:bg-muted/50">
-                                        <TableHead className="w-[100px]">Linha</TableHead>
-                                        {contacts && contacts.length > 0 && Object.keys(contacts[0]).filter(k => k !== 'id').map((header) => (
-                                            <TableHead key={header} className="capitalize">{header}</TableHead>
-                                        ))}
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {filteredContacts.map((contact: any) => (
-                                        <TableRow key={contact.id} className="border-border hover:bg-muted/50">
-                                            <TableCell className="font-mono text-xs text-muted-foreground">#{contact.id}</TableCell>
-                                            {Object.keys(contacts[0]).filter(k => k !== 'id').map((key) => (
-                                                <TableCell key={`${contact.id}-${key}`}>
-                                                    {contact[key]}
-                                                </TableCell>
-                                            ))}
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
+            {/* Count */}
+            <div className="flex items-center gap-3">
+                <span className="text-[10px] text-[#555] uppercase tracking-wider">
+                    {isLoading ? "..." : filteredContacts.length} RECORDS
+                </span>
+                <div className="flex-1 h-px bg-[#1a1a1a]"></div>
+                <span className="text-[9px] text-[#333] uppercase">SYNCED FROM GOOGLE SHEETS</span>
+            </div>
 
+            {/* Table */}
+            <div className="border border-[#1a1a1a] bg-[#0a0a0a] overflow-hidden">
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-20">
+                        <Loader2 className="h-6 w-6 animate-spin text-[#00FF41]" />
+                    </div>
+                ) : error ? (
+                    <div className="flex items-center justify-center py-20 text-[#ff3333] text-xs uppercase">
+                        ERROR: {error.message || "CONNECTION FAILED"}
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead>
+                                <tr className="border-b border-[#1a1a1a] bg-[#050505]">
+                                    <th className="text-left px-4 py-2 text-[9px] font-medium text-[#555] uppercase tracking-wider w-[60px]">#</th>
+                                    {contacts && contacts.length > 0 && Object.keys(contacts[0]).filter(k => k !== 'id').map((header) => (
+                                        <th key={header} className="text-left px-4 py-2 text-[9px] font-medium text-[#555] uppercase tracking-wider">
+                                            {header}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredContacts.map((contact: any) => (
+                                    <tr key={contact.id} className="border-b border-[#0a0a0a] last:border-0 hover:bg-[#00FF41]/5 transition-colors">
+                                        <td className="px-4 py-2 font-mono text-[10px] text-[#333]">{contact.id}</td>
+                                        {Object.keys(contacts[0]).filter(k => k !== 'id').map((key) => (
+                                            <td key={`${contact.id}-${key}`} className="px-4 py-2 text-[11px] text-[#999]">
+                                                {contact[key]}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

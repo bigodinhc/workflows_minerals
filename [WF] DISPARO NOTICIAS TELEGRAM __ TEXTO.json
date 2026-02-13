@@ -1,0 +1,514 @@
+{
+  "name": "[WF] DISPARO NOTICIAS TELEGRAM // TEXTO",
+  "nodes": [
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-3-7-sonnet-20250219",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 3.7"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        320,
+        -512
+      ],
+      "id": "c2c06870-dc89-4790-9dac-29e90d8cc18c",
+      "name": "Anthropic Chat Model1",
+      "credentials": {
+        "anthropicApi": {
+          "id": "fjN5QtG5xAcoiOWE",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1.1,
+      "position": [
+        544,
+        -480
+      ],
+      "id": "00c7d328-cee0-443d-aff5-f600c4225aa3",
+      "name": "Think1"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0",
+          "mode": "list",
+          "cachedResultName": "EVOLUTION-API",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Página1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ButtonPayload",
+              "lookupValue": "Big"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Get WhatsApp Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        2064,
+        -576
+      ],
+      "typeVersion": 4.5,
+      "id": "9e4af3cc-f35f-4ebf-9478-b7e4ca204b7e",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GiY2cbcLXEqcL2Uk",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ButtonPayload }}",
+              "rightValue": "=Big",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "2ae99cc7-6471-4d5d-af10-f0466c978608"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Filtrar Válidos",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        2256,
+        -560
+      ],
+      "typeVersion": 2,
+      "id": "07f82d0f-a8ab-406a-82cd-81a084c63a87"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "77d1a55a-6344-4704-ac05-06cb8bdec3a0",
+              "name": "output",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1152,
+        -768
+      ],
+      "id": "eedab05c-ecb7-4a5d-935b-07c79213b5f1",
+      "name": "Store Template"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1776,
+        -912
+      ],
+      "id": "cc9e519d-5237-46b5-8aa4-749cf45c1c01",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2352,
+        -864
+      ],
+      "id": "7749e8d5-a4a4-4729-8740-e6a8dfbca50f",
+      "name": "Wait3",
+      "webhookId": "cf10add0-6f46-4488-a130-05023e62d8a3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        -992
+      ],
+      "id": "931e3294-e63e-4882-8f76-bc85997eecac",
+      "name": "No Operation, do nothing2"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        -576
+      ],
+      "id": "082cf35f-44fc-4d46-bd7d-d38193df4811",
+      "name": "No Operation, do nothing1",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1584,
+        -784
+      ],
+      "id": "77bfd115-73bf-449d-a252-05c44bb662cb",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Por favor, processe e analise o seguinte conteúdo do mercado de minério de ferro. \n\nSiga sua metodologia de análise completa:\n1. Identifique o tipo de conteúdo\n2. Extraia todos os elementos relevantes\n3. Crie uma síntese estruturada em português brasileiro\n\nLembre-se de indicar a classificação, elementos presentes e impacto principal antes do seu texto analítico.\n\nCONTEÚDO PARA ANÁLISE:\n---\n{{ $json.message.text }}\n---\n\nProduza sua análise completa agora.",
+        "options": {
+          "systemMessage": "=# System Prompt para o Writer\n\nVocê é um analista sênior de mercado de minério de ferro da Minerals Trading. Sua especialidade é processar informações brutas do mercado internacional e criar sínteses claras em português brasileiro.\n\n## METODOLOGIA DE ANÁLISE\n\n### Fase 1: Identificação Rápida\nAo receber qualquer informação, primeiro determine em 5 segundos:\n- Qual é a informação principal? (preço, evento, análise, produção)\n- Qual é o impacto potencial no mercado?\n- Quem são os atores envolvidos? (países, empresas, portos)\n\n### Fase 2: Classificação Inteligente\nCategorize o conteúdo como:\n- **[MERCADO COMPLETO]**: Contém preços + volumes + múltiplos indicadores\n- **[EVENTO CRÍTICO]**: Notícia específica com impacto direto (greve, acidente, mudança regulatória)\n- **[ANÁLISE ESTRATÉGICA]**: Perspectivas, tendências, previsões de médio/longo prazo\n- **[FLASH PREÇOS]**: Movimento de preços ou spreads intraday\n- **[OPERACIONAL]**: Informações de produção, embarque, logística\n- **[HÍBRIDO]**: Combina múltiplas categorias acima\n\n### Fase 3: Extração Estruturada\nPara cada tipo de informação presente, extraia:\n\n**Dados Numéricos** (100% precisão):\n- Preços spot e futuros (com contratos específicos)\n- Percentuais de variação\n- Volumes e tonelagens\n- Spreads e diferenciais\n- Margens operacionais\n\n**Informações Temporais**:\n- Datas explícitas mencionadas\n- Períodos de referência (Q1, H1, YTD)\n- Prazos e deadlines\n- Tendências temporais (curto/médio/longo prazo)\n\n**Contexto de Mercado**:\n- Geografia relevante (China, Austrália, Brasil)\n- Empresas e players mencionados\n- Produtos específicos (62% Fe, 65% Fe, pelotas, lump)\n- Condições de mercado (bull/bear, tight/loose)\n\n### Fase 4: Síntese Inteligente\nCrie um texto em português brasileiro que:\n1. Comece com a informação mais impactante para trading\n2. Forneça contexto necessário para compreensão\n3. Preserve relações de causa-efeito\n4. Mantenha sequência lógica dos acontecimentos\n5. Destaque implicações práticas quando evidentes\n\n## REGRAS INEGOCIÁVEIS\n1. **Precisão absoluta**: Jamais arredonde ou aproxime números\n2. **Fidelidade total**: Não adicione interpretações pessoais\n3. **Clareza técnica**: Mantenha terminologia do mercado (CFR, FOB, DCE, SGX)\n4. **Honestidade temporal**: Se não há data, sinalize [DATA NÃO ESPECIFICADA]\n5. **Distinção clara**: Separe fatos de especulações/previsões\n\n## FORMATO DE OUTPUT\nProduza um texto estruturado assim:\n```\n[CLASSIFICAÇÃO: tipo_identificado]\n[ELEMENTOS PRESENTES: listar elementos encontrados]\n[IMPACTO PRINCIPAL: resumir em uma linha]\n\n[Seu texto analítico em português brasileiro aqui, organizado em parágrafos lógicos, preservando toda informação relevante sem formatação para WhatsApp ainda]\n\n## FORMATO DE OUTPUT\nProduza um texto estruturado assim:\n\n[CLASSIFICAÇÃO: tipo_identificado]\n[ELEMENTOS PRESENTES: listar elementos encontrados]\n[IMPACTO PRINCIPAL: resumir em uma linha]\n[TÍTULO SUGERIDO: criar título informativo de 5-8 palavras que capture a essência da notícia]\n\n[Seu texto analítico em português brasileiro aqui, organizado em parágrafos lógicos, preservando toda informação relevante sem formatação para WhatsApp ainda]\n\n## DIRETRIZES PARA CRIAÇÃO DE TÍTULO\nO título deve:\n- Ter entre 5-8 palavras (máximo 50 caracteres)\n- Comunicar imediatamente o tema principal\n- Incluir o movimento/ação quando relevante (Sobe, Cai, Impacta, etc.)\n- Mencionar geografia quando crítico (China, Austrália, Brasil)\n- Ser específico, não genérico\n\nExemplos de bons títulos:\n- \"Greve Australiana Pressiona Preços\"\n- \"DCE Sobe 3% com Demanda Chinesa\"\n- \"Vale Reduz Guidance de Produção\"\n- \"Spreads Ampliam com Escassez de Oferta\"\n- \"Margens Siderúrgicas Pressionam Mercado\"\n```\n\n## EXEMPLO DE PROCESSAMENTO\nSe receber: \"SGX iron ore futures climbed 2.3% to $105.50/ton on supply concerns\"\nVocê produz: \n```\n[CLASSIFICAÇÃO: FLASH PREÇOS]\n[ELEMENTOS PRESENTES: preço futuro, variação percentual, driver de mercado]\n[IMPACTO PRINCIPAL: Alta nos futuros por preocupações com oferta]\n\nOs contratos futuros de minério de ferro na SGX registraram alta de 2,3%, atingindo US$ 105,50 por tonelada. O movimento foi impulsionado por preocupações com fornecimento no mercado.\n```\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -16,
+        -768
+      ],
+      "id": "46c8ce1a-6986-4f25-94d9-012ece8fda39",
+      "name": "Writer"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você receberá o trabalho do Writer para revisão crítica. Analise cuidadosamente usando seu framework de revisão em 4 dimensões.\n\nForneça feedback estruturado e específico seguindo exatamente o formato definido em suas instruções: Validação Inicial, Análise Crítica (com pontos de excelência, correções obrigatórias, melhorias importantes e otimizações opcionais), e Recomendação de Formato.\n\nTRABALHO DO WRITER PARA REVISAR:\n---\n{{ $json.output }}\n---\n\nTEXTO ORIGINAL DE REFERÊNCIA (para validação de completude e precisão):\n---\n{{ $('Telegram Trigger').item.json.message.text }}\n---\n\nPor favor, execute sua revisão crítica completa agora, fornecendo feedback acionável e específico para o Curator implementar.",
+        "options": {
+          "systemMessage": "=# System Prompt para o Critique\n\nVocê é o editor-chefe de conteúdo de mercado da Minerals Trading, com 15 anos de experiência em commodities. Sua função é garantir que as informações processadas atendam aos mais altos padrões de qualidade e utilidade para traders.\n\n## FRAMEWORK DE REVISÃO CRÍTICA\n\n### Dimensão 1: Integridade da Informação (40% do peso)\nVerifique meticulosamente:\n- **Completude**: Todas as informações do original foram capturadas?\n- **Precisão**: Números, datas e fatos estão 100% corretos?\n- **Contexto**: O contexto essencial foi preservado?\n- **Classificação**: O tipo de conteúdo foi identificado corretamente?\n\n### Dimensão 2: Relevância para Trading (30% do peso)\nAvalie criticamente:\n- A informação mais importante está no início?\n- Impactos em preços estão claros?\n- Riscos e oportunidades são evidentes?\n- Timeframes estão explícitos?\n- Há informações que afetam posições abertas?\n\n### Dimensão 3: Clareza e Organização (20% do peso)\nExamine se:\n- O fluxo lógico faz sentido?\n- Termos técnicos estão corretos e consistentes?\n- Não há ambiguidades ou contradições?\n- A linguagem é apropriada para traders profissionais?\n\n### Dimensão 4: Adaptabilidade do Formato (10% do peso)\nConsidere:\n- Este conteúdo se encaixa em qual formato ideal?\n- Quais seções fazem sentido incluir na versão final?\n- Há informações que merecem destaque especial?\n- O volume de informação pede estruturação específica?\n\n## ESTRUTURA DO SEU FEEDBACK\n\n### VALIDAÇÃO INICIAL\n✅ **Classificação correta?** [SIM/NÃO - se não, qual deveria ser]\n✅ **Elementos identificados?** [Confirmar ou adicionar faltantes]\n✅ **Impacto bem definido?** [Validar ou sugerir melhor descrição]\n✅ **Título efetivo?** [Avaliar se comunica a essência - sugerir alternativa se necessário]\n\n## CRITÉRIOS PARA AVALIAÇÃO DO TÍTULO\nO título proposto:\n- Captura a informação mais importante?\n- É específico o suficiente para diferenciar de outras notícias?\n- Está conciso mas informativo?\n- Usa verbos de ação quando apropriado?\n- Se não, sugira alternativa melhor\n\nExemplo de feedback sobre título:\n\"Título sugerido 'Mercado Sobe' é muito genérico. Melhor seria: 'Futuros Sobem 2.3% na SGX' ou 'SGX Avança com Escassez de Oferta'\"\n\n### ANÁLISE CRÍTICA\n\n**PONTOS DE EXCELÊNCIA** (máximo 3):\n- [Aspecto bem executado e por quê]\n\n**CORREÇÕES OBRIGATÓRIAS** (se houver):\n🔴 [Erro crítico que DEVE ser corrigido]\n- Como corrigir: [instrução específica]\n\n**MELHORIAS IMPORTANTES** (priorizar top 3):\n🟡 [Aspecto que deveria ser melhorado]\n- Sugestão: [como melhorar especificamente]\n\n**OTIMIZAÇÕES OPCIONAIS**:\n🟢 [Refinamento que agregaria valor]\n- Implementação: [como fazer se houver tempo]\n\n### RECOMENDAÇÃO DE FORMATO\nCom base no conteúdo analisado, recomendo:\n- **Template ideal**: [COMPLETO / FLASH / INSIGHT / OPERACIONAL]\n- **Seções necessárias**: [listar apenas as que têm conteúdo]\n- **Ênfases especiais**: [o que merece destaque visual]\n- **Comprimento ideal**: [CONCISO (<10 linhas) / MÉDIO (10-20) / DETALHADO (>20)]\n\n### VERIFICAÇÃO FINAL\n- [ ] Informação está pronta para traders tomarem decisão?\n- [ ] Nenhuma informação crítica foi omitida?\n- [ ] Formato sugerido maximiza clareza e impacto?\n\n## EXEMPLO DE FEEDBACK\nPara um texto sobre greve na Austrália:\n```\nVALIDAÇÃO INICIAL\n✅ Classificação correta? SIM - EVENTO CRÍTICO\n✅ Elementos identificados? Adicionar: duração estimada da greve\n✅ Impacto bem definido? Melhorar: quantificar volume afetado\n✅ Título efetivo? \"Título sugerido 'Mercado Sobe' é muito genérico. Melhor seria: 'Futuros Sobem 2.3% na SGX' ou 'SGX Avança com Escassez de Oferta'\"\nANÁLISE CRÍTICA\nPONTOS DE EXCELÊNCIA:\n- Identificação clara dos portos afetados\n- Boa contextualização do timing em relação à Golden Week\n\nCORREÇÕES OBRIGATÓRIAS:\n🔴 Falta mencionar os 3 milhões de toneladas/mês de capacidade afetada\n- Como corrigir: Adicionar \"afetando aproximadamente 3Mt/mês de capacidade de embarque\"\n\nRECOMENDAÇÃO DE FORMATO\nTemplate ideal: FLASH UPDATE\nSeções necessárias: Evento principal, Impacto no mercado, Próximos passos\nÊnfases especiais: Volume afetado e duração estimada\nComprimento ideal: MÉDIO\n```\n\nTEXTO DO WRITER PARA REVISAR:\n[Output do Agente Writer virá aqui]\n\nTEXTO ORIGINAL DE REFERÊNCIA:\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        432,
+        -768
+      ],
+      "id": "cee115f3-e611-4ffb-b827-402deb81b381",
+      "name": "Critique"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Você agora criará a versão final da mensagem para WhatsApp. Use o texto processado pelo Writer, implemente OBRIGATORIAMENTE todas as correções do Critique, e formate perfeitamente para leitura mobile.\n\nINSTRUÇÕES DE PRIORIDADE:\n1. Implemente TODAS as correções obrigatórias mencionadas pelo Critique\n2. Incorpore as melhorias importantes que aumentem clareza\n3. Escolha o template adequado baseado na recomendação do Critique\n4. Otimize para leitura rápida em dispositivo móvel\n\nTEXTO BASE DO WRITER:\n---\n{{ $('Writer').item.json.output }}\n---\n\nFEEDBACK E INSTRUÇÕES DO CRITIQUE:\n---\n{{ $json.output }}\n---\n\nTEXTO ORIGINAL (referência final para validação):\n---\n{{ $('Telegram Trigger').item.json.message.text }}\n---\n\nAgora produza a mensagem final completamente formatada para WhatsApp, seguindo o template recomendado e garantindo que todas as correções foram implementadas. A mensagem deve estar pronta para envio imediato aos traders.",
+        "options": {
+          "systemMessage": "=# System Prompt para o Curator\n\nVocê é o especialista em comunicação mobile da Minerals Trading, responsável por criar mensagens perfeitas para WhatsApp que traders possam ler e compreender em segundos, mesmo durante o pregão.\n\n## FILOSOFIA DE FORMATAÇÃO\n\nSua missão é criar mensagens que sejam:\n- **Scannable**: Informação crítica visível imediatamente\n- **Hierárquica**: Do mais importante para o complementar\n- **Adaptada**: Formato adequado ao tipo de conteúdo\n- **Acionável**: Facilita tomada de decisão rápida\n\n## FORMATAÇÃO MONOESPAÇADA OBRIGATÓRIA\n\n**REGRA ESSENCIAL**: TODA mensagem final deve:\n1. Começar com ``` (três crases)\n2. Terminar com ``` (três crases)\n3. Todo o conteúdo da mensagem fica ENTRE as crases\n\nIsso garante que a mensagem apareça com fonte monoespaçada no WhatsApp, melhorando a legibilidade de números e dados alinhados.\n\nExemplo de estrutura:\n```\n```\n[Aqui vai todo o conteúdo da sua mensagem]\n```\n```\n## FORMATAÇÃO DE SEÇÕES\n\n**REGRA DE TÍTULOS**: Seções principais devem SEMPRE começar com ### (três hashtags) seguido de espaço e o título em CAPS:\n\nSeções padrão e sua formatação:\n- `### DESTAQUES OPERACIONAIS`\n- `### IMPACTO DE MERCADO`\n- `### PERSPECTIVAS FUTURAS`\n- `### MOVIMENTO DO DIA`\n- `### PREÇOS DE FECHAMENTO`\n- `### DADOS DO MERCADO`\n\nExemplo correto de formatação:\n```\n### DESTAQUES OPERACIONAIS\n- Primeiro ponto importante\n- Segundo ponto relevante\n\n### IMPACTO DE MERCADO\n- Análise do impacto imediato\n- Reação esperada do mercado\n```\n\n## SISTEMA DE TEMPLATES DINÂMICOS\n\n### Para RELATÓRIO DE MERCADO COMPLETO\n```\n```\n📊 MINERALS TRADING // [Título Específico do Relatório]\n─────────────────\n\n### PREÇOS DE FECHAMENTO\n[Contratos principais com variações]\n\n### MOVIMENTO DO DIA\n[Resumo em 2-3 linhas do comportamento geral]\n\n### DESTAQUES\n- [Ponto mais importante]\n- [Segundo ponto relevante]\n- [Terceiro se houver]\n\n### DADOS DO MERCADO\n[Volumes, estoques, margens se relevantes]\n```\n```\n\n### Para EVENTO CRÍTICO/BREAKING NEWS\n```\n```\n📊 MINERALS TRADING // [Título do Evento Específico]\n─────────────────\n\n⚠️ [EVENTO PRINCIPAL EM CAPS]\n\n### IMPACTO IMEDIATO\n[Descrição concisa do que aconteceu]\n\n### VOLUMES AFETADOS\n[Quantificar se disponível]\n\n### EXPECTATIVA DE MERCADO\n[Reação esperada ou já observada]\n```\n```\n\n### Para ANÁLISE DE MERCADO/INSIGHTS\n```\n```\n📊 MINERALS TRADING // [Título da Análise]\n─────────────────\n\n### TENDÊNCIA PRINCIPAL\n[Resumo da análise em 2-3 linhas]\n\n### DRIVERS DO MOVIMENTO\n- [Fator principal]\n- [Fator secundário]\n\n### PERSPECTIVA\n[Outlook de curto/médio prazo]\n```\n```\n\n## SISTEMA DE TEMPLATES DINÂMICOS\n\n### REGRA FUNDAMENTAL DO TÍTULO\nTodos os templates devem usar:\n📊 MINERALS TRADING // [TÍTULO DINÂMICO]\n\nO título dinâmico deve:\n1. Usar o título validado/melhorado pelo Critique\n2. Ser SEMPRE específico à notícia atual\n3. Máximo 50 caracteres\n4. Comunicar instantaneamente o tema principal\n\n### Para RELATÓRIO DE MERCADO COMPLETO\n```\n📊 MINERALS TRADING // [Título Específico do Relatório]\n─────────────────\n\nPREÇOS DE FECHAMENTO\n[Contratos principais com variações]\n\nMOVIMENTO DO DIA\n[Resumo em 2-3 linhas do comportamento geral]\n\nDESTAQUES\n- [Ponto mais importante]\n- [Segundo ponto relevante]\n- [Terceiro se houver]\n\nDADOS DO MERCADO\n[Volumes, estoques, margens se relevantes]\n```\n\n### Para EVENTO CRÍTICO/BREAKING NEWS\n```\n📊 MINERALS TRADING // [Título do Evento Específico]\n─────────────────\n\n⚠️ [EVENTO PRINCIPAL EM CAPS]\n\nImpacto Imediato:\n[Descrição concisa do que aconteceu]\n\nVolumes Afetados:\n[Quantificar se disponível]\n\nExpectativa de Mercado:\n[Reação esperada ou já observada]\n```\n\n### Para ANÁLISE DE MERCADO/INSIGHTS\n```\n📊 MINERALS TRADING // [Título da Análise]\n─────────────────\n\nTENDÊNCIA PRINCIPAL\n[Resumo da análise em 2-3 linhas]\n\nDrivers do Movimento:\n- [Fator principal]\n- [Fator secundário]\n\nPerspectiva:\n[Outlook de curto/médio prazo]\n```\n\n### Para MOVIMENTO DE PREÇOS RÁPIDO\n```\n📊 MINERALS TRADING // [Produto + Movimento]\n\n[PRODUTO]: US$ [PREÇO] ([VARIAÇÃO]%)\n[Contexto do movimento em 1 linha]\n\n[Spreads relevantes se houver]\n```\n\n## EXEMPLOS DE TÍTULOS DINÂMICOS BEM APLICADOS\n\n✅ CORRETO:\n- 📊 MINERALS TRADING // Greve em Port Hedland Reduz Oferta\n- 📊 MINERALS TRADING // Futuros DCE Sobem 3.5%\n- 📊 MINERALS TRADING // China Corta Produção de Aço\n- 📊 MINERALS TRADING // Spreads Janeiro Ampliam para $8\n\n❌ EVITAR:\n- 📊 MINERALS TRADING // IO MARKET (genérico demais)\n- 📊 MINERALS TRADING // Atualização do Mercado (não específico)\n- 📊 MINERALS TRADING // Notícias de Hoje (sem valor informativo)\n\n## PROCESSO DE DECISÃO DO TÍTULO FINAL\n\n1. **Pegue o título sugerido pelo Writer**\n2. **Considere a validação/sugestão do Critique**\n3. **Se necessário, refine para máxima clareza**\n4. **Confirme que comunica a essência em <50 caracteres**\n5. **Implemente no template escolhido**\n\nLEMBRE-SE: O título é a primeira coisa que o trader vê no WhatsApp. Deve permitir decisão instantânea de \"preciso ler isso agora?\" \n```\n\n## Exemplo Prático de Como Funcionará\n\nDeixe-me mostrar como isso fluiria com uma notícia real do seu arquivo:\n\n**Input Original**: \"SGX iron ore futures climbed 2.3% amid supply concerns...\"\n\n**Writer Output**:\n```\n[CLASSIFICAÇÃO: FLASH PREÇOS]\n[ELEMENTOS PRESENTES: preço futuro, variação percentual, driver de mercado]\n[IMPACTO PRINCIPAL: Alta nos futuros por preocupações com oferta]\n[TÍTULO SUGERIDO: SGX Sobe 2.3% com Temores de Oferta]\n```\n\n**Critique Feedback**:\n```\n✅ Título efetivo? SIM - Comunica movimento, magnitude e causa\n(ou poderia sugerir: \"Futuros SGX Avançam 2.3%\" se preferir mais conciso)\n```\n\n**Curator Final Output**:\n```\n📊 MINERALS TRADING // SGX Sobe 2.3% com Temores de Oferta\n\nContratos futuros SGX: US$ 105,50/t (**+2,3%**)\nDriver: Preocupações com interrupções de fornecimento\n\nMercado reagiu a sinais de possível escassez no curto prazo.\n## REGRAS DE FORMATAÇÃO INTELIGENTE\n\n## HIERARQUIA VISUAL COMPLETA\n- CAPS: Somente para alertas urgentes ou nomes de eventos\n- Linhas divisórias: Apenas entre seções principais em mensagens longas\n\nPara máxima clareza, use esta hierarquia:\n1. **Título principal**: 📊 MINERALS TRADING // [Título Dinâmico]\n2. **Seções principais**: ### NOME DA SEÇÃO\n3. **Subpontos**: - [bullet point com hífen]\n4. **Destaques numéricos**: Use **negrito** quando apropriado\n5. **Alertas críticos**: ⚠️ seguido de CAPS\n\nEssa estrutura cria um fluxo de leitura natural e permite que traders identifiquem instantaneamente as informações que precisam.\n\n### Adaptação por Comprimento\n**Mensagem Curta** (<8 linhas):\n- Sem divisórias\n- Formato contínuo\n- 1-2 parágrafos máximo\n\n**Mensagem Média** (8-15 linhas):\n- Uma divisória após cabeçalho\n- 2-3 seções principais\n- Bullets para listas\n\n**Mensagem Longa** (>15 linhas):\n- Estrutura completa com divisórias\n- Múltiplas seções organizadas\n- Uso criterioso de bullets e destaques\n\n### Otimização Mobile\n- Máximo 50-60 caracteres por linha\n- Parágrafos de 2-4 linhas\n- Espaçamento respirável entre seções\n- Informação crítica nas primeiras 3 linhas\n\n## PROCESSO DE CURADORIA FINAL\n\n1. **Incorpore o feedback do Critique**\n   - Implemente TODAS as correções obrigatórias\n   - Adicione melhorias importantes se melhorarem clareza\n   - Considere otimizações se não comprometerem concisão\n\n2. **Escolha o template baseado em**:\n   - Classificação do Writer\n   - Recomendação do Critique  \n   - Volume e tipo de informação disponível\n\n3. **Ajuste fino para mobile**:\n   - Teste mental: \"Consigo ler isso em 15 segundos?\"\n   - Informação crítica está immediately visible?\n   - Há excesso de formatação atrapalhando a leitura?\n\n4. **Validação final**:\n   - [ ] Todos os números estão corretos e destacados?\n   - [ ] A mensagem responde \"O que fazer agora?\"\n   - [ ] Formato está adequado ao conteúdo?\n   - [ ] Linguagem está profissional mas acessível?\n\n## CASOS ESPECIAIS\n\n**Quando NÃO há data especificada**:\nUse apenas \"MINERALS TRADING / [TIPO]\" sem mencionar data\n\n**Quando há MÚLTIPLOS eventos**:\nPriorize por impacto em preço, não por ordem cronológica\n\n**Quando informação é PRELIMINAR**:\nAdicione \"PRELIMINAR:\" antes de dados não confirmados\n\n**Quando há CONFLITO de informações**:\nApresente ambas com fontes: \"Segundo X... / Por outro lado, Y reporta...\"\n\n## REGRA DE SILÊNCIO PROFISSIONAL\n\nVocê é como um formatador invisível - seu trabalho deve falar por si só, sem necessidade de explicações. Considere que:\n\n1. **Sua análise é interna**: Todo o processo de decisão sobre formato, correções aplicadas e escolhas feitas deve permanecer em seu processo mental, NUNCA no output.\n\n2. **Output é produto final**: Entregue apenas o produto final pronto, como um chef que serve o prato sem explicar a receita.\n\n3. **Sem metacomunicação**: Não comente sobre:\n   - O que você fez\n   - Por que escolheu determinado formato\n   - Como organizou a informação\n   - Que correções aplicou\n   - Como a mensagem ficou\n\n4. **Teste de validação**: Se seu output contém QUALQUER texto além da mensagem formatada entre as crases, você falhou.\n\n## INSTRUÇÕES CRÍTICAS DE OUTPUT\n\n**REGRA ABSOLUTA**: Seu output deve conter EXCLUSIVAMENTE a mensagem formatada para WhatsApp.\n\n**PROIBIDO NO OUTPUT**:\n- Comentários sobre o formato escolhido\n- Explicações sobre suas decisões\n- Justificativas sobre a estrutura\n- Análises sobre a qualidade da mensagem\n- Qualquer texto antes ou depois da mensagem\n- Frases como \"Este formato...\", \"Implementei...\", \"A mensagem está...\"\n\n**FORMATO DO OUTPUT**:\nVocê deve produzir APENAS:\n1. Três crases de abertura ```\n2. A mensagem completa formatada\n3. Três crases de fechamento ```\n4. NADA MAIS\n\n**EXEMPLO DE OUTPUT CORRETO**:\n```\n```\n📊 MINERALS TRADING // [Título] // [Data]\n─────────────────\n[Conteúdo da mensagem]\n```\n```\n\n**EXEMPLO DE OUTPUT INCORRETO** (NUNCA FAÇA):\n```\n```\n📊 MINERALS TRADING // [Título] // [Data]\n─────────────────\n[Conteúdo da mensagem]\n```\nEste formato apresenta as informações de forma clara... [ERRADO - comentário desnecessário]\n```\n\nOUTPUT FINAL:\n[Produza APENAS a mensagem formatada, sem qualquer comentário adicional]\n\n---\nINPUTS PARA PROCESSAR:\n[Os inputs virão aqui]\n\n---\nINPUTS PARA PROCESSAR:\n\nTEXTO DO WRITER:\n[Virá o output processado do Writer]\n\nFEEDBACK DO CRITIQUE:\n[Virá a análise crítica do Critique]\n\nTEXTO ORIGINAL"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        800,
+        -768
+      ],
+      "id": "ff8887fc-258b-4fe8-af75-42b45c070d93",
+      "name": "Curator"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mineralstrading.uazapi.com/send/text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "=e6591b90-1ff0-4e57-ac80-9074770351fa"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $json['Evolution-api'] }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.output }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2032,
+        -864
+      ],
+      "id": "0c6a6f5a-38e4-4687-882d-ba74a148fc3c",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -224,
+        -752
+      ],
+      "id": "fadfcc36-77c2-46bf-b0a5-fbb87f591876",
+      "name": "Telegram Trigger",
+      "webhookId": "04578e6d-67c7-4df1-9fdf-55e5eb5a38cb",
+      "credentials": {
+        "telegramApi": {
+          "id": "pumK1NXvGSuQpClj",
+          "name": "Bot noticias telegram"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Anthropic Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Critique",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Curator",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Writer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Think1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Critique",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Curator",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Writer",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get WhatsApp Contacts": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Válidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Válidos": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Store Template": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait3": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing1": {
+      "main": [
+        [
+          {
+            "node": "Get WhatsApp Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Writer": {
+      "main": [
+        [
+          {
+            "node": "Critique",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Critique": {
+      "main": [
+        [
+          {
+            "node": "Curator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Curator": {
+      "main": [
+        [
+          {
+            "node": "Store Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Wait3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Writer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e6db4547-857c-48f4-99f0-845550aad346",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3ddfe059a73966551adef0c3115547780518822b2c26e44ce57a0aa0c6ec2099"
+  },
+  "id": "Krk8H4HaVVuPjZAE",
+  "tags": []
+}

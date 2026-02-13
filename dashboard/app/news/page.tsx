@@ -1,16 +1,12 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, Check, X, FileText, AlertCircle, RefreshCw } from "lucide-react";
+import { Loader2, Check, X, FileText, RefreshCw } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import useSWR from "swr";
-// import { toast } from "sonner";
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
@@ -29,22 +25,25 @@ export default function NewsReviewPage() {
     const [editText, setEditText] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // If no drafts
     if (!data?.drafts?.length) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] text-zinc-400">
-                <FileText className="w-16 h-16 mb-4 opacity-20" />
-                <h2 className="text-xl font-medium mb-2">Nenhum Rascunho Pendente</h2>
-                <p className="text-sm">O robô ainda não encontrou novas notícias para revisão.</p>
-                <Button variant="outline" className="mt-6" onClick={() => mutate()}>
-                    <RefreshCw className="w-4 h-4 mr-2" /> Atualizar
-                </Button>
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-[#555]">
+                <FileText className="w-12 h-12 mb-4 text-[#222]" />
+                <h2 className="text-sm font-bold uppercase tracking-wider mb-1 text-[#444]">NO PENDING DRAFTS</h2>
+                <p className="text-[10px] uppercase tracking-wider text-[#333]">Waiting for new articles...</p>
+                <button
+                    onClick={() => mutate()}
+                    className="mt-6 text-[10px] text-[#00FF41]/60 hover:text-[#00FF41] uppercase tracking-wider border border-[#00FF41]/20 px-4 py-2 transition-colors"
+                >
+                    <RefreshCw className="w-3 h-3 inline mr-2" />
+                    REFRESH
+                </button>
             </div>
         );
     }
 
     const handleAction = async (draftId: string, action: 'approve' | 'reject') => {
-        if (!confirm(action === 'approve' ? "Confirma o envio para TODOS os contatos?" : "Rejeitar rascunho?")) return;
+        if (!confirm(action === 'approve' ? "Confirma envio para TODOS os contatos?" : "Rejeitar rascunho?")) return;
 
         setIsProcessing(true);
         try {
@@ -52,72 +51,71 @@ export default function NewsReviewPage() {
 
             const res = await fetch("/api/news", {
                 method: "POST",
-                body: JSON.stringify({
-                    action,
-                    draftId,
-                    text: textToSend
-                }),
+                body: JSON.stringify({ action, draftId, text: textToSend }),
                 headers: { "Content-Type": "application/json" }
             });
 
-            if (!res.ok) throw new Error("Falha na operação");
+            if (!res.ok) throw new Error("Operation failed");
 
-            mutate(); // Reload list
+            mutate();
             setEditingId(null);
-            alert(action === 'approve' ? "Mensagem enviada com sucesso! 🚀" : "Rascunho rejeitado.");
+            alert(action === 'approve' ? "Mensagem enviada! 🚀" : "Rascunho rejeitado.");
 
         } catch (e) {
-            alert("Erro ao processar: " + String(e));
+            alert("Error: " + String(e));
         } finally {
             setIsProcessing(false);
         }
     };
 
     return (
-        <div className="p-6 max-w-4xl mx-auto space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2">
-                    📰 Revisão de Notícias
-                    <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-400">
-                        {data.drafts.length} Pendentes
-                    </Badge>
-                </h1>
+        <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-6 bg-black min-h-screen">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <p className="text-[10px] text-[#00FF41] uppercase tracking-[0.3em] mb-1">/ NEWS REVIEW</p>
+                    <h1 className="text-xl font-bold text-white uppercase tracking-tight flex items-center gap-3">
+                        DRAFT APPROVAL
+                        <span className="text-[10px] text-[#FFD700] border border-[#FFD700]/30 px-2 py-0.5 font-bold">
+                            {data.drafts.length} PENDING
+                        </span>
+                    </h1>
+                </div>
             </div>
 
-            <div className="grid gap-6">
+            <div className="space-y-4">
                 {data.drafts.map((draft: Draft) => (
-                    <Card key={draft.id} className="bg-zinc-900 border-zinc-800">
-                        <CardHeader>
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <CardTitle className="text-lg text-zinc-200">
-                                        Rationale ({draft.source_date})
-                                    </CardTitle>
-                                    <div className="text-sm text-zinc-500 mt-1 flex gap-2">
-                                        <span>{draft.original_count} artigos originais</span>
-                                        <span>•</span>
-                                        <span>Criado {formatDistanceToNow(new Date(draft.created_at), { locale: ptBR, addSuffix: true })}</span>
-                                    </div>
+                    <div key={draft.id} className="border border-[#1a1a1a] bg-[#0a0a0a]">
+                        {/* Draft Header */}
+                        <div className="px-4 py-3 border-b border-[#1a1a1a] flex items-center justify-between">
+                            <div>
+                                <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                                    RATIONALE // {draft.source_date}
+                                </h3>
+                                <div className="text-[9px] text-[#444] mt-0.5 flex gap-3 uppercase">
+                                    <span>{draft.original_count} ARTICLES</span>
+                                    <span>•</span>
+                                    <span>{formatDistanceToNow(new Date(draft.created_at), { locale: ptBR, addSuffix: true })}</span>
                                 </div>
                             </div>
-                        </CardHeader>
+                        </div>
 
-                        <CardContent className="space-y-4">
-                            <div className="bg-zinc-950 p-4 rounded-md border border-zinc-800">
+                        {/* Content */}
+                        <div className="p-4">
+                            <div className="border border-[#1a1a1a] bg-[#050505] p-3">
                                 {editingId === draft.id ? (
-                                    <Textarea
+                                    <textarea
                                         value={editText}
-                                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditText(e.target.value)}
-                                        className="min-h-[300px] font-mono text-xs bg-zinc-900 border-none focus-visible:ring-1"
+                                        onChange={(e) => setEditText(e.target.value)}
+                                        className="w-full min-h-[300px] font-mono text-[11px] bg-transparent text-[#00FF41]/80 border-none outline-none resize-y"
                                     />
                                 ) : (
                                     <pre
-                                        className="text-xs text-zinc-300 whitespace-pre-wrap font-mono cursor-pointer hover:bg-zinc-900/50 p-2 rounded transition-colors"
+                                        className="text-[11px] text-[#ccc] whitespace-pre-wrap font-mono cursor-pointer hover:bg-[#0a0a0a] p-2 transition-colors"
                                         onClick={() => {
                                             setEditingId(draft.id);
                                             setEditText(draft.ai_text);
                                         }}
-                                        title="Clique para editar"
+                                        title="Click to edit"
                                     >
                                         {draft.ai_text}
                                     </pre>
@@ -125,48 +123,48 @@ export default function NewsReviewPage() {
                             </div>
 
                             {editingId !== draft.id && (
-                                <div className="text-xs text-zinc-500 italic">
-                                    * Clique no texto acima para editar antes de aprovar.
-                                </div>
+                                <p className="text-[9px] text-[#333] mt-2 uppercase tracking-wider">
+                                    * CLICK TEXT TO EDIT BEFORE APPROVING
+                                </p>
                             )}
-                        </CardContent>
+                        </div>
 
-                        <CardFooter className="flex justify-between pt-0 pb-6 px-6">
-                            <Button
-                                variant="ghost"
-                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                        {/* Actions */}
+                        <div className="px-4 py-3 border-t border-[#1a1a1a] flex items-center justify-between">
+                            <button
+                                className="text-[10px] text-[#ff3333]/60 hover:text-[#ff3333] uppercase tracking-wider transition-colors disabled:opacity-50"
                                 onClick={() => handleAction(draft.id, 'reject')}
                                 disabled={isProcessing}
                             >
-                                <X className="w-4 h-4 mr-2" /> Rejeitar
-                            </Button>
+                                [REJECT]
+                            </button>
 
                             <div className="flex gap-2">
-                                {editingId === draft.id ? (
-                                    <Button
-                                        variant="secondary"
+                                {editingId === draft.id && (
+                                    <button
+                                        className="text-[10px] text-[#555] hover:text-white uppercase tracking-wider transition-colors"
                                         onClick={() => setEditingId(null)}
                                         disabled={isProcessing}
                                     >
-                                        Cancelar Edição
-                                    </Button>
-                                ) : null}
-
-                                <Button
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                        [CANCEL]
+                                    </button>
+                                )}
+                                <button
+                                    className="text-[10px] text-[#00FF41] border border-[#00FF41]/30 px-3 py-1.5 uppercase tracking-wider font-bold
+                                      hover:bg-[#00FF41]/10 transition-all disabled:opacity-50"
                                     onClick={() => handleAction(draft.id, 'approve')}
                                     disabled={isProcessing}
                                 >
                                     {isProcessing ? (
-                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                        <Loader2 className="w-3 h-3 animate-spin inline mr-1" />
                                     ) : (
-                                        <Check className="w-4 h-4 mr-2" />
+                                        <Check className="w-3 h-3 inline mr-1" />
                                     )}
-                                    {editingId === draft.id ? "Salvar e Enviar" : "Aprovar e Enviar"}
-                                </Button>
+                                    {editingId === draft.id ? "SAVE & SEND" : "APPROVE & SEND"}
+                                </button>
                             </div>
-                        </CardFooter>
-                    </Card>
+                        </div>
+                    </div>
                 ))}
             </div>
         </div>

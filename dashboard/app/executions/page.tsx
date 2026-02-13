@@ -1,9 +1,6 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, ExternalLink, GitCommit, Calendar, Clock, PlayCircle, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
+import { Loader2, ExternalLink, GitCommit, Calendar, CheckCircle2, XCircle, AlertCircle, PlayCircle } from "lucide-react";
 import useSWR from "swr";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -13,108 +10,131 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 export default function ExecutionsPage() {
     const { data: runs, error, isLoading } = useSWR("/api/workflows", fetcher, { refreshInterval: 10000 });
 
-    const getStatusIcon = (status: string, conclusion: string) => {
-        if (status === "queued" || status === "in_progress") return <Loader2 className="h-4 w-4 text-blue-400 animate-spin" />;
-        if (conclusion === "success") return <CheckCircle2 className="h-4 w-4 text-green-400" />;
-        if (conclusion === "failure") return <XCircle className="h-4 w-4 text-red-400" />;
-        return <AlertCircle className="h-4 w-4 text-gray-400" />;
+    const getStatusColor = (status: string, conclusion: string) => {
+        if (status === "queued" || status === "in_progress") return "text-[#FFD700]";
+        if (conclusion === "success") return "text-[#00FF41]";
+        if (conclusion === "failure") return "text-[#ff3333]";
+        return "text-[#555]";
     };
 
-    const getEventBadge = (event: string) => {
+    const getStatusDot = (status: string, conclusion: string) => {
+        if (status === "queued" || status === "in_progress") return "bg-[#FFD700]";
+        if (conclusion === "success") return "bg-[#00FF41]";
+        if (conclusion === "failure") return "bg-[#ff3333]";
+        return "bg-[#555]";
+    };
+
+    const getEventLabel = (event: string) => {
         switch (event) {
-            case 'schedule': return <Badge variant="outline" className="border-blue-500 text-blue-400">Schedule</Badge>;
-            case 'workflow_dispatch': return <Badge variant="outline" className="border-purple-500 text-purple-400">Manual</Badge>;
-            case 'push': return <Badge variant="outline" className="border-yellow-500 text-yellow-400">Push</Badge>;
-            default: return <Badge variant="outline">{event}</Badge>;
+            case 'schedule': return { text: 'SCHEDULE', color: 'text-[#00bfff] border-[#00bfff]/30' };
+            case 'workflow_dispatch': return { text: 'MANUAL', color: 'text-[#ff00ff] border-[#ff00ff]/30' };
+            case 'push': return { text: 'PUSH', color: 'text-[#FFD700] border-[#FFD700]/30' };
+            default: return { text: event.toUpperCase(), color: 'text-[#555] border-[#555]/30' };
         }
-    }
+    };
 
     return (
-        <div className="p-8 space-y-8 bg-background text-foreground min-h-screen">
+        <div className="p-4 md:p-6 space-y-6 bg-black text-[#e0e0e0] min-h-screen">
             {/* Header */}
             <div>
-                <h1 className="text-3xl font-bold tracking-tight text-white/90">Histórico de Execuções</h1>
-                <p className="text-muted-foreground mt-1">Log detalhado de todas as automações do sistema.</p>
+                <p className="text-[10px] text-[#00FF41] uppercase tracking-[0.3em] mb-1">/ EXECUTIONS</p>
+                <h1 className="text-xl md:text-2xl font-bold uppercase tracking-tight text-white">
+                    EXECUTION HISTORY
+                </h1>
+                <p className="text-[10px] text-[#555] mt-1 uppercase">FULL LOG OF ALL AUTOMATION RUNS</p>
             </div>
 
-            {/* Main Content */}
-            <Card className="bg-card border-border">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <PlayCircle className="h-5 w-5 text-primary" />
-                        Workflow Runs
-                    </CardTitle>
-                    <CardDescription>
-                        Exibindo as últimas 30 execuções do GitHub Actions.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {isLoading ? (
-                        <div className="flex items-center justify-center py-20 text-muted-foreground">
-                            <Loader2 className="h-8 w-8 animate-spin" />
+            {/* Table */}
+            <div className="border border-[#1a1a1a] bg-[#0a0a0a] overflow-hidden">
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-20">
+                        <Loader2 className="h-6 w-6 animate-spin text-[#00FF41]" />
+                    </div>
+                ) : error ? (
+                    <div className="flex items-center justify-center py-20 text-[#ff3333] text-xs uppercase">
+                        ERROR: {error.message || "CONNECTION FAILED"}
+                    </div>
+                ) : (
+                    <>
+                        {/* Desktop Table */}
+                        <div className="hidden md:block">
+                            <div className="grid grid-cols-7 gap-2 px-4 py-2 text-[9px] font-medium text-[#555] uppercase tracking-wider border-b border-[#1a1a1a] bg-[#050505]">
+                                <div>RUN #</div>
+                                <div>STATUS</div>
+                                <div>TYPE</div>
+                                <div className="col-span-2">COMMIT / MESSAGE</div>
+                                <div>TIMESTAMP</div>
+                                <div className="text-right">LINK</div>
+                            </div>
+                            {runs?.map((run: any) => {
+                                const evt = getEventLabel(run.event);
+                                return (
+                                    <div key={run.id} className="grid grid-cols-7 gap-2 px-4 py-2.5 text-xs items-center hover:bg-[#00FF41]/5 transition-colors border-b border-[#0a0a0a] last:border-0">
+                                        <div className="font-mono text-[#555]">#{run.run_number}</div>
+                                        <div>
+                                            <span className={`inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider ${getStatusColor(run.status, run.conclusion)}`}>
+                                                <span className={`inline-block w-1.5 h-1.5 ${getStatusDot(run.status, run.conclusion)}`}></span>
+                                                {run.conclusion || run.status}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <span className={`text-[9px] border px-1.5 py-0.5 uppercase tracking-wider ${evt.color}`}>
+                                                {evt.text}
+                                            </span>
+                                        </div>
+                                        <div className="col-span-2 truncate">
+                                            <span className="text-white/80 text-[11px]">{run.commit?.message || run.name}</span>
+                                            {run.commit?.sha && (
+                                                <span className="text-[#333] ml-2 text-[9px] font-mono">{run.commit.sha.substring(0, 7)}</span>
+                                            )}
+                                        </div>
+                                        <div className="text-[#555] text-[10px]">
+                                            {format(new Date(run.created_at), "dd/MM HH:mm", { locale: ptBR })}
+                                        </div>
+                                        <div className="text-right">
+                                            <a href={run.html_url} target="_blank" rel="noopener noreferrer"
+                                                className="text-[#00FF41]/50 hover:text-[#00FF41] text-[9px] uppercase tracking-wider transition-colors">
+                                                [OPEN]
+                                            </a>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
-                    ) : error ? (
-                        <div className="flex items-center justify-center py-20 text-red-400">
-                            Erro ao carregar dados: {error.message || "Verifique a conexão"}
-                        </div>
-                    ) : (
-                        <div className="rounded-md border border-border">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow className="border-border hover:bg-muted/50">
-                                        <TableHead className="w-[100px]">Run #</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead>Tipo</TableHead>
-                                        <TableHead>Commit / Mensagem</TableHead>
-                                        <TableHead>Duração</TableHead>
-                                        <TableHead>Data</TableHead>
-                                        <TableHead className="text-right">Link</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {runs?.map((run: any) => (
-                                        <TableRow key={run.id} className="border-border hover:bg-muted/50">
-                                            <TableCell className="font-mono text-muted-foreground">#{run.run_number}</TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center gap-2 text-sm">
-                                                    {getStatusIcon(run.status, run.conclusion)}
-                                                    <span className="capitalize">{run.conclusion || run.status}</span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>{getEventBadge(run.event)}</TableCell>
-                                            <TableCell>
-                                                <div className="flex flex-col gap-1 max-w-[300px]">
-                                                    <span className="truncate font-medium text-white/80">{run.commit?.message || run.name}</span>
-                                                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                                        <GitCommit className="h-3 w-3" />
-                                                        <span className="font-mono">{run.commit?.sha?.substring(0, 7)}</span>
-                                                        {run.commit?.author && <span>by {run.commit.author}</span>}
-                                                    </div>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="font-mono text-sm">
-                                                {run.duration ? `${run.duration}s` : "-"}
-                                            </TableCell>
-                                            <TableCell className="text-muted-foreground text-sm">
-                                                <div className="flex items-center gap-1">
-                                                    <Calendar className="h-3 w-3" />
-                                                    {format(new Date(run.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <a href={run.html_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:text-primary/80 transition-colors text-sm font-medium">
-                                                    Logs <ExternalLink className="h-3 w-3" />
-                                                </a>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
 
+                        {/* Mobile Table */}
+                        <div className="md:hidden">
+                            <div className="grid grid-cols-3 gap-2 px-3 py-2 text-[9px] font-medium text-[#555] uppercase tracking-wider border-b border-[#1a1a1a] bg-[#050505]">
+                                <div>RUN</div>
+                                <div>STATUS</div>
+                                <div className="text-right">LINK</div>
+                            </div>
+                            {runs?.map((run: any) => (
+                                <div key={run.id} className="grid grid-cols-3 gap-2 px-3 py-2 text-[10px] items-center border-b border-[#0a0a0a] last:border-0">
+                                    <div className="truncate">
+                                        <div className="text-white text-[10px] font-medium truncate">{run.name}</div>
+                                        <div className="text-[#333] text-[8px]">
+                                            {format(new Date(run.created_at), "dd/MM HH:mm")}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className={`inline-flex items-center gap-1 text-[9px] uppercase ${getStatusColor(run.status, run.conclusion)}`}>
+                                            <span className={`inline-block w-1 h-1 ${getStatusDot(run.status, run.conclusion)}`}></span>
+                                            {run.conclusion || run.status}
+                                        </span>
+                                    </div>
+                                    <div className="text-right">
+                                        <a href={run.html_url} target="_blank" rel="noopener noreferrer"
+                                            className="text-[#00FF41]/50 text-[9px] uppercase">
+                                            [→]
+                                        </a>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
+            </div>
         </div>
     );
 }

@@ -2,22 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "framer-motion";
 import {
     LayoutDashboard,
     Activity,
     Users,
-    Zap,
     Boxes,
     Newspaper
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-} from "@/components/ui/tooltip"
 
 interface NavItem {
     label: string;
@@ -26,11 +18,11 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-    { label: "Dashboard", icon: LayoutDashboard, href: "/" },
-    { label: "Workflows", icon: Boxes, href: "/workflows" },
-    { label: "News", icon: Newspaper, href: "/news" },
-    { label: "Executions", icon: Activity, href: "/executions" },
-    { label: "Contacts", icon: Users, href: "/contacts" },
+    { label: "SYS", icon: LayoutDashboard, href: "/" },
+    { label: "WF", icon: Boxes, href: "/workflows" },
+    { label: "NEWS", icon: Newspaper, href: "/news" },
+    { label: "EXEC", icon: Activity, href: "/executions" },
+    { label: "USERS", icon: Users, href: "/contacts" },
 ];
 
 export function SideNav() {
@@ -38,51 +30,14 @@ export function SideNav() {
 
     return (
         <>
-            {/* Desktop: Left sidebar */}
-            <div className="hidden md:flex fixed left-0 top-0 z-40 h-screen w-16 border-r border-sidebar-border bg-sidebar flex-col items-center py-6">
-                <div className="mb-8 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/20 text-primary ring-1 ring-primary/50 shadow-[0_0_15px_-3px_var(--primary)]">
-                    <Zap className="h-6 w-6" />
+            {/* Desktop: Left sidebar — terminal style */}
+            <div className="hidden md:flex fixed left-0 top-0 z-40 h-screen w-16 border-r border-[#00FF41]/20 bg-black flex-col items-center py-4">
+                {/* Brand */}
+                <div className="mb-6 flex h-10 w-10 items-center justify-center border border-[#00FF41]/40 text-[#00FF41] text-xs font-bold">
+                    MT
                 </div>
 
-                <nav className="flex-1 flex flex-col gap-4 w-full px-2">
-                    <TooltipProvider delayDuration={0}>
-                        {navItems.map((item) => {
-                            const isActive = pathname === item.href;
-                            return (
-                                <Tooltip key={item.href}>
-                                    <TooltipTrigger asChild>
-                                        <Link
-                                            href={item.href}
-                                            className={cn(
-                                                "relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-300 group mx-auto",
-                                                isActive
-                                                    ? "bg-sidebar-accent text-primary shadow-[0_0_10px_-4px_var(--primary)]"
-                                                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
-                                            )}
-                                        >
-                                            {isActive && (
-                                                <motion.div
-                                                    layoutId="activeNav"
-                                                    className="absolute inset-0 rounded-lg bg-primary/10"
-                                                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                                                />
-                                            )}
-                                            <item.icon className="h-5 w-5" />
-                                        </Link>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="right" className="bg-popover text-popover-foreground border-border">
-                                        {item.label}
-                                    </TooltipContent>
-                                </Tooltip>
-                            );
-                        })}
-                    </TooltipProvider>
-                </nav>
-            </div>
-
-            {/* Mobile: Bottom navigation bar */}
-            <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-sidebar-border bg-sidebar/95 backdrop-blur-lg safe-area-bottom">
-                <nav className="flex items-center justify-around px-2 py-2">
+                <nav className="flex-1 flex flex-col gap-1 w-full px-2">
                     {navItems.map((item) => {
                         const isActive = pathname === item.href;
                         return (
@@ -90,21 +45,46 @@ export function SideNav() {
                                 key={item.href}
                                 href={item.href}
                                 className={cn(
-                                    "relative flex flex-col items-center justify-center gap-1 px-3 py-1.5 rounded-lg transition-all duration-200 min-w-[56px]",
+                                    "flex flex-col items-center justify-center gap-0.5 py-2 px-1 transition-all duration-150 text-[10px] font-medium uppercase tracking-wider",
                                     isActive
-                                        ? "text-primary"
-                                        : "text-muted-foreground active:text-foreground"
+                                        ? "bg-[#00FF41]/10 text-[#00FF41] border-l-2 border-[#00FF41]"
+                                        : "text-[#555] hover:text-[#00FF41]/70 hover:bg-[#00FF41]/5 border-l-2 border-transparent"
                                 )}
                             >
-                                {isActive && (
-                                    <motion.div
-                                        layoutId="activeNavMobile"
-                                        className="absolute inset-0 rounded-lg bg-primary/10"
-                                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                                    />
+                                <item.icon className="h-4 w-4" />
+                                <span>{item.label}</span>
+                            </Link>
+                        );
+                    })}
+                </nav>
+
+                {/* Version */}
+                <div className="text-[8px] text-[#333] uppercase tracking-widest">
+                    v2.0
+                </div>
+            </div>
+
+            {/* Mobile: Bottom navigation bar */}
+            <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-[#00FF41]/20 bg-black/95 backdrop-blur-sm safe-area-bottom">
+                <nav className="flex items-center justify-around px-1 py-1.5">
+                    {navItems.map((item) => {
+                        const isActive = pathname === item.href;
+                        return (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                className={cn(
+                                    "flex flex-col items-center justify-center gap-0.5 px-2 py-1 min-w-[48px] transition-all duration-150 text-[9px] font-medium uppercase tracking-wider",
+                                    isActive
+                                        ? "text-[#00FF41]"
+                                        : "text-[#555] active:text-[#00FF41]/70"
                                 )}
-                                <item.icon className="h-5 w-5 relative z-10" />
-                                <span className="text-[10px] font-medium relative z-10">{item.label}</span>
+                            >
+                                <item.icon className="h-4 w-4" />
+                                <span>{item.label}</span>
+                                {isActive && (
+                                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-[2px] bg-[#00FF41]" />
+                                )}
                             </Link>
                         );
                     })}

@@ -480,6 +480,25 @@ Você deve produzir APENAS:
 3. Três crases de fechamento
 4. NADA MAIS
 
+## ESCRITA HUMANIZADA (REGRA CRÍTICA)
+
+Você DEVE escrever como um analista humano real escreveria numa mensagem de WhatsApp para colegas do mercado. NÃO como uma IA.
+
+**PROIBIDO** (linguagem típica de IA):
+- Palavras grandiosas: "dramático", "robusto", "significativo", "notável", "substancial"
+- Construções passivas rebuscadas: "foi observada uma deterioração", "registrou-se um movimento"
+- Frases genéricas vagas: "em meio a um cenário de incertezas", "no atual contexto macroeconômico"
+- Qualificadores excessivos: "extremamente", "absolutamente", "fundamentalmente"
+- Jargão corporativo vazio: "sinergia", "otimização", "alavancagem"
+
+**OBRIGATÓRIO** (linguagem natural de trader):
+- Frases diretas e curtas: "Caiu forte", "Recuperou rápido", "Mercado travado"
+- Linguagem do dia-a-dia do mercado: "Bateu nos US$ 99,50 e voltou", "Liquidez secou", "Spread abriu"
+- Tom de conversa profissional: como se estivesse mandando um resumo rápido num grupo de WhatsApp de traders
+- Opiniões implícitas quando os dados permitem: "Difícil manter posição com essa liquidez" em vez de "A baixa liquidez pode representar desafios para a manutenção de posições"
+
+**TESTE**: Leia cada frase e pergunte: "Um trader de 35 anos mandaria isso no WhatsApp?" Se a resposta for não, reescreva.
+
 OUTPUT FINAL:
 [Produza APENAS a mensagem formatada, sem qualquer comentário adicional]"""
 
@@ -491,6 +510,7 @@ REGRAS:
 3. Mantenha o estilo e tom da mensagem original
 4. Preserve todos os dados numéricos que não foram questionados
 5. Produza APENAS a mensagem ajustada, sem comentários
+6. ESCRITA HUMANIZADA: Escreva como um trader real mandaria no WhatsApp. Evite linguagem de IA ("dramático", "robusto", "significativo", "notável", construções passivas rebuscadas). Use frases diretas e naturais do mercado.
 
 OUTPUT: Apenas a mensagem ajustada, pronta para envio."""
 

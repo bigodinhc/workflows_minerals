@@ -45,6 +45,15 @@ const WORKFLOW_CATALOG = [
         emoji: "📈",
         tags: ["SGX", "LSEG", "Futures", "WhatsApp"],
         dataPoints: ["IO Swap Fev/26", "IO Swap Mar/26", "IO Swap Abr/26", "..."]
+    },
+    {
+        id: "rationale_news.yml",
+        name: "Rationale News (Telegram)",
+        description: "Coleta notícias via Apify, processa com cadeia de 3 agentes IA (Writer → Critique → Curator), envia preview para aprovação no Telegram e dispara via WhatsApp.",
+        schedule: "12:00, 12:30, 13:00 BRT",
+        emoji: "📰",
+        tags: ["Telegram", "Claude AI", "WhatsApp", "Apify"],
+        dataPoints: ["Notícias de Mercado", "Análise IA", "Aprovação Manual", "Disparo WhatsApp"]
     }
 ];
 

@@ -547,11 +547,16 @@ def send_approval_message(chat_id, draft_id, preview_text):
     display_text = preview_text[:3500] if len(preview_text) > 3500 else preview_text
     
     buttons = {
-        "inline_keyboard": [[
-            {"text": "✅ Aprovar e Enviar", "callback_data": f"approve:{draft_id}"},
-            {"text": "✏️ Ajustar", "callback_data": f"adjust:{draft_id}"},
-            {"text": "❌ Rejeitar", "callback_data": f"reject:{draft_id}"}
-        ]]
+        "inline_keyboard": [
+            [
+                {"text": "✅ Aprovar e Enviar", "callback_data": f"approve:{draft_id}"},
+                {"text": "✏️ Ajustar", "callback_data": f"adjust:{draft_id}"},
+            ],
+            [
+                {"text": "🧪 Teste (1 contato)", "callback_data": f"test_approve:{draft_id}"},
+                {"text": "❌ Rejeitar", "callback_data": f"reject:{draft_id}"}
+            ]
+        ]
     }
     
     return send_telegram_message(chat_id, f"📋 *PREVIEW*\n\n{display_text}", buttons)
@@ -778,6 +783,41 @@ def process_approval_async(chat_id, draft_message, uazapi_token=None, uazapi_url
         else:
             send_telegram_message(chat_id, error_text)
 
+def process_test_send_async(chat_id, draft_id, draft_message, uazapi_token=None, uazapi_url=None):
+    """Send message only to the first contact for testing."""
+    try:
+        contacts = get_contacts()
+        if not contacts:
+            send_telegram_message(chat_id, "❌ Nenhum contato encontrado na planilha.")
+            return
+        
+        first_contact = contacts[0]
+        name = first_contact.get("Nome", "Contato 1")
+        phone = first_contact.get("Evolution-api") or first_contact.get("Telefone")
+        if not phone:
+            send_telegram_message(chat_id, "❌ Primeiro contato sem telefone.")
+            return
+        
+        phone = str(phone).replace("whatsapp:", "").strip()
+        
+        if send_whatsapp(phone, draft_message, token=uazapi_token, url=uazapi_url):
+            send_telegram_message(chat_id, 
+                f"🧪 *TESTE OK*\n\n"
+                f"✅ Enviado para: {name} ({phone})\n\n"
+                f"Se ficou bom, clique em ✅ Aprovar para enviar a todos os {len(contacts)} contatos.")
+            # Re-send approval buttons
+            send_approval_message(chat_id, draft_id, draft_message)
+        else:
+            send_telegram_message(chat_id, 
+                f"❌ *TESTE FALHOU*\n\n"
+                f"Falha ao enviar para: {name} ({phone})\n"
+                f"Verifique o token UAZAPI.")
+            
+        logger.info(f"Test send for {draft_id}: {name} ({phone})")
+    except Exception as e:
+        logger.error(f"Test send error: {e}")
+        send_telegram_message(chat_id, f"❌ Erro no teste:\n{str(e)[:500]}")
+
 # ============================================================
 # ROUTES
 # ============================================================
@@ -906,7 +946,7 @@ def handle_callback(callback_query):
     
     logger.info(f"Callback: {callback_data} from chat {chat_id}")
     
-    parts = callback_data.split(":")
+    parts = callback_data.split(":", 1)
     if len(parts) != 2:
         answer_callback(callback_id, "Erro: dados inválidos")
         return jsonify({"ok": True})
@@ -931,6 +971,22 @@ def handle_callback(callback_query):
         thread = threading.Thread(
             target=process_approval_async,
             args=(chat_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
+        )
+        thread.daemon = True
+        thread.start()
+        return jsonify({"ok": True})
+    
+    elif action == "test_approve":
+        draft = DRAFTS.get(draft_id)
+        if not draft:
+            answer_callback(callback_id, "❌ Draft não encontrado")
+            return jsonify({"ok": True})
+        
+        answer_callback(callback_id, "🧪 Enviando teste para 1 contato...")
+        
+        thread = threading.Thread(
+            target=process_test_send_async,
+            args=(chat_id, draft_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
         )
         thread.daemon = True
         thread.start()

@@ -45,11 +45,17 @@ def main():
     logger = WorkflowLogger("RationaleIngestion")
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--target-date", type=str, default="",
+                        help="Data alvo DD/MM/YYYY. Vazio = hoje.")
     args = parser.parse_args()
-    
+
     try:
         # 1. Prepare Date
-        today_br = datetime.now().strftime("%d/%m/%Y")
+        if args.target_date:
+            today_br = args.target_date
+            logger.info(f"Using target date: {today_br}")
+        else:
+            today_br = datetime.now().strftime("%d/%m/%Y")
         logger.info(f"Starting ingestion for date: {today_br}")
         
         # Check if webhook already has a draft (avoid duplicate sends on retry crons)
@@ -72,11 +78,11 @@ def main():
             "username": os.getenv("PLATTS_USERNAME", ""),
             "password": os.getenv("PLATTS_PASSWORD", ""),
             "maxArticles": 5,
-            "collectMarketCommentary": True,
-            # "dateFilter": "specificDate", # Let actor default to Today (server time)
-            # "targetDate": today_br,       # Avoid sending 2026 if real world is 2025
-            "saveScreenshots": True
         }
+
+        if args.target_date:
+            run_input["targetDate"] = args.target_date
+            run_input["dateFormat"] = "BR"
         
         if args.dry_run:
             logger.info("[DRY RUN] Would run Apify with input: " + str(run_input))

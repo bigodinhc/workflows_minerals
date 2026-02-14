@@ -78,6 +78,10 @@ class TelegramClient:
             "inline_keyboard": [
                 [
                     {"text": "✅ Aprovar e Enviar", "callback_data": f"approve:{draft_id}"},
+                    {"text": "🧪 Teste", "callback_data": f"test_approve:{draft_id}"}
+                ],
+                [
+                    {"text": "✏️ Ajustar", "callback_data": f"adjust:{draft_id}"},
                     {"text": "❌ Rejeitar", "callback_data": f"reject:{draft_id}"}
                 ]
             ]

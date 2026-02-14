@@ -14,6 +14,11 @@ on:
         required: false
         type: boolean
         default: false
+      target_date:
+        description: 'Data alvo DD/MM/YYYY (ex: 13/02/2026). Vazio = hoje.'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   scrape-and-process:
@@ -53,8 +58,11 @@ jobs:
           UAZAPI_URL: "https://mineralstrading.uazapi.com"
           
         run: |
+          CMD="python execution/scripts/rationale_ingestion.py"
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
-            python execution/scripts/rationale_ingestion.py --dry-run
-          else
-            python execution/scripts/rationale_ingestion.py
+            CMD="$CMD --dry-run"
           fi
+          if [ -n "${{ github.event.inputs.target_date }}" ]; then
+            CMD="$CMD --target-date ${{ github.event.inputs.target_date }}"
+          fi
+          $CMD

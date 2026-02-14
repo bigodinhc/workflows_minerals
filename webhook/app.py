@@ -567,11 +567,16 @@ def send_approval_message(chat_id, draft_id, preview_text):
     display_text = preview_text[:3500] if len(preview_text) > 3500 else preview_text
     
     buttons = {
-        "inline_keyboard": [[
-            {"text": "✅ Aprovar e Enviar", "callback_data": f"approve:{draft_id}"},
-            {"text": "✏️ Ajustar", "callback_data": f"adjust:{draft_id}"},
-            {"text": "❌ Rejeitar", "callback_data": f"reject:{draft_id}"}
-        ]]
+        "inline_keyboard": [
+            [
+                {"text": "✅ Aprovar e Enviar", "callback_data": f"approve:{draft_id}"},
+                {"text": "🧪 Teste", "callback_data": f"test_approve:{draft_id}"}
+            ],
+            [
+                {"text": "✏️ Ajustar", "callback_data": f"adjust:{draft_id}"},
+                {"text": "❌ Rejeitar", "callback_data": f"reject:{draft_id}"}
+            ]
+        ]
     }
     
     return send_telegram_message(chat_id, f"📋 *PREVIEW*\n\n{display_text}", buttons)

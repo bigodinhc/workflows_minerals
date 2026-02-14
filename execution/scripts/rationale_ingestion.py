@@ -30,7 +30,7 @@ def save_draft(draft):
         with open(DRAFTS_FILE, 'r') as f:
             try:
                 drafts = json.load(f)
-            except:
+            except (json.JSONDecodeError, ValueError):
                 drafts = []
     else:
         drafts = []
@@ -69,8 +69,8 @@ def main():
         logger.info(f"Targeting Apify Actor ID: {ACTOR_ID}")
         
         run_input = {
-            "username": os.getenv("PLATTS_USERNAME", "antonio@mineralstrading.com.br"),
-            "password": os.getenv("PLATTS_PASSWORD", "141204*MtM"), # Should use Env Var ideally
+            "username": os.getenv("PLATTS_USERNAME", ""),
+            "password": os.getenv("PLATTS_PASSWORD", ""),
             "maxArticles": 5,
             "collectMarketCommentary": True,
             # "dateFilter": "specificDate", # Let actor default to Today (server time)

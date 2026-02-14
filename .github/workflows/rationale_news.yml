@@ -35,6 +35,10 @@ jobs:
         env:
           # Apify
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+
+          # Platts
+          PLATTS_USERNAME: ${{ secrets.PLATTS_USERNAME }}
+          PLATTS_PASSWORD: ${{ secrets.PLATTS_PASSWORD }}
           
           # AI
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

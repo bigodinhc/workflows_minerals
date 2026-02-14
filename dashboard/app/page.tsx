@@ -98,8 +98,7 @@ export default function Home() {
               ) : (
                 <Play className="h-3 w-3" />
               )}
-              <span className="hidden sm:inline">{wf.tag}</span>
-              <span className="sm:hidden">{wf.type}</span>
+              {wf.tag}
             </button>
           ))}
         </div>

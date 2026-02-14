@@ -124,9 +124,22 @@ def main():
         if args.dry_run:
             logger.info("[DRY RUN] Would run Apify with input: " + str(run_input))
             items = [{
-                "title": "Test Market News",
-                "fullText": "Iron ore spot prices fell $1.20 to $107.30/dmt CFR China amid weak steel margins. Vale shipped 80Mt in Q4. BHP reported record production at Western Australia operations.",
-                "gridDateTime": today_br
+                "type": "success",
+                "topNews": [{
+                    "title": "Test Market News",
+                    "fullText": "Iron ore spot prices fell $1.20 to $107.30/dmt CFR China amid weak steel margins. Vale shipped 80Mt in Q4. BHP reported record production at Western Australia operations.",
+                    "date": today_br,
+                    "source": "Top News - Ferrous Metals",
+                    "author": "Test Author"
+                }],
+                "allArticles": [{
+                    "title": "Test Market News",
+                    "fullText": "Iron ore spot prices fell $1.20 to $107.30/dmt CFR China amid weak steel margins. Vale shipped 80Mt in Q4. BHP reported record production at Western Australia operations.",
+                    "date": today_br,
+                    "source": "Top News - Ferrous Metals",
+                    "author": "Test Author"
+                }],
+                "summary": {"totalArticles": 1}
             }]
         else:
             logger.info("Running Apify Actor...")
@@ -137,10 +150,13 @@ def main():
             logger.warning("No articles found today.")
             return
 
-        # Dataset may return wrapper object with "articles" array
-        if len(items) == 1 and "articles" in items[0]:
-            logger.info("Detected wrapper object, extracting articles array...")
-            articles = items[0].get("articles", [])
+        # Actor returns wrapper: {type, topNews, allArticles, summary}
+        # Use allArticles (most complete list) with topNews as fallback
+        if len(items) == 1 and isinstance(items[0], dict):
+            wrapper = items[0]
+            articles = wrapper.get("allArticles") or wrapper.get("topNews") or wrapper.get("articles") or []
+            total = wrapper.get("summary", {}).get("totalArticles", len(articles))
+            logger.info(f"Detected wrapper object (type={wrapper.get('type')}), extracted {len(articles)} articles (summary says {total})")
         else:
             articles = items
 
@@ -163,7 +179,7 @@ def main():
 
         # 5. Aggregate Text for AI
         combined_text = "\n\n".join([
-            f"=== ARTICLE {i+1} ===\nTitle: {item.get('title')}\nDate: {item.get('gridDateTime')}\n\n{item.get('fullText', '')}"
+            f"=== ARTICLE {i+1} ===\nTitle: {item.get('title')}\nDate: {item.get('date') or item.get('publishDate') or item.get('gridDateTime', '')}\nSource: {item.get('source', '')}\n\n{item.get('fullText', '')}"
             for i, item in enumerate(new_articles)
         ])
 

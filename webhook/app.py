@@ -33,6 +33,7 @@ SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
 # In-memory state
 DRAFTS = {}         # draft_id → {message, status, original_text, uazapi_token, uazapi_url}
 ADJUST_STATE = {}   # chat_id → {draft_id, awaiting_feedback: True}
+SEEN_ARTICLES = {}  # date_str → set of article titles (for market_news dedup)
 
 # Log config at startup
 logger.info(f"UAZAPI_URL: {UAZAPI_URL}")
@@ -847,6 +848,7 @@ def health():
     return jsonify({
         "status": "ok",
         "drafts_count": len(DRAFTS),
+        "seen_articles_dates": len(SEEN_ARTICLES),
         "uazapi_token_set": bool(UAZAPI_TOKEN),
         "uazapi_url": UAZAPI_URL,
         "anthropic_key_set": bool(ANTHROPIC_API_KEY),
@@ -889,6 +891,45 @@ def store_draft():
     
     logger.info(f"Draft stored: {draft_id} ({len(message)} chars)")
     return jsonify({"success": True, "draft_id": draft_id})
+
+@app.route("/seen-articles", methods=["GET"])
+def get_seen_articles():
+    """Return list of seen article titles for a given date (dedup for market_news)."""
+    date = request.args.get("date", "")
+    if not date:
+        return jsonify({"error": "Missing 'date' query parameter"}), 400
+    titles = list(SEEN_ARTICLES.get(date, set()))
+    return jsonify({"date": date, "titles": titles})
+
+@app.route("/seen-articles", methods=["POST"])
+def store_seen_articles():
+    """Store new article titles and prune entries older than 3 days."""
+    from datetime import datetime, timedelta
+    data = request.json
+    date = data.get("date", "")
+    titles = data.get("titles", [])
+
+    if not date or not titles:
+        return jsonify({"error": "Missing 'date' or 'titles'"}), 400
+
+    if date not in SEEN_ARTICLES:
+        SEEN_ARTICLES[date] = set()
+    SEEN_ARTICLES[date].update(titles)
+
+    # Prune entries older than 3 days
+    try:
+        cutoff = datetime.now() - timedelta(days=3)
+        stale_keys = [
+            k for k in SEEN_ARTICLES
+            if datetime.strptime(k, "%Y-%m-%d") < cutoff
+        ]
+        for k in stale_keys:
+            del SEEN_ARTICLES[k]
+    except ValueError as e:
+        logger.warning(f"Date format mismatch during seen-articles pruning: {e}")
+
+    logger.info(f"Stored {len(titles)} seen articles for {date} (total: {len(SEEN_ARTICLES.get(date, []))})")
+    return jsonify({"success": True, "stored": len(titles)})
 
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():

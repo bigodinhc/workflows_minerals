@@ -1,0 +1,67 @@
+name: "Market News (Telegram)"
+
+on:
+  schedule:
+    - cron: '0 12 * * 1-5'   # 9h BRT
+    - cron: '0 15 * * 1-5'   # 12h BRT
+    - cron: '0 18 * * 1-5'   # 15h BRT
+    - cron: '0 21 * * 1-5'   # 18h BRT
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run (sem envio)'
+        required: false
+        type: boolean
+        default: false
+      target_date:
+        description: 'Data alvo DD/MM/YYYY (ex: 13/02/2026). Vazio = hoje.'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  scrape-and-process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Market News Ingestion
+        env:
+          # Apify
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+
+          # Platts
+          PLATTS_USERNAME: ${{ secrets.PLATTS_USERNAME }}
+          PLATTS_PASSWORD: ${{ secrets.PLATTS_PASSWORD }}
+
+          # AI
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # Telegram
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_WEBHOOK_URL: ${{ vars.TELEGRAM_WEBHOOK_URL }}
+
+          # WhatsApp (passed to webhook for sending)
+          UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
+          UAZAPI_URL: "https://mineralstrading.uazapi.com"
+
+        run: |
+          CMD="python execution/scripts/market_news_ingestion.py"
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            CMD="$CMD --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.target_date }}" ]; then
+            CMD="$CMD --target-date ${{ github.event.inputs.target_date }}"
+          fi
+          $CMD

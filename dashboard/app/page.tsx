@@ -15,7 +15,8 @@ const WORKFLOWS = [
   { id: "morning_check.yml", name: "MORNING CHECK", tag: "PLATTS", type: "Morning" },
   { id: "baltic_ingestion.yml", name: "BALTIC INGESTION", tag: "EMAIL", type: "Mid-Day" },
   { id: "daily_report.yml", name: "DAILY REPORT", tag: "SGX", type: "Afternoon" },
-  { id: "rationale_news.yml", name: "RATIONALE NEWS", tag: "TELEGRAM", type: "On-Demand" }
+  { id: "rationale_news.yml", name: "RATIONALE NEWS", tag: "TELEGRAM", type: "On-Demand" },
+  { id: "market_news.yml", name: "MARKET NEWS", tag: "MARKET", type: "4x Daily" }
 ];
 
 export default function Home() {

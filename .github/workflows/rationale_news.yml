@@ -1,4 +1,4 @@
-name: "Rationale News Ingestion"
+name: "Rationale News (Telegram)"
 
 on:
   schedule:

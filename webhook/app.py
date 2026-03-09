@@ -590,6 +590,7 @@ def get_contacts():
     """Fetch WhatsApp contacts from Google Sheets."""
     import gspread
     from google.oauth2.service_account import Credentials
+    import time
 
     creds_json = json.loads(GOOGLE_CREDENTIALS_JSON)
     creds = Credentials.from_service_account_info(creds_json, scopes=[
@@ -597,7 +598,21 @@ def get_contacts():
     ])
     gc = gspread.authorize(creds)
     sheet = gc.open_by_key(SHEET_ID).sheet1
-    records = sheet.get_all_records()
+    
+    # Retry logic to handle intermittent Google API 500 errors
+    max_retries = 3
+    records = []
+    for attempt in range(max_retries):
+        try:
+            records = sheet.get_all_records()
+            break
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logger.error(f"Failed to fetch contacts after {max_retries} attempts: {e}")
+                raise
+            sleep_time = 2 ** attempt
+            logger.warning(f"Google Sheets API error {e}. Retrying in {sleep_time}s...")
+            time.sleep(sleep_time)
 
     contacts = [r for r in records if r.get("ButtonPayload") == "Big"]
     logger.info(f"Found {len(contacts)} contacts with ButtonPayload='Big'")

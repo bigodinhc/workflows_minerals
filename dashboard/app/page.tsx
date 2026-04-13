@@ -5,13 +5,28 @@ import { Play, CheckCircle2, XCircle, Loader2, FileText, AlertTriangle, ChevronD
 import useSWR from "swr";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DeliveryReportView } from "@/components/delivery/DeliveryReportView";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
+
+function SearchParamsHandler({ onRunId }: { onRunId: (id: number) => void }) {
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const runIdParam = searchParams.get("run_id");
+    if (runIdParam) {
+      const runId = Number(runIdParam);
+      if (!Number.isNaN(runId)) {
+        onRunId(runId);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+  return null;
+}
 
 const WORKFLOWS = [
   { id: "morning_check.yml", name: "MORNING CHECK", tag: "PLATTS", type: "Morning" },
@@ -29,7 +44,6 @@ export default function Home() {
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [deliveryReport, setDeliveryReport] = useState<any | null>(null);
   const [showRawLog, setShowRawLog] = useState(false);
-  const searchParams = useSearchParams();
 
   const handleTrigger = async (workflowId: string) => {
     setTriggeringId(workflowId);
@@ -73,17 +87,6 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    const runIdParam = searchParams.get("run_id");
-    if (runIdParam) {
-      const runId = Number(runIdParam);
-      if (!Number.isNaN(runId)) {
-        handleViewLogs(runId);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
   const lastRun = runs?.[0];
   const isOnline = !error;
   const lastSuccess = runs?.find((r: any) => r.conclusion === "success");
@@ -100,6 +103,9 @@ export default function Home() {
 
   return (
     <div className="p-4 md:p-6 space-y-6 bg-black text-[#e0e0e0] min-h-screen">
+      <Suspense fallback={null}>
+        <SearchParamsHandler onRunId={handleViewLogs} />
+      </Suspense>
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>

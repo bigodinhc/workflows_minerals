@@ -20,6 +20,7 @@ from datetime import datetime
 # Adjust path to allow imports from root
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
+from execution.core.delivery_reporter import DeliveryReporter, Contact
 from execution.core.logger import WorkflowLogger
 from execution.integrations.baltic_client import BalticClient
 from execution.integrations.claude_client import ClaudeClient
@@ -259,34 +260,45 @@ def main():
     else:
         logger.error(f"IronMarket Ingestion Failed: {err}")
             
-    # 5. Send WhatsApp
+    # 5. Send WhatsApp via DeliveryReporter
     message = format_whatsapp_message(data)
-    
+
     if args.dry_run:
         print("\n--- WHATSAPP PREVIEW ---\n")
         print(message)
-    else:
-        contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
-        uazapi = UazapiClient()
-        count = 0
-        
-        for contact in contacts:
-            phone = contact.get('Evolution-api')
-            if not phone: continue
-            phone = str(phone).replace("whatsapp:", "").strip()
-            
-            try:
-                uazapi.send_message(phone, message)
-                count += 1
-            except Exception as e:
-                logger.error(f"Failed send to {phone}: {e}")
-                
-        logger.info(f"Sent to {count} contacts.")
-        
-        # 6. Mark Complete
-        if count > 0:
-            sheets.mark_daily_status(SHEET_ID, today_str, REPORT_TYPE)
-            logger.info("Marked as complete in control sheet.")
+        return
+
+    contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
+    uazapi = UazapiClient()
+
+    def build_contact(c):
+        raw_phone = (
+            c.get('Evolution-api') or c.get('Telefone') or
+            c.get('Phone') or c.get('From')
+        )
+        if not raw_phone:
+            return None
+        phone = str(raw_phone).replace("whatsapp:", "").strip()
+        name = c.get("Nome") or c.get("Name") or "—"
+        return Contact(name=name, phone=phone)
+
+    delivery_contacts = [bc for c in contacts if (bc := build_contact(c))]
+
+    reporter = DeliveryReporter(
+        workflow="baltic",
+        send_fn=uazapi.send_message,
+        gh_run_id=os.getenv("GITHUB_RUN_ID"),
+    )
+    report = reporter.dispatch(delivery_contacts, message)
+    logger.info(
+        f"Baltic broadcast complete. Sent: {report.success_count}, "
+        f"Failed: {report.failure_count}"
+    )
+
+    # 6. Mark Complete
+    if report.success_count > 0:
+        sheets.mark_daily_status(SHEET_ID, today_str, REPORT_TYPE)
+        logger.info("Marked as complete in control sheet.")
 
 if __name__ == "__main__":
     main()

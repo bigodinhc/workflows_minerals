@@ -305,3 +305,43 @@ def test_dispatch_continues_when_telegram_fails(monkeypatch):
     report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
     assert report.total == 1
     assert report.success_count == 1
+
+
+def test_on_progress_called_per_contact():
+    events = []
+
+    def on_progress(processed, total, result):
+        events.append((processed, total, result.contact.name))
+
+    reporter = DeliveryReporter(
+        workflow="test",
+        send_fn=MagicMock(),
+        notify_telegram=False,
+    )
+    reporter.dispatch(
+        [Contact(name=f"U{i}", phone=str(i)) for i in range(3)],
+        message="hi",
+        on_progress=on_progress,
+    )
+    assert len(events) == 3
+    assert events[0] == (1, 3, "U0")
+    assert events[1] == (2, 3, "U1")
+    assert events[2] == (3, 3, "U2")
+
+
+def test_on_progress_exception_does_not_abort():
+    def on_progress(processed, total, result):
+        raise RuntimeError("callback broken")
+
+    reporter = DeliveryReporter(
+        workflow="test",
+        send_fn=MagicMock(),
+        notify_telegram=False,
+    )
+    report = reporter.dispatch(
+        [Contact(name="A", phone="111"), Contact(name="B", phone="222")],
+        message="hi",
+        on_progress=on_progress,
+    )
+    assert report.total == 2
+    assert report.success_count == 2

@@ -248,3 +248,60 @@ def test_telegram_message_home_link_when_no_run_id():
     msg = _format_telegram_message(report, dashboard_base_url="https://dash.com", gh_run_id=None)
     assert "https://dash.com/" in msg
     assert "?run_id=" not in msg
+
+
+def test_dispatch_sends_telegram_when_enabled(monkeypatch):
+    send_calls = []
+
+    class FakeTelegram:
+        def __init__(self):
+            pass
+
+        def send_message(self, text, chat_id=None, **kwargs):
+            send_calls.append({"text": text, "chat_id": chat_id})
+            return 1
+
+    monkeypatch.setattr(
+        "execution.core.delivery_reporter._build_telegram_client",
+        lambda: FakeTelegram(),
+    )
+
+    reporter = DeliveryReporter(
+        workflow="test",
+        send_fn=MagicMock(),
+        notify_telegram=True,
+        telegram_chat_id="123",
+    )
+    reporter.dispatch([Contact(name="A", phone="111")], message="hi")
+    assert len(send_calls) == 1
+    assert "test".upper() in send_calls[0]["text"].upper()
+    assert send_calls[0]["chat_id"] == "123"
+
+
+def test_dispatch_skips_telegram_when_disabled():
+    reporter = DeliveryReporter(
+        workflow="test",
+        send_fn=MagicMock(),
+        notify_telegram=False,
+    )
+    report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
+    assert report.total == 1
+
+
+def test_dispatch_continues_when_telegram_fails(monkeypatch):
+    class BrokenTelegram:
+        def send_message(self, text, chat_id=None, **kwargs):
+            raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(
+        "execution.core.delivery_reporter._build_telegram_client",
+        lambda: BrokenTelegram(),
+    )
+    reporter = DeliveryReporter(
+        workflow="test",
+        send_fn=MagicMock(),
+        notify_telegram=True,
+    )
+    report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
+    assert report.total == 1
+    assert report.success_count == 1

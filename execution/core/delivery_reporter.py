@@ -130,6 +130,12 @@ def _format_telegram_message(
     return "\n".join(lines)
 
 
+def _build_telegram_client():
+    """Factory for TelegramClient. Separate function to allow test monkeypatching."""
+    from execution.integrations.telegram_client import TelegramClient
+    return TelegramClient()
+
+
 class DeliveryReporter:
     """Shared delivery tracker for WhatsApp workflows."""
 
@@ -194,6 +200,8 @@ class DeliveryReporter:
             results=results,
         )
         self._emit_stdout_report(report)
+        if self.notify_telegram:
+            self._send_telegram_summary(report)
         return report
 
     def _emit_stdout_report(self, report: DeliveryReport) -> None:
@@ -223,3 +231,20 @@ class DeliveryReporter:
         print("<<<DELIVERY_REPORT_START>>>")
         print(_json.dumps(payload, indent=2, ensure_ascii=False))
         print("<<<DELIVERY_REPORT_END>>>")
+
+    def _send_telegram_summary(self, report: DeliveryReport) -> None:
+        """Send final delivery summary to Telegram. Never raises."""
+        try:
+            text = _format_telegram_message(
+                report,
+                dashboard_base_url=self.dashboard_base_url,
+                gh_run_id=self.gh_run_id,
+            )
+            client = _build_telegram_client()
+            client.send_message(
+                text=text,
+                chat_id=self.telegram_chat_id,
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            print(f"[WARN] Failed to send Telegram summary: {exc}")

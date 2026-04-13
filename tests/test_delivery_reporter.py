@@ -175,3 +175,76 @@ def test_stdout_json_includes_failures(capsys):
     fail = [r for r in data["results"] if not r["success"]][0]
     assert fail["name"] == "Bad"
     assert "fail me" in fail["error"]
+from execution.core.delivery_reporter import _format_telegram_message
+
+
+def _make_report(workflow, results):
+    from datetime import datetime
+    now = datetime.now().astimezone()
+    return DeliveryReport(
+        workflow=workflow,
+        started_at=now,
+        finished_at=now,
+        results=results,
+    )
+
+
+def test_telegram_message_all_success():
+    c = Contact(name="Ana", phone="111")
+    results = [DeliveryResult(contact=c, success=True, error=None, duration_ms=100)]
+    report = _make_report("morning_check", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+    assert "✅" in msg
+    assert "MORNING CHECK" in msg
+    assert "Total: 1" in msg
+    assert "OK: 1" in msg
+    assert "Falha: 0" in msg
+
+
+def test_telegram_message_with_failures():
+    results = [
+        DeliveryResult(contact=Contact(name="A", phone="111"), success=True, error=None, duration_ms=100),
+        DeliveryResult(contact=Contact(name="Carlos", phone="222"), success=False, error="timeout", duration_ms=30000),
+    ]
+    report = _make_report("test", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+    assert "⚠️" in msg
+    assert "Carlos" in msg
+    assert "222" in msg
+    assert "timeout" in msg
+
+
+def test_telegram_message_total_failure():
+    results = [
+        DeliveryResult(contact=Contact(name=f"U{i}", phone=str(i)), success=False, error="boom", duration_ms=100)
+        for i in range(10)
+    ]
+    report = _make_report("test", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+    assert "🚨" in msg
+    assert "FALHA TOTAL" in msg
+
+
+def test_telegram_message_truncates_long_failure_list():
+    results = [
+        DeliveryResult(contact=Contact(name=f"U{i}", phone=str(i)), success=False, error="boom", duration_ms=100)
+        for i in range(50)
+    ]
+    report = _make_report("test", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+    assert "...e mais 35" in msg
+
+
+def test_telegram_message_includes_run_id_link():
+    results = [DeliveryResult(contact=Contact(name="A", phone="111"), success=True, error=None, duration_ms=100)]
+    report = _make_report("test", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash.com", gh_run_id="999")
+    assert "https://dash.com/?run_id=999" in msg
+
+
+def test_telegram_message_home_link_when_no_run_id():
+    results = [DeliveryResult(contact=Contact(name="A", phone="111"), success=True, error=None, duration_ms=100)]
+    report = _make_report("test", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash.com", gh_run_id=None)
+    assert "https://dash.com/" in msg
+    assert "?run_id=" not in msg

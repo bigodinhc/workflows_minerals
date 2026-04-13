@@ -66,6 +66,70 @@ def _categorize_error(exc: Exception) -> str:
     return str(exc)[:200]
 
 
+_MAX_FAILURES_LISTED = 15
+
+
+def _format_telegram_message(
+    report: DeliveryReport,
+    dashboard_base_url: str,
+    gh_run_id: Optional[str],
+) -> str:
+    """Build Telegram-ready text summary of a DeliveryReport."""
+    failure_pct = (report.failure_count / report.total * 100) if report.total else 0
+
+    if report.failure_count == 0:
+        emoji = "✅"
+        header = f"{emoji} {report.workflow.upper().replace('_', ' ')}"
+    elif failure_pct > 50:
+        emoji = "🚨"
+        header = f"{emoji} {report.workflow.upper().replace('_', ' ')} — FALHA TOTAL"
+    else:
+        emoji = "⚠️"
+        header = f"{emoji} {report.workflow.upper().replace('_', ' ')}"
+
+    duration = report.finished_at - report.started_at
+    minutes = int(duration.total_seconds() // 60)
+    seconds = int(duration.total_seconds() % 60)
+    dur_str = f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
+    when = report.started_at.strftime("%d/%m/%Y %H:%M")
+
+    lines = [header, f"{when} ({dur_str})", ""]
+    lines.append(
+        f"📊 Total: {report.total} | OK: {report.success_count} | "
+        f"Falha: {report.failure_count}"
+    )
+    lines.append("")
+
+    if report.failure_count == 0:
+        lines.append("Todos os contatos receberam.")
+    elif failure_pct > 50 and report.success_count == 0 and report.failure_count <= _MAX_FAILURES_LISTED:
+        lines.append("Todos os envios falharam. Verifique:")
+        lines.append("• Token UAZAPI")
+        lines.append("• Status do servico UazAPI")
+        lines.append("• Logs do GitHub Actions")
+        first_err = report.failures[0].error if report.failures else "unknown"
+        lines.append("")
+        lines.append(f"Primeira falha: {first_err}")
+    else:
+        lines.append("❌ FALHAS:")
+        listed = report.failures[:_MAX_FAILURES_LISTED]
+        for f in listed:
+            lines.append(f"• {f.contact.name} ({f.contact.phone}) — {f.error}")
+        remaining = len(report.failures) - len(listed)
+        if remaining > 0:
+            lines.append(f"...e mais {remaining} falhas")
+
+    link = (
+        f"{dashboard_base_url}/?run_id={gh_run_id}"
+        if gh_run_id
+        else f"{dashboard_base_url}/"
+    )
+    lines.append("")
+    lines.append(f"[Ver no dashboard]({link})")
+
+    return "\n".join(lines)
+
+
 class DeliveryReporter:
     """Shared delivery tracker for WhatsApp workflows."""
 

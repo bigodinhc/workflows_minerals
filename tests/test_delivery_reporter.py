@@ -113,3 +113,65 @@ def test_dispatch_tracks_duration():
     report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
     assert report.results[0].duration_ms >= 0
     assert (report.finished_at - report.started_at).total_seconds() >= 0
+
+
+import json
+import re
+
+
+def test_dispatch_emits_json_block_on_stdout(capsys):
+    send_fn = MagicMock()
+    reporter = DeliveryReporter(workflow="test_wf", send_fn=send_fn, notify_telegram=False)
+    reporter.dispatch([Contact(name="Ana", phone="5511999")], message="hi")
+    captured = capsys.readouterr().out
+    assert "<<<DELIVERY_REPORT_START>>>" in captured
+    assert "<<<DELIVERY_REPORT_END>>>" in captured
+
+
+def test_stdout_json_is_parseable(capsys):
+    send_fn = MagicMock()
+    reporter = DeliveryReporter(workflow="test_wf", send_fn=send_fn, notify_telegram=False)
+    reporter.dispatch([
+        Contact(name="Ana", phone="5511999"),
+        Contact(name="Bob", phone="5511888"),
+    ], message="hi")
+    captured = capsys.readouterr().out
+    match = re.search(
+        r"<<<DELIVERY_REPORT_START>>>\s*(\{.*?\})\s*<<<DELIVERY_REPORT_END>>>",
+        captured,
+        re.DOTALL,
+    )
+    assert match, "JSON block not found"
+    data = json.loads(match.group(1))
+    assert data["workflow"] == "test_wf"
+    assert data["summary"]["total"] == 2
+    assert data["summary"]["success"] == 2
+    assert data["summary"]["failure"] == 0
+    assert len(data["results"]) == 2
+    assert data["results"][0]["name"] == "Ana"
+    assert data["results"][0]["phone"] == "5511999"
+    assert data["results"][0]["success"] is True
+    assert data["results"][0]["error"] is None
+    assert "duration_ms" in data["results"][0]
+
+
+def test_stdout_json_includes_failures(capsys):
+    def send_fn(phone, text):
+        if phone == "222":
+            raise RuntimeError("fail me")
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    reporter.dispatch([
+        Contact(name="OK", phone="111"),
+        Contact(name="Bad", phone="222"),
+    ], message="hi")
+    captured = capsys.readouterr().out
+    match = re.search(
+        r"<<<DELIVERY_REPORT_START>>>\s*(\{.*?\})\s*<<<DELIVERY_REPORT_END>>>",
+        captured,
+        re.DOTALL,
+    )
+    data = json.loads(match.group(1))
+    assert data["summary"]["failure"] == 1
+    fail = [r for r in data["results"] if not r["success"]][0]
+    assert fail["name"] == "Bad"
+    assert "fail me" in fail["error"]

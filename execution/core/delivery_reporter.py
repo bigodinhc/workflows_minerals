@@ -123,9 +123,39 @@ class DeliveryReporter:
                     pass  # progress callback failures do not abort dispatch
 
         finished_at = datetime.now().astimezone()
-        return DeliveryReport(
+        report = DeliveryReport(
             workflow=self.workflow,
             started_at=started_at,
             finished_at=finished_at,
             results=results,
         )
+        self._emit_stdout_report(report)
+        return report
+
+    def _emit_stdout_report(self, report: DeliveryReport) -> None:
+        """Print structured JSON report delimited by markers for dashboard parsing."""
+        import json as _json
+        payload = {
+            "workflow": report.workflow,
+            "started_at": report.started_at.isoformat(),
+            "finished_at": report.finished_at.isoformat(),
+            "duration_seconds": int((report.finished_at - report.started_at).total_seconds()),
+            "summary": {
+                "total": report.total,
+                "success": report.success_count,
+                "failure": report.failure_count,
+            },
+            "results": [
+                {
+                    "name": r.contact.name,
+                    "phone": r.contact.phone,
+                    "success": r.success,
+                    "error": r.error,
+                    "duration_ms": r.duration_ms,
+                }
+                for r in report.results
+            ],
+        }
+        print("<<<DELIVERY_REPORT_START>>>")
+        print(_json.dumps(payload, indent=2, ensure_ascii=False))
+        print("<<<DELIVERY_REPORT_END>>>")

@@ -49,7 +49,7 @@ IMPORTANT:
 """
 
         message = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=4096,
             system=system_prompt,
             messages=[
@@ -91,7 +91,7 @@ IMPORTANT:
     def generate_text(self, system_prompt, user_prompt):
         """Generates text completion based on system and user prompts."""
         message = self.client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-sonnet-4-6",
             max_tokens=4000,
             system=system_prompt,
             messages=[

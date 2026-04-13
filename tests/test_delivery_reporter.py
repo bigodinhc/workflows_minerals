@@ -45,3 +45,71 @@ def test_delivery_report_properties():
     assert report.failure_count == 1
     assert len(report.failures) == 1
     assert report.failures[0].contact.name == "B"
+
+
+from unittest.mock import MagicMock
+from execution.core.delivery_reporter import DeliveryReporter
+import requests
+
+
+def test_dispatch_all_success():
+    send_fn = MagicMock()  # does not raise = success
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name=f"User{i}", phone=f"11{i}") for i in range(5)]
+    report = reporter.dispatch(contacts, message="hello")
+    assert report.total == 5
+    assert report.success_count == 5
+    assert report.failure_count == 0
+    assert send_fn.call_count == 5
+
+
+def test_dispatch_partial_failure():
+    call_count = {"n": 0}
+    def send_fn(phone, text):
+        call_count["n"] += 1
+        if call_count["n"] in (2, 4):
+            raise RuntimeError("boom")
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name=f"User{i}", phone=f"11{i}") for i in range(5)]
+    report = reporter.dispatch(contacts, message="hello")
+    assert report.success_count == 3
+    assert report.failure_count == 2
+    assert all("boom" in r.error for r in report.failures)
+
+
+def test_dispatch_all_failure():
+    def send_fn(phone, text):
+        raise RuntimeError("total failure")
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name="A", phone="111")]
+    report = reporter.dispatch(contacts, message="hi")
+    assert report.success_count == 0
+    assert report.failure_count == 1
+
+
+def test_error_categorization_timeout():
+    def send_fn(phone, text):
+        raise requests.Timeout("read timeout")
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
+    assert report.failures[0].error == "timeout"
+
+
+def test_error_categorization_http_error():
+    def send_fn(phone, text):
+        resp = requests.Response()
+        resp.status_code = 400
+        resp._content = b'{"error":"invalid number"}'
+        err = requests.HTTPError(response=resp)
+        raise err
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
+    assert report.failures[0].error.startswith("HTTP 400")
+
+
+def test_dispatch_tracks_duration():
+    send_fn = MagicMock()
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
+    assert report.results[0].duration_ms >= 0
+    assert (report.finished_at - report.started_at).total_seconds() >= 0

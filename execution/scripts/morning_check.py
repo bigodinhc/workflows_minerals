@@ -7,7 +7,6 @@ sends via WhatsApp, and ensures single execution per day via Control Sheet.
 
 import os
 import sys
-import time
 import argparse
 from datetime import datetime, date
 
@@ -15,6 +14,7 @@ from datetime import datetime, date
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.logger import WorkflowLogger
+from execution.core.delivery_reporter import DeliveryReporter, Contact
 from execution.integrations.platts_client import PlattsClient
 from execution.integrations.sheets_client import SheetsClient
 from execution.integrations.uazapi_client import UazapiClient
@@ -239,48 +239,44 @@ def main():
         print(message)
         print("\n-----------------------\n")
         
-    # 5. Send & Mark
+    # 5. Send & Mark using shared DeliveryReporter
     contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
-    
+
     if not contacts:
         logger.warning("No contacts found.")
         return
-        
+
     uazapi = UazapiClient()
-    success_count = 0
-    
-    for contact in contacts:
-        # Same phone logic from send_daily_report.py
+
+    def build_contact(c):
         raw_phone = (
-            contact.get('Evolution-api') or 
-            contact.get('Telefone') or 
-            contact.get('Phone') or 
-            contact.get('From')
+            c.get('Evolution-api') or c.get('Telefone') or
+            c.get('Phone') or c.get('From')
         )
-        
-        if not raw_phone: continue
+        if not raw_phone:
+            return None
         phone = str(raw_phone).replace("whatsapp:", "").strip()
-        
-        # Check Big Filter (if applicable? User said "same flow and list")
-        # In Implementation Plan we didn't specify filter, but Task.md says "Filter 'Big'".
-        # User said "Queremos esse mesmo fluxo... e a mesma lista".
-        # Assuming we apply "Big" filter logic if present in sheet.
-        # Check logic in SheetsClient.get_contacts -> IT ALREADY FILTERS 'Big'! 
-        # So contacts list is already filtered.
-        
-        if args.dry_run:
-            logger.info(f"[DRY RUN] Would send to {phone}")
-        else:
-            try:
-                uazapi.send_message(phone, message)
-                success_count += 1
-                time.sleep(2)
-            except Exception as e:
-                logger.error(f"Failed to send to {phone}", {"error": str(e)})
-                
-    logger.info(f"Broadcast complete. Sent: {success_count}")
-    
-    if not args.dry_run and success_count > 0:
+        name = c.get("Nome") or c.get("Name") or "—"
+        return Contact(name=name, phone=phone)
+
+    delivery_contacts = [bc for c in contacts if (bc := build_contact(c))]
+
+    if args.dry_run:
+        logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+        return
+
+    reporter = DeliveryReporter(
+        workflow="morning_check",
+        send_fn=uazapi.send_message,
+        gh_run_id=os.getenv("GITHUB_RUN_ID"),
+    )
+    report = reporter.dispatch(delivery_contacts, message)
+
+    logger.info(
+        f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"
+    )
+
+    if report.success_count > 0:
         sheets.mark_daily_status(SHEET_ID, date_str, REPORT_TYPE)
         logger.info("Control sheet updated.")
 

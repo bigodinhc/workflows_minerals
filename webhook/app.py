@@ -7,12 +7,17 @@ Deploy to Railway.
 """
 
 import os
+import sys
 import json
 import logging
 import threading
 import requests
 import anthropic
+from pathlib import Path
 from flask import Flask, request, jsonify
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from execution.core.delivery_reporter import DeliveryReporter, Contact
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -765,52 +770,74 @@ def process_adjustment_async(chat_id, draft_id, feedback):
         if progress_msg_id:
             edit_message(chat_id, progress_msg_id, f"❌ Erro no ajuste:\n{str(e)[:500]}")
 
+def _send_whatsapp_raising(phone, text, token=None, url=None):
+    """Raising wrapper around send_whatsapp for DeliveryReporter contract."""
+    use_token = token or UAZAPI_TOKEN
+    use_url = url or UAZAPI_URL
+    headers = {"token": use_token, "Content-Type": "application/json"}
+    payload = {"number": str(phone), "text": text}
+    response = requests.post(
+        f"{use_url}/send/text",
+        json=payload,
+        headers=headers,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def process_approval_async(chat_id, draft_message, uazapi_token=None, uazapi_url=None):
-    """Process WhatsApp sending in background thread with Telegram progress updates."""
+    """Process WhatsApp sending with progress updates via DeliveryReporter."""
     progress = send_telegram_message(chat_id, "⏳ Iniciando envio para WhatsApp...")
     progress_msg_id = progress.get("result", {}).get("message_id") if progress.get("ok") else None
-    
+
     try:
-        contacts = get_contacts()
-        total = len(contacts)
-        success_count = 0
-        fail_count = 0
-        
+        raw_contacts = get_contacts()
+
+        def build_contact(c):
+            raw_phone = c.get("Evolution-api") or c.get("Telefone")
+            if not raw_phone:
+                return None
+            phone = str(raw_phone).replace("whatsapp:", "").strip()
+            name = c.get("Nome") or "—"
+            return Contact(name=name, phone=phone)
+
+        delivery_contacts = [bc for c in raw_contacts if (bc := build_contact(c))]
+
         if progress_msg_id:
-            edit_message(chat_id, progress_msg_id, 
-                f"⏳ Enviando para {total} contatos...\n0/{total} processados")
-        
-        for i, contact in enumerate(contacts):
-            phone = contact.get("Evolution-api") or contact.get("Telefone")
-            if not phone:
-                continue
-            phone = str(phone).replace("whatsapp:", "").strip()
-            
-            if send_whatsapp(phone, draft_message, token=uazapi_token, url=uazapi_url):
-                success_count += 1
-            else:
-                fail_count += 1
-            
-            processed = success_count + fail_count
+            edit_message(chat_id, progress_msg_id,
+                f"⏳ Enviando para {len(delivery_contacts)} contatos...\n0/{len(delivery_contacts)}")
+
+        def on_progress(processed, total_, result):
             if progress_msg_id and processed % 10 == 0:
-                edit_message(chat_id, progress_msg_id,
-                    f"⏳ Enviando...\n{processed}/{total} processados\n✅ {success_count} OK | ❌ {fail_count} falhas")
-        
-        result_text = f"📊 ENVIO CONCLUÍDO\n\n"
-        result_text += f"✅ Enviados: {success_count}\n"
-        result_text += f"❌ Falhas: {fail_count}\n"
-        result_text += f"📋 Total: {total}\n"
-        
-        if fail_count == total:
-            result_text += "\n⚠️ TODOS falharam! Verifique o token UAZAPI."
-        
+                edit_message(
+                    chat_id,
+                    progress_msg_id,
+                    f"⏳ Enviando...\n{processed}/{total_} processados",
+                )
+
+        def send_fn(phone, text):
+            _send_whatsapp_raising(phone, text, token=uazapi_token, url=uazapi_url)
+
+        reporter = DeliveryReporter(
+            workflow="webhook_approval",
+            send_fn=send_fn,
+            telegram_chat_id=chat_id,
+            gh_run_id=None,
+        )
+        report = reporter.dispatch(delivery_contacts, draft_message, on_progress=on_progress)
+
         if progress_msg_id:
-            edit_message(chat_id, progress_msg_id, result_text)
-        else:
-            send_telegram_message(chat_id, result_text)
-            
-        logger.info(f"Approval complete: {success_count} sent, {fail_count} failed")
-        
+            edit_message(
+                chat_id,
+                progress_msg_id,
+                f"✔️ Envio finalizado — veja resumo detalhado abaixo.",
+            )
+
+        logger.info(
+            f"Approval complete: {report.success_count} sent, {report.failure_count} failed"
+        )
+
     except Exception as e:
         logger.error(f"Approval processing error: {e}")
         error_text = f"❌ ERRO NO ENVIO\n\n{str(e)}"

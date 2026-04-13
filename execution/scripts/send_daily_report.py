@@ -6,7 +6,6 @@ Unified Workflow: LSEG Fetch -> Format -> Send Uazapi
 
 import os
 import sys
-import time
 import argparse
 from datetime import datetime
 
@@ -14,6 +13,7 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.logger import WorkflowLogger
+from execution.core.delivery_reporter import DeliveryReporter, Contact
 
 # CONFIG
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0" 
@@ -128,44 +128,37 @@ def main():
             if lseg: lseg.close()
             return
 
-        # 4. Send Messages
+        # 4. Send Messages via DeliveryReporter
         from execution.integrations.uazapi_client import UazapiClient
         uazapi = UazapiClient()
-        success_count = 0
-        fail_count = 0
-        
-        logger.info(f"Starting broadcast to {len(contacts)} contacts...")
-        
-        for contact in contacts:
-            # Try to get phone from multiple convenient columns (Sheet Screenshot shows 'From')
+
+        def build_contact(c):
             raw_phone = (
-                contact.get('Evolution-api') or 
-                contact.get('Telefone') or 
-                contact.get('Phone') or 
-                contact.get('From')
+                c.get('Evolution-api') or c.get('Telefone') or
+                c.get('Phone') or c.get('From')
             )
-            
             if not raw_phone:
-                continue
-                
-            # Clean phone number (remove 'whatsapp:' prefix if present)
+                return None
             phone = str(raw_phone).replace("whatsapp:", "").strip()
-            
-            if args.dry_run:
-                logger.info(f"[DRY RUN] Would send to {phone}")
-                success_count += 1
-            else:
-                try:
-                    uazapi.send_message(phone, message)
-                    logger.info(f"Sent to {phone}")
-                    success_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to send to {phone}", {"error": str(e)})
-                    fail_count += 1
-            
-            time.sleep(3) # Rate limit
-            
-        logger.info("Broadcast finished", {"success": success_count, "fail": fail_count})
+            name = c.get("Nome") or c.get("Name") or "—"
+            return Contact(name=name, phone=phone)
+
+        delivery_contacts = [bc for c in contacts if (bc := build_contact(c))]
+
+        if args.dry_run:
+            logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+            return
+
+        reporter = DeliveryReporter(
+            workflow="daily_report",
+            send_fn=uazapi.send_message,
+            gh_run_id=os.getenv("GITHUB_RUN_ID"),
+        )
+        report = reporter.dispatch(delivery_contacts, message)
+        logger.info(
+            f"Daily report broadcast complete. Sent: {report.success_count}, "
+            f"Failed: {report.failure_count}"
+        )
 
     except Exception as e:
         logger.critical("Workflow disrupted", {"error": str(e)})

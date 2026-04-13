@@ -1,13 +1,15 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Play, CheckCircle2, XCircle, Loader2, FileText, AlertTriangle } from "lucide-react";
+import { Play, CheckCircle2, XCircle, Loader2, FileText, AlertTriangle, ChevronDown } from "lucide-react";
 import useSWR from "swr";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { DeliveryReportView } from "@/components/delivery/DeliveryReportView";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -25,6 +27,9 @@ export default function Home() {
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [logContent, setLogContent] = useState<string | null>(null);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [deliveryReport, setDeliveryReport] = useState<any | null>(null);
+  const [showRawLog, setShowRawLog] = useState(false);
+  const searchParams = useSearchParams();
 
   const handleTrigger = async (workflowId: string) => {
     setTriggeringId(workflowId);
@@ -46,10 +51,20 @@ export default function Home() {
     setSelectedRunId(runId);
     setIsLoadingLogs(true);
     setLogContent(null);
+    setDeliveryReport(null);
+    setShowRawLog(false);
 
     try {
-      const res = await fetch(`/api/logs?run_id=${runId}`);
-      const text = await res.text();
+      // Fetch delivery report and raw log in parallel
+      const [reportRes, logRes] = await Promise.all([
+        fetch(`/api/delivery-report?run_id=${runId}`),
+        fetch(`/api/logs?run_id=${runId}`),
+      ]);
+      const reportData = await reportRes.json();
+      if (reportData.found && reportData.report) {
+        setDeliveryReport(reportData.report);
+      }
+      const text = await logRes.text();
       setLogContent(text);
     } catch (e) {
       setLogContent("Failed to load logs.");
@@ -57,6 +72,17 @@ export default function Home() {
       setIsLoadingLogs(false);
     }
   };
+
+  useEffect(() => {
+    const runIdParam = searchParams.get("run_id");
+    if (runIdParam) {
+      const runId = Number(runIdParam);
+      if (!Number.isNaN(runId)) {
+        handleViewLogs(runId);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const lastRun = runs?.[0];
   const isOnline = !error;
@@ -274,16 +300,29 @@ export default function Home() {
             </SheetDescription>
           </SheetHeader>
 
-          <div className="flex-1 overflow-hidden border border-[#1a1a1a] bg-[#050505] text-[#00FF41] font-mono text-xs relative">
+          <div className="flex-1 overflow-hidden border border-[#1a1a1a] bg-[#050505] relative">
             {isLoadingLogs ? (
               <div className="absolute inset-0 flex items-center justify-center">
                 <Loader2 className="h-6 w-6 animate-spin text-[#00FF41]" />
               </div>
             ) : (
               <ScrollArea className="h-full w-full p-4">
-                <pre className="whitespace-pre-wrap break-all text-[11px] text-[#00FF41]/80">
-                  {logContent || "No log content."}
-                </pre>
+                {deliveryReport && <DeliveryReportView report={deliveryReport} />}
+
+                <button
+                  onClick={() => setShowRawLog((v) => !v)}
+                  className="flex items-center gap-1 text-[10px] text-[#00FF41]/70 uppercase tracking-wider mb-2 hover:text-[#00FF41]"
+                >
+                  <ChevronDown
+                    className={`h-3 w-3 transition-transform ${showRawLog ? "" : "-rotate-90"}`}
+                  />
+                  / RAW LOG
+                </button>
+                {showRawLog && (
+                  <pre className="whitespace-pre-wrap break-all text-[11px] text-[#00FF41]/80 font-mono">
+                    {logContent || "No log content."}
+                  </pre>
+                )}
               </ScrollArea>
             )}
           </div>

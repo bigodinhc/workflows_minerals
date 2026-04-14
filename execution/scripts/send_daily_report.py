@@ -14,6 +14,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.logger import WorkflowLogger
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
+from execution.core.progress_reporter import ProgressReporter
 
 # CONFIG
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0" 
@@ -85,7 +86,14 @@ def format_price_message(prices):
 
 def main():
     logger = WorkflowLogger("DailyReport")
-    
+
+    progress = ProgressReporter(
+        workflow="daily_report",
+        chat_id=os.getenv("TELEGRAM_CHAT_ID"),
+        gh_run_id=os.getenv("GITHUB_RUN_ID"),
+    )
+    progress.start("Preparando dados...")
+
     # Check for DRY RUN mode
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Do not actually send messages")
@@ -108,6 +116,7 @@ def main():
         if not prices:
             logger.warning("No prices found/returned from LSEG!")
             if lseg: lseg.close()
+            progress.finish_empty("sem dados do LSEG ainda")
             return
             
         logger.info(f"Got {len(prices)} contracts.")
@@ -126,6 +135,7 @@ def main():
         if not contacts:
             logger.warning("No contacts found to send to.")
             if lseg: lseg.close()
+            progress.finish_empty("nenhum contato ativo")
             return
 
         # 4. Send Messages via DeliveryReporter
@@ -136,14 +146,25 @@ def main():
 
         if args.dry_run:
             logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+            progress.finish_empty("dry-run")
             return
+
+        progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
 
         reporter = DeliveryReporter(
             workflow="daily_report",
             send_fn=uazapi.send_message,
+            notify_telegram=False,
             gh_run_id=os.getenv("GITHUB_RUN_ID"),
         )
-        report = reporter.dispatch(delivery_contacts, message)
+        report = reporter.dispatch(
+            delivery_contacts,
+            message,
+            on_progress=progress.on_dispatch_tick,
+        )
+
+        progress.finish(report)
+
         logger.info(
             f"Daily report broadcast complete. Sent: {report.success_count}, "
             f"Failed: {report.failure_count}"

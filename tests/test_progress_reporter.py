@@ -256,3 +256,142 @@ def test_on_dispatch_tick_throttle_count_for_100_contacts(monkeypatch):
 
     edit_count = fake_client.edit_message_text.call_count
     assert 9 <= edit_count <= 12, f"Expected 9-12 edits, got {edit_count}"
+
+
+from datetime import datetime
+from execution.core.delivery_reporter import DeliveryReport
+
+
+def _make_report(workflow, results):
+    now = datetime.now().astimezone()
+    return DeliveryReport(
+        workflow=workflow,
+        started_at=now,
+        finished_at=now,
+        results=results,
+    )
+
+
+def test_finish_edits_with_success_emoji_for_all_success():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    results = [
+        DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
+    ]
+    report = _make_report("test", results)
+    reporter.finish(report)
+
+    fake_client.edit_message_text.assert_called_once()
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert kwargs["chat_id"] == "chat-1"
+    assert kwargs["message_id"] == 42
+    assert "✅" in kwargs["new_text"]
+    assert "Total: 1" in kwargs["new_text"]
+
+
+def test_finish_edits_with_total_failure_emoji():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    results = [
+        DeliveryResult(contact=Contact(name=f"U{i}", phone=str(i)), success=False, error="boom", duration_ms=0)
+        for i in range(10)
+    ]
+    report = _make_report("test", results)
+    reporter.finish(report)
+
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert "🚨" in kwargs["new_text"]
+    assert "FALHA TOTAL" in kwargs["new_text"]
+
+
+def test_finish_swallows_exceptions():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.side_effect = RuntimeError("telegram down")
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+
+    results = [
+        DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
+    ]
+    report = _make_report("test", results)
+    # Must not raise
+    reporter.finish(report)
+
+
+def test_finish_noop_when_disabled():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = None  # disabled
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    results = [
+        DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
+    ]
+    report = _make_report("test", results)
+    reporter.finish(report)
+
+    fake_client.edit_message_text.assert_not_called()
+
+
+def test_finish_empty_edits_with_info_emoji_and_reason():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    reporter = ProgressReporter(
+        workflow="market_news",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    reporter.finish_empty("sem items novos")
+
+    fake_client.edit_message_text.assert_called_once()
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert "ℹ️" in kwargs["new_text"]
+    assert "sem items novos" in kwargs["new_text"]
+    assert "MARKET NEWS" in kwargs["new_text"]
+
+
+def test_finish_empty_noop_when_disabled():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = None  # disabled
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    reporter.finish_empty("nothing")
+    fake_client.edit_message_text.assert_not_called()

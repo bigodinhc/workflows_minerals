@@ -108,3 +108,44 @@ class ProgressReporter:
 
         self._last_edit_at = now
         self._last_edit_pct = pct
+
+    def finish(self, report) -> None:
+        """Edit message with final summary. Reuses _format_telegram_message
+        from delivery_reporter for format parity with today's notification.
+        Never raises."""
+        if self._disabled or self._message_id is None:
+            return
+        from execution.core.delivery_reporter import _format_telegram_message
+        try:
+            text = _format_telegram_message(
+                report,
+                dashboard_base_url=self.dashboard_base_url,
+                gh_run_id=self.gh_run_id,
+            )
+        except Exception as exc:
+            print(f"[WARN] ProgressReporter.finish format failed: {exc}")
+            return
+        try:
+            client = self._get_client()
+            client.edit_message_text(
+                chat_id=self.chat_id,
+                message_id=self._message_id,
+                new_text=text,
+            )
+        except Exception as exc:
+            print(f"[WARN] ProgressReporter.finish edit failed: {exc}")
+
+    def finish_empty(self, reason: str) -> None:
+        """Edit message to signal a no-op finish (e.g., no new articles)."""
+        if self._disabled or self._message_id is None:
+            return
+        text = self._header("ℹ️", reason)
+        try:
+            client = self._get_client()
+            client.edit_message_text(
+                chat_id=self.chat_id,
+                message_id=self._message_id,
+                new_text=text,
+            )
+        except Exception as exc:
+            print(f"[WARN] ProgressReporter.finish_empty edit failed: {exc}")

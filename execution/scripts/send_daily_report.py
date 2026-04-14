@@ -13,7 +13,7 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.logger import WorkflowLogger
-from execution.core.delivery_reporter import DeliveryReporter, Contact
+from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 
 # CONFIG
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0" 
@@ -132,18 +132,7 @@ def main():
         from execution.integrations.uazapi_client import UazapiClient
         uazapi = UazapiClient()
 
-        def build_contact(c):
-            raw_phone = (
-                c.get('Evolution-api') or c.get('Telefone') or
-                c.get('Phone') or c.get('From')
-            )
-            if not raw_phone:
-                return None
-            phone = str(raw_phone).replace("whatsapp:", "").strip()
-            name = c.get("Nome") or c.get("Name") or "—"
-            return Contact(name=name, phone=phone)
-
-        delivery_contacts = [bc for c in contacts if (bc := build_contact(c))]
+        delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
 
         if args.dry_run:
             logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")

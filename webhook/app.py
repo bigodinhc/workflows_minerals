@@ -21,7 +21,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 # Local dev: <repo>/execution/ is sibling to webhook/
 sys.path.insert(0, str(_HERE.parent))
-from execution.core.delivery_reporter import DeliveryReporter, Contact
+from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -798,15 +798,7 @@ def process_approval_async(chat_id, draft_message, uazapi_token=None, uazapi_url
     try:
         raw_contacts = get_contacts()
 
-        def build_contact(c):
-            raw_phone = c.get("Evolution-api") or c.get("Telefone")
-            if not raw_phone:
-                return None
-            phone = str(raw_phone).replace("whatsapp:", "").strip()
-            name = c.get("Nome") or "—"
-            return Contact(name=name, phone=phone)
-
-        delivery_contacts = [bc for c in raw_contacts if (bc := build_contact(c))]
+        delivery_contacts = [bc for c in raw_contacts if (bc := build_contact_from_row(c))]
 
         if progress_msg_id:
             edit_message(chat_id, progress_msg_id,

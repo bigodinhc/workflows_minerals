@@ -58,3 +58,20 @@ class ProgressReporter:
             self._disabled = True
             return
         self._message_id = message_id
+
+    def update(self, text: str) -> None:
+        """Edit the current message with new body text. Never raises."""
+        if self._disabled or self._message_id is None:
+            return
+        full = self._header("⏳", text)
+        try:
+            client = self._get_client()
+            client.edit_message_text(
+                chat_id=self.chat_id,
+                message_id=self._message_id,
+                new_text=full,
+            )
+        except Exception as exc:
+            print(f"[WARN] ProgressReporter.update failed: {exc}")
+        import time as _time
+        self._last_edit_at = _time.monotonic()

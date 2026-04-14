@@ -59,3 +59,55 @@ def test_start_uses_default_phase_text():
     reporter.start()
     text = fake_client.send_message.call_args.kwargs["text"]
     assert "Preparando dados..." in text
+
+
+def test_update_edits_message_when_enabled():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start("Preparando dados...")
+    fake_client.reset_mock()
+
+    reporter.update("Processing step 2...")
+
+    fake_client.edit_message_text.assert_called_once()
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert kwargs["chat_id"] == "chat-1"
+    assert kwargs["message_id"] == 42
+    assert "Processing step 2..." in kwargs["new_text"]
+    assert "TEST" in kwargs["new_text"]
+
+
+def test_update_noop_when_disabled():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = None  # start fails → disabled
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    reporter.update("anything")
+
+    fake_client.edit_message_text.assert_not_called()
+
+
+def test_update_swallows_exceptions():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.side_effect = RuntimeError("telegram down")
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    # Must not raise
+    reporter.update("anything")

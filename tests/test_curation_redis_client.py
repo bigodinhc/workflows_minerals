@@ -84,6 +84,20 @@ def test_mark_seen_applies_30d_ttl(fake_redis):
     assert 2591000 <= ttl <= 2592000
 
 
+def test_get_archive_roundtrip(fake_redis):
+    from execution.curation.redis_client import set_staging, archive, get_archive
+    set_staging("abc", {"id": "abc", "title": "Hello"})
+    archive("abc", "2026-04-14", chat_id=1)
+    got = get_archive("2026-04-14", "abc")
+    assert got["title"] == "Hello"
+    assert got["archivedBy"] == 1
+
+
+def test_get_archive_missing_returns_none(fake_redis):
+    from execution.curation.redis_client import get_archive
+    assert get_archive("2026-04-14", "missing") is None
+
+
 def test_rationale_flag_set_once_per_day(fake_redis):
     from execution.curation.redis_client import (
         is_rationale_processed,

@@ -1031,10 +1031,11 @@ def process_test_send_async(chat_id, draft_id, draft_message, uazapi_token=None,
 def preview_item(item_id):
     """Render Platts item HTML preview for Telegram in-app browser.
 
-    Looks up item in Redis staging first, then in today's archive,
-    then returns a 404 HTML message if missing/expired.
+    Looks up item in Redis staging first, then in today's and yesterday's
+    archive (covers post-midnight opens), then returns a 404 HTML message
+    if missing/expired.
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta, timezone
     from flask import render_template
     from execution.curation import redis_client
 
@@ -1042,23 +1043,38 @@ def preview_item(item_id):
     try:
         item = redis_client.get_staging(item_id)
     except Exception as exc:
-        logger.warning(f"Preview redis staging lookup failed: {exc}")
+        logger.warning(f"Preview staging lookup failed: {exc}")
 
     if item is None:
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        try:
-            client = redis_client._get_client()
-            raw = client.get(f"platts:archive:{today}:{item_id}")
-            if raw:
-                import json
-                item = json.loads(raw)
-        except Exception as exc:
-            logger.warning(f"Preview redis archive lookup failed: {exc}")
+        now_utc = datetime.now(timezone.utc)
+        for offset in (0, 1):
+            date = (now_utc - timedelta(days=offset)).strftime("%Y-%m-%d")
+            try:
+                item = redis_client.get_archive(date, item_id)
+            except Exception as exc:
+                logger.warning(f"Preview archive lookup failed ({date}): {exc}")
+                continue
+            if item is not None:
+                break
 
     if item is None:
-        return "<h1>Item not found</h1><p>Expired (48h) or already processed.</p>", 404
+        return (
+            "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'>"
+            "<title>Item não encontrado</title></head><body>"
+            "<h1>Item não encontrado</h1>"
+            "<p>Expirou (48h) ou já foi processado.</p>"
+            "</body></html>",
+            404,
+        )
 
-    return render_template("preview.html", item=item)
+    # Defensive coercion — a malformed scraper payload shouldn't crash the template
+    safe_item = dict(item)
+    if not isinstance(safe_item.get("fullText"), str):
+        safe_item["fullText"] = ""
+    if not isinstance(safe_item.get("tables"), list):
+        safe_item["tables"] = []
+
+    return render_template("preview.html", item=safe_item)
 
 
 @app.route("/health", methods=["GET"])

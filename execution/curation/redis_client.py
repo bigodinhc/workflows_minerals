@@ -108,6 +108,15 @@ def discard(item_id: str) -> None:
     client.delete(_staging_key(item_id))
 
 
+def get_archive(date: str, item_id: str) -> Optional[dict]:
+    """Read an archived item by date + id. Returns None if missing."""
+    client = _get_client()
+    raw = client.get(_archive_key(date, item_id))
+    if raw is None:
+        return None
+    return json.loads(raw)
+
+
 def is_seen(date: str, item_id: str) -> bool:
     """Check if item id is in dedup set for date."""
     client = _get_client()

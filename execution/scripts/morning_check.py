@@ -15,6 +15,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.logger import WorkflowLogger
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
+from execution.core.progress_reporter import ProgressReporter
 from execution.integrations.platts_client import PlattsClient
 from execution.integrations.sheets_client import SheetsClient
 from execution.integrations.uazapi_client import UazapiClient
@@ -194,13 +195,21 @@ def main():
     date_fmt_br = today.strftime("%d/%m/%Y")
     
     logger.info(f"Starting Morning Check for {date_str}")
-    
+
+    progress = ProgressReporter(
+        workflow="morning_check",
+        chat_id=os.getenv("TELEGRAM_CHAT_ID"),
+        gh_run_id=os.getenv("GITHUB_RUN_ID"),
+    )
+    progress.start("Preparando dados...")
+
     # 2. Check Control Sheet
     sheets = SheetsClient()
     
     if not args.dry_run:
         if sheets.check_daily_status(SHEET_ID, date_str, REPORT_TYPE):
             logger.info("Report already sent today. Exiting.")
+            progress.finish_empty("report ja enviado hoje")
             return
 
     # 3. Fetch Data
@@ -210,6 +219,7 @@ def main():
     
     if not report_items:
         logger.info("No data available yet from Platts. Will retry later.")
+        progress.finish_empty("sem dados do Platts ainda")
         sys.exit(0) # Exit success (so GitHub Action doesn't fail, just finishes)
     
     # --- VALIDATION: Check minimum items collected ---
@@ -221,6 +231,7 @@ def main():
     if len(report_items) < MIN_ITEMS_EXPECTED:
         logger.warning(f"⚠️ INCOMPLETE DATA: Only {len(report_items)}/{TOTAL_SYMBOLS} items collected!")
         logger.warning(f"   Threshold is {MIN_ITEMS_EXPECTED}. Skipping send, will retry on next scheduled run.")
+        progress.finish_empty(f"dados incompletos ({len(report_items)}/{TOTAL_SYMBOLS})")
         sys.exit(0)  # Exit gracefully - next scheduled action will retry
         
     # DEBUG: Print items to see why filtering failed
@@ -244,6 +255,7 @@ def main():
 
     if not contacts:
         logger.warning("No contacts found.")
+        progress.finish_empty("nenhum contato ativo")
         return
 
     uazapi = UazapiClient()
@@ -252,14 +264,24 @@ def main():
 
     if args.dry_run:
         logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+        progress.finish_empty("dry-run")
         return
+
+    progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
 
     reporter = DeliveryReporter(
         workflow="morning_check",
         send_fn=uazapi.send_message,
+        notify_telegram=False,
         gh_run_id=os.getenv("GITHUB_RUN_ID"),
     )
-    report = reporter.dispatch(delivery_contacts, message)
+    report = reporter.dispatch(
+        delivery_contacts,
+        message,
+        on_progress=progress.on_dispatch_tick,
+    )
+
+    progress.finish(report)
 
     logger.info(
         f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"

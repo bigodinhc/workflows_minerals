@@ -1539,7 +1539,6 @@ def handle_callback(callback_query):
             callback_query,
             f"🤖 *Enviado aos 3 agents* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n🆔 `{item_id}`",
         )
-        import threading
         threading.Thread(
             target=_run_pipeline_and_archive,
             args=(chat_id, raw_text, progress_msg_id, item_id),

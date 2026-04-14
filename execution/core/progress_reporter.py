@@ -6,6 +6,7 @@ on_progress=progress.on_dispatch_tick and notify_telegram=False).
 All methods are non-raising. Telegram failures degrade to log warnings so
 the workflow is never broken by a notification failure.
 """
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -73,5 +74,4 @@ class ProgressReporter:
             )
         except Exception as exc:
             print(f"[WARN] ProgressReporter.update failed: {exc}")
-        import time as _time
-        self._last_edit_at = _time.monotonic()
+        self._last_edit_at = time.monotonic()

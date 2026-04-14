@@ -1,11 +1,11 @@
-name: "Market News (Telegram)"
+name: "Platts Ingestion (Unified)"
 
 on:
   schedule:
+    # Unified ingestion: 9h, 12h, 15h BRT (12, 15, 18 UTC)
     - cron: '0 12 * * 1-5'   # 9h BRT
     - cron: '0 15 * * 1-5'   # 12h BRT
     - cron: '0 18 * * 1-5'   # 15h BRT
-    - cron: '0 21 * * 1-5'   # 18h BRT
   workflow_dispatch:
     inputs:
       dry_run:
@@ -35,7 +35,7 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run Market News Ingestion
+      - name: Run Platts Ingestion
         env:
           # Apify
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
@@ -58,7 +58,7 @@ jobs:
           UAZAPI_URL: "https://mineralstrading.uazapi.com"
 
         run: |
-          CMD="python execution/scripts/market_news_ingestion.py"
+          CMD="python -m execution.scripts.platts_ingestion"
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
             CMD="$CMD --dry-run"
           fi

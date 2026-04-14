@@ -306,7 +306,7 @@ def main():
         message,
         on_progress=progress.on_dispatch_tick,
     )
-    progress.finish(report)
+    progress.finish(report, message=message)
     logger.info(
         f"Baltic broadcast complete. Sent: {report.success_count}, "
         f"Failed: {report.failure_count}"

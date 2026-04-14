@@ -448,3 +448,75 @@ def test_update_called_before_start_is_noop():
     # Do not call start()
     reporter.update("anything")
     fake_client.edit_message_text.assert_not_called()
+
+
+def test_finish_with_message_preview_includes_message():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    results = [
+        DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
+    ]
+    report = _make_report("test", results)
+    reporter.finish(report, message="Iron ore price: $100.50")
+
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert "Iron ore price: $100.50" in kwargs["new_text"]
+    assert "Mensagem enviada" in kwargs["new_text"]
+
+
+def test_finish_without_message_has_no_preview_section():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    results = [
+        DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
+    ]
+    report = _make_report("test", results)
+    reporter.finish(report)  # no message passed
+
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert "Mensagem enviada" not in kwargs["new_text"]
+
+
+def test_finish_truncates_long_message_to_fit_telegram_limit():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    results = [
+        DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
+    ]
+    report = _make_report("test", results)
+    long_message = "X" * 10000  # well above Telegram's 4096 limit
+
+    reporter.finish(report, message=long_message)
+
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    # Must stay under Telegram limit
+    assert len(kwargs["new_text"]) <= 4096
+    # Must contain truncation marker
+    assert "truncada" in kwargs["new_text"]

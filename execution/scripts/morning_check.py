@@ -281,7 +281,7 @@ def main():
         on_progress=progress.on_dispatch_tick,
     )
 
-    progress.finish(report)
+    progress.finish(report, message=message)
 
     logger.info(
         f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"

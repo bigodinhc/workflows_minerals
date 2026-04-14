@@ -10,6 +10,25 @@ import time
 from datetime import datetime
 from typing import Optional
 
+_TELEGRAM_MAX_CHARS = 4096
+_PREVIEW_HEADER = "\n\n━━━━━━━━━━━━━━━━\n📝 *Mensagem enviada:*\n"
+_TRUNCATION_SUFFIX = "\n...[truncada]"
+
+
+def _append_message_preview(summary_text: str, message: str) -> str:
+    """Append a message preview section, truncating to fit Telegram's 4096-char
+    limit. If the combined text would overflow, the message body is cut and a
+    suffix marker is added."""
+    overhead = len(summary_text) + len(_PREVIEW_HEADER)
+    available = _TELEGRAM_MAX_CHARS - overhead
+    if available <= len(_TRUNCATION_SUFFIX):
+        # Not enough room even for truncation marker: skip preview
+        return summary_text
+    if len(message) <= available:
+        return summary_text + _PREVIEW_HEADER + message
+    cut = available - len(_TRUNCATION_SUFFIX)
+    return summary_text + _PREVIEW_HEADER + message[:cut] + _TRUNCATION_SUFFIX
+
 
 class ProgressReporter:
     def __init__(
@@ -109,9 +128,10 @@ class ProgressReporter:
         self._last_edit_at = now
         self._last_edit_pct = pct
 
-    def finish(self, report) -> None:
+    def finish(self, report, message: Optional[str] = None) -> None:
         """Edit message with final summary. Reuses _format_telegram_message
         from delivery_reporter for format parity with today's notification.
+        If message is provided, appends a preview of what was broadcast.
         Never raises."""
         if self._disabled or self._message_id is None:
             return
@@ -125,6 +145,10 @@ class ProgressReporter:
         except Exception as exc:
             print(f"[WARN] ProgressReporter.finish format failed: {exc}")
             return
+
+        if message:
+            text = _append_message_preview(text, message)
+
         try:
             client = self._get_client()
             client.edit_message_text(

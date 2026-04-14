@@ -516,7 +516,7 @@ LEMBRE-SE: O título é a primeira coisa que o trader vê no WhatsApp. Deve perm
 
 ## HIERARQUIA VISUAL COMPLETA
 - CAPS: Somente para alertas urgentes ou nomes de eventos
-- Linhas divisórias: Apenas entre seções principais em mensagens longas
+- Linhas divisórias (`─────────────────`): EXCLUSIVAMENTE uma única linha, logo abaixo do título `📊 MINERALS TRADING // ...`. JAMAIS usar divisórias entre seções, antes de `###`, ou em qualquer outro lugar da mensagem.
 
 Para máxima clareza, use esta hierarquia:
 1. **Título principal**: 📊 MINERALS TRADING // [Título Dinâmico]
@@ -527,19 +527,17 @@ Para máxima clareza, use esta hierarquia:
 
 ### Adaptação por Comprimento
 **Mensagem Curta** (<8 linhas):
-- Sem divisórias
 - Formato contínuo
 - 1-2 parágrafos máximo
 
 **Mensagem Média** (8-15 linhas):
-- Uma divisória após cabeçalho
-- 2-3 seções principais
+- 2-3 seções principais com `###`
 - Bullets para listas
 
 **Mensagem Longa** (>15 linhas):
-- Estrutura completa com divisórias
-- Múltiplas seções organizadas
+- Múltiplas seções organizadas com `###`
 - Uso criterioso de bullets e destaques
+- NUNCA adicionar divisórias entre as seções — a única divisória permitida é a que fica logo abaixo do título
 
 ### Otimização Mobile
 - Máximo 50-60 caracteres por linha

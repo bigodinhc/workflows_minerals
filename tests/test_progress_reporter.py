@@ -613,3 +613,104 @@ def test_fail_swallows_state_store_exception(monkeypatch):
     reporter.start()
     # Must not raise
     reporter.fail(RuntimeError("original"))
+
+
+def test_finish_records_success_when_any_delivery_ok(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    calls = []
+    monkeypatch.setattr(
+        "execution.core.state_store.record_success",
+        lambda wf, summary, duration_ms: calls.append((wf, summary, duration_ms)),
+    )
+    monkeypatch.setattr(
+        "execution.core.state_store.record_failure",
+        lambda wf, summary, duration_ms: calls.append(("FAIL", wf)),
+    )
+    reporter = ProgressReporter(
+        workflow="morning_check",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+
+    results = [DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)]
+    report = _make_report("morning_check", results)
+    reporter.finish(report)
+
+    assert any(c[0] == "morning_check" for c in calls)
+    assert not any(isinstance(c, tuple) and c[0] == "FAIL" for c in calls)
+
+
+def test_finish_records_failure_when_all_deliveries_failed(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    calls = []
+    monkeypatch.setattr(
+        "execution.core.state_store.record_failure",
+        lambda wf, summary, duration_ms: calls.append(wf),
+    )
+    monkeypatch.setattr(
+        "execution.core.state_store.record_success",
+        lambda wf, summary, duration_ms: calls.append("SHOULD_NOT_HAPPEN"),
+    )
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+
+    results = [
+        DeliveryResult(contact=Contact(name=f"U{i}", phone=str(i)), success=False, error="boom", duration_ms=0)
+        for i in range(3)
+    ]
+    report = _make_report("test", results)
+    reporter.finish(report)
+    assert calls == ["test"]
+
+
+def test_finish_empty_records_to_state_store(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    calls = []
+    monkeypatch.setattr(
+        "execution.core.state_store.record_empty",
+        lambda wf, reason: calls.append((wf, reason)),
+    )
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    reporter.finish_empty("no data")
+    assert calls == [("test", "no data")]
+
+
+def test_finish_state_store_errors_swallowed(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("redis down")
+    monkeypatch.setattr("execution.core.state_store.record_success", broken)
+    monkeypatch.setattr("execution.core.state_store.record_failure", broken)
+    monkeypatch.setattr("execution.core.state_store.record_empty", broken)
+
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+
+    results = [DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)]
+    report = _make_report("test", results)
+    # Must not raise
+    reporter.finish(report)
+    reporter.finish_empty("x")

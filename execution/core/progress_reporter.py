@@ -133,6 +133,21 @@ class ProgressReporter:
         from delivery_reporter for format parity with today's notification.
         If message is provided, appends a preview of what was broadcast.
         Never raises."""
+        try:
+            from execution.core import state_store
+            summary = {
+                "total": report.total,
+                "success": report.success_count,
+                "failure": report.failure_count,
+            }
+            duration_ms = int((report.finished_at - report.started_at).total_seconds() * 1000)
+            if report.success_count > 0:
+                state_store.record_success(self.workflow, summary, duration_ms)
+            else:
+                state_store.record_failure(self.workflow, summary, duration_ms)
+        except Exception as exc:
+            print(f"[WARN] ProgressReporter.finish state_store failed: {exc}")
+
         if self._disabled or self._message_id is None:
             return
         from execution.core.delivery_reporter import _format_telegram_message
@@ -161,6 +176,12 @@ class ProgressReporter:
 
     def finish_empty(self, reason: str) -> None:
         """Edit message to signal a no-op finish (e.g., no new articles)."""
+        try:
+            from execution.core import state_store
+            state_store.record_empty(self.workflow, reason)
+        except Exception as exc:
+            print(f"[WARN] ProgressReporter.finish_empty state_store failed: {exc}")
+
         if self._disabled or self._message_id is None:
             return
         text = self._header("ℹ️", reason)

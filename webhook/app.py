@@ -1414,7 +1414,103 @@ def handle_callback(callback_query):
         if draft_id in DRAFTS:
             DRAFTS[draft_id]["status"] = "rejected"
         return jsonify({"ok": True})
-    
+
+    elif action == "curate_archive":
+        item_id = parts[1] if len(parts) > 1 else ""
+        from datetime import datetime, timezone
+        from execution.curation import redis_client
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            archived = redis_client.archive(item_id, date, chat_id=chat_id)
+        except Exception as exc:
+            logger.error(f"curate_archive redis error: {exc}")
+            answer_callback(callback_query["id"], "⚠️ Redis indisponível, tenta de novo")
+            return jsonify({"ok": True})
+        if archived is None:
+            answer_callback(callback_query["id"], "⚠️ Item expirou ou já processado")
+            edit_message(
+                chat_id,
+                callback_query["message"]["message_id"],
+                "⚠️ Item expirou ou já processado",
+                reply_markup=None,
+            )
+            return jsonify({"ok": True})
+        answer_callback(callback_query["id"], "✅ Arquivado")
+        edit_message(
+            chat_id,
+            callback_query["message"]["message_id"],
+            f"✅ *Arquivado* em {datetime.now().strftime('%H:%M')}\n🆔 `{item_id}`",
+            reply_markup=None,
+        )
+        return jsonify({"ok": True})
+
+    elif action == "curate_reject":
+        item_id = parts[1] if len(parts) > 1 else ""
+        from datetime import datetime
+        from execution.curation import redis_client
+        try:
+            redis_client.discard(item_id)
+        except Exception as exc:
+            logger.error(f"curate_reject redis error: {exc}")
+            answer_callback(callback_query["id"], "⚠️ Redis indisponível")
+            return jsonify({"ok": True})
+        answer_callback(callback_query["id"], "❌ Recusado")
+        edit_message(
+            chat_id,
+            callback_query["message"]["message_id"],
+            f"❌ *Recusado* em {datetime.now().strftime('%H:%M')}\n🆔 `{item_id}`",
+            reply_markup=None,
+        )
+        return jsonify({"ok": True})
+
+    elif action == "curate_pipeline":
+        item_id = parts[1] if len(parts) > 1 else ""
+        from datetime import datetime, timezone
+        from execution.curation import redis_client
+        try:
+            item = redis_client.get_staging(item_id)
+        except Exception as exc:
+            logger.error(f"curate_pipeline redis error: {exc}")
+            answer_callback(callback_query["id"], "⚠️ Redis indisponível")
+            return jsonify({"ok": True})
+        if item is None:
+            answer_callback(callback_query["id"], "⚠️ Item expirou")
+            edit_message(
+                chat_id,
+                callback_query["message"]["message_id"],
+                "⚠️ Item expirou ou já processado",
+                reply_markup=None,
+            )
+            return jsonify({"ok": True})
+        raw_text = (
+            f"Title: {item.get('title','')}\n"
+            f"Date: {item.get('publishDate','')}\n"
+            f"Source: {item.get('source','')}\n\n"
+            f"{item.get('fullText','')}"
+        )
+        answer_callback(callback_query["id"], "🤖 Processando nos 3 agents...")
+        progress = send_telegram_message(chat_id, f"🤖 Processando item `{item_id}` nos 3 agents...")
+        progress_msg_id = progress.get("result", {}).get("message_id") if progress else None
+        import threading
+        threading.Thread(
+            target=process_news_async,
+            args=(chat_id, raw_text, progress_msg_id),
+            daemon=True,
+        ).start()
+        # Archive the item so it leaves staging — decision is taken.
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            redis_client.archive(item_id, date, chat_id=chat_id)
+        except Exception as exc:
+            logger.warning(f"curate_pipeline archive post-dispatch failed: {exc}")
+        edit_message(
+            chat_id,
+            callback_query["message"]["message_id"],
+            f"🤖 *Enviado aos 3 agents* em {datetime.now().strftime('%H:%M')}\n🆔 `{item_id}`",
+            reply_markup=None,
+        )
+        return jsonify({"ok": True})
+
     return jsonify({"ok": True})
 
 if __name__ == "__main__":

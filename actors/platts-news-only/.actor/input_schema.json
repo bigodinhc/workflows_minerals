@@ -1,0 +1,46 @@
+{
+    "title": "Platts IODEX Commentary Scraper",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "username": {
+            "title": "Username",
+            "type": "string",
+            "description": "Platts/S&P Global login username.",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "password": {
+            "title": "Password",
+            "type": "string",
+            "description": "Platts/S&P Global login password.",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "targetDate": {
+            "title": "Target Date",
+            "type": "string",
+            "description": "Date to scrape in DD/MM/YYYY (BR) or MM/DD/YYYY (US) format. Defaults to today (UTC).",
+            "editor": "textfield",
+            "nullable": true
+        },
+        "dateFormat": {
+            "title": "Date Format",
+            "type": "string",
+            "description": "Format of the targetDate input.",
+            "editor": "select",
+            "default": "BR",
+            "enum": ["BR", "US"],
+            "enumTitles": ["DD/MM/YYYY (Brazilian)", "MM/DD/YYYY (American)"]
+        },
+        "maxArticles": {
+            "title": "Max Articles",
+            "type": "integer",
+            "description": "Maximum number of articles to extract.",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 10
+        }
+    },
+    "required": ["username", "password"]
+}

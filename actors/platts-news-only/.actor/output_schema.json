@@ -1,0 +1,13 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Platts IODEX Commentary",
+    "description": "Dataset of IODEX Commentary and Rationale articles from Platts Connect.",
+    "properties": {
+        "dataset": {
+            "type": "string",
+            "title": "Commentary Articles",
+            "description": "Dataset containing one object per run with IODEX commentary articles and summary metrics.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        }
+    }
+}

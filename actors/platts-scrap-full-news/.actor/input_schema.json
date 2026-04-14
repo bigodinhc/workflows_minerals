@@ -1,0 +1,57 @@
+{
+  "title": "Platts Iron Ore Scraper",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "username": {
+      "title": "Username",
+      "type": "string",
+      "description": "Email de login do Platts",
+      "editor": "textfield"
+    },
+    "password": {
+      "title": "Password", 
+      "type": "string",
+      "description": "Senha do Platts",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "maxArticles": {
+      "title": "Máximo de Artigos",
+      "type": "integer",
+      "description": "Quantidade máxima de artigos para coletar",
+      "default": 10,
+      "minimum": 1,
+      "maximum": 50
+    },
+    "collectMarketCommentary": {
+      "title": "Coletar Market Commentary",
+      "type": "boolean",
+      "description": "Incluir seção Market Commentary",
+      "default": true
+    },
+    "dateFilter": {
+      "title": "Filtro de Data",
+      "type": "string",
+      "description": "Tipo de filtro de data",
+      "default": "specificDate",
+      "enum": ["today", "specificDate", "lastXDays", "all"],
+      "enumTitles": ["Hoje (servidor)", "Data Específica", "Últimos X Dias", "Todos"]
+    },
+    "targetDate": {
+      "title": "Data Alvo",
+      "type": "string",
+      "description": "Data específica no formato DD/MM/YYYY (ex: 30/12/2025). Usar com dateFilter = specificDate ou today",
+      "editor": "textfield"
+    },
+    "daysToCollect": {
+      "title": "Dias para Coletar",
+      "type": "integer",
+      "description": "Número de dias (apenas para dateFilter = lastXDays)",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 30
+    }
+  },
+  "required": ["username", "password"]
+}

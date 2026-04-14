@@ -1,0 +1,16 @@
+{
+    "actorSpecification": 1,
+    "name": "platts-news-only",
+    "title": "Project Playwright Crawler JavaScript",
+    "description": "Crawlee and Playwright project in JavaScript.",
+    "version": "0.0",
+    "meta": {
+        "templateId": "js-crawlee-playwright-chrome"
+    },
+    "input": "./input_schema.json",
+    "output": "./output_schema.json",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "dockerfile": "../Dockerfile"
+}

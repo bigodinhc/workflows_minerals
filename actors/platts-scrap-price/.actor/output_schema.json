@@ -1,0 +1,13 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Iron Ore Price Assessments",
+    "description": "Dataset of all Platts iron ore price symbols with descriptions, prices, and categorization.",
+    "properties": {
+        "dataset": {
+            "type": "string",
+            "title": "Price Assessments",
+            "description": "Dataset containing one object per run with all extracted symbols.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        }
+    }
+}

@@ -1,0 +1,155 @@
+{
+    "actorSpecification": 1,
+    "fields": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "description": "Run outcome: success or error.",
+                "enum": ["success", "error"],
+                "nullable": true,
+                "example": "success"
+            },
+            "source": {
+                "type": "string",
+                "description": "Data source identifier.",
+                "nullable": true,
+                "example": "Platts IODEX Commentary and Rationale"
+            },
+            "version": {
+                "type": "string",
+                "description": "Scraper version string.",
+                "nullable": true,
+                "example": "15.0"
+            },
+            "message": {
+                "type": "string",
+                "description": "Error or status message.",
+                "nullable": true,
+                "example": "Credenciais necessárias"
+            },
+            "timestamp": {
+                "type": "string",
+                "description": "ISO 8601 timestamp of the error event.",
+                "nullable": true,
+                "example": "2026-01-15T12:00:00.000Z"
+            },
+            "dateInput": {
+                "type": "object",
+                "description": "Normalized date input information.",
+                "properties": {
+                    "original": { "type": "string", "description": "Raw targetDate value provided by the user.", "nullable": true, "example": "15/01/2026" },
+                    "formatBR": { "type": "string", "description": "Date in DD/MM/YYYY format.", "nullable": true, "example": "15/01/2026" },
+                    "formatUS": { "type": "string", "description": "Date in MM/DD/YYYY format.", "nullable": true, "example": "01/15/2026" },
+                    "inputFormat": { "type": "string", "description": "Format of the user-provided date.", "enum": ["BR", "US"], "nullable": true, "example": "BR" }
+                },
+                "required": [],
+                "additionalProperties": true,
+                "nullable": true,
+                "example": { "original": "15/01/2026", "formatBR": "15/01/2026", "formatUS": "01/15/2026", "inputFormat": "BR" }
+            },
+            "summary": {
+                "type": "object",
+                "description": "Aggregate metrics across extracted articles.",
+                "properties": {
+                    "requestedArticles": { "type": "number", "description": "Number of articles requested via input.", "nullable": true, "example": 2 },
+                    "foundArticles": { "type": "number", "description": "Number of articles actually extracted.", "nullable": true, "example": 2 },
+                    "totalWords": { "type": "number", "description": "Combined word count across all articles.", "nullable": true, "example": 1580 },
+                    "totalParagraphs": { "type": "number", "description": "Combined paragraph count across all articles.", "nullable": true, "example": 28 },
+                    "companiesMentioned": { "type": "array", "description": "Unique companies mentioned across articles.", "items": { "type": "string" }, "nullable": true, "example": ["Vale", "Rio Tinto", "BHP"] },
+                    "pricesFound": { "type": "array", "description": "Unique price strings detected in article text.", "items": { "type": "string" }, "nullable": true, "example": ["$102.55", "$99.75"] },
+                    "iodexPrices": { "type": "array", "description": "IODEX price values extracted from article text.", "items": { "type": "string" }, "nullable": true, "example": ["102.55"] }
+                },
+                "required": [],
+                "additionalProperties": true,
+                "nullable": true,
+                "example": {
+                    "requestedArticles": 2,
+                    "foundArticles": 2,
+                    "totalWords": 1580,
+                    "iodexPrices": ["102.55"]
+                }
+            },
+            "articles": {
+                "type": "array",
+                "description": "Extracted IODEX commentary articles.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": { "type": "string", "description": "Article title.", "nullable": true, "example": "Iron ore daily: IODEX settles higher on Chinese demand" },
+                        "url": { "type": "string", "description": "Article URL.", "nullable": true, "example": "https://plattsconnect.spglobal.com/article/example" },
+                        "symbol": { "type": "string", "description": "Article reference symbol (e.g., PMA code).", "nullable": true, "example": "PMA1234567" },
+                        "publishDate": { "type": "string", "description": "Publish date string as shown in the reading pane.", "nullable": true, "example": "15/01/2026 10:00:00 UTC" },
+                        "author": { "type": "string", "description": "Comma-joined authors.", "nullable": true, "example": "Sample Reporter, Example Reporter" },
+                        "authors": { "type": "array", "description": "Individual author names.", "items": { "type": "string" }, "nullable": true, "example": ["Sample Reporter", "Example Reporter"] },
+                        "highlights": { "type": "array", "description": "Highlight bullet points at the top of the article.", "items": { "type": "string" }, "nullable": true, "example": ["IODEX up $0.85 on the day"] },
+                        "paragraphs": { "type": "array", "description": "Body paragraphs.", "items": { "type": "string" }, "nullable": true, "example": ["This is the first body paragraph.", "This is the second body paragraph."] },
+                        "fullText": { "type": "string", "description": "Body paragraphs joined with blank lines.", "nullable": true, "example": "This is the first body paragraph.\n\nThis is the second body paragraph." },
+                        "metadata": {
+                            "type": "object",
+                            "description": "Derived metadata from the article text.",
+                            "properties": {
+                                "wordCount": { "type": "number", "description": "Word count of fullText.", "nullable": true, "example": 790 },
+                                "paragraphCount": { "type": "number", "description": "Number of body paragraphs.", "nullable": true, "example": 14 },
+                                "highlightCount": { "type": "number", "description": "Number of highlight bullets.", "nullable": true, "example": 3 },
+                                "prices": { "type": "array", "description": "Unique USD price strings detected.", "items": { "type": "string" }, "nullable": true, "example": ["$102.55"] },
+                                "yuanPrices": { "type": "array", "description": "Unique Yuan price strings detected.", "items": { "type": "string" }, "nullable": true, "example": ["Yuan 720"] },
+                                "percentages": { "type": "array", "description": "Unique percentage strings detected.", "items": { "type": "string" }, "nullable": true, "example": ["0.84%"] },
+                                "companies": { "type": "array", "description": "Companies from a known list detected in text.", "items": { "type": "string" }, "nullable": true, "example": ["Vale", "Rio Tinto"] },
+                                "iodexPrice": { "type": "string", "description": "IODEX price extracted from 'IODEX at $X' pattern.", "nullable": true, "example": "102.55" },
+                                "iopexAssessments": { "type": "array", "description": "Raw IOPEX mention strings.", "items": { "type": "string" }, "nullable": true, "example": ["IOPEX lump premium steady"] },
+                                "lumpPremium": { "type": "string", "description": "Lump premium value parsed from text.", "nullable": true, "example": "12.50 cents/dmtu" }
+                            },
+                            "required": [],
+                            "additionalProperties": true,
+                            "nullable": true,
+                            "example": { "wordCount": 790, "iodexPrice": "102.55" }
+                        }
+                    },
+                    "required": [],
+                    "additionalProperties": true
+                },
+                "nullable": true,
+                "example": []
+            },
+            "extractedAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when extraction finished.",
+                "nullable": true,
+                "example": "2026-01-15T12:00:00.000Z"
+            }
+        },
+        "required": [],
+        "additionalProperties": true
+    },
+    "views": {
+        "overview": {
+            "title": "Overview",
+            "description": "Run-level summary of IODEX commentary extraction.",
+            "transformation": {
+                "fields": [
+                    "type",
+                    "dateInput.formatBR",
+                    "summary.foundArticles",
+                    "summary.totalWords",
+                    "summary.iodexPrices",
+                    "summary.companiesMentioned",
+                    "extractedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "type": { "label": "Status", "format": "text" },
+                    "dateInput.formatBR": { "label": "Date (BR)", "format": "text" },
+                    "summary.foundArticles": { "label": "Articles", "format": "number" },
+                    "summary.totalWords": { "label": "Words", "format": "number" },
+                    "summary.iodexPrices": { "label": "IODEX Prices", "format": "array" },
+                    "summary.companiesMentioned": { "label": "Companies", "format": "array" },
+                    "extractedAt": { "label": "Extracted At", "format": "date" }
+                }
+            }
+        }
+    }
+}

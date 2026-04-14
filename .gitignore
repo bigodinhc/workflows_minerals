@@ -25,3 +25,10 @@ Thumbs.db
 
 # Data storage
 data/
+
+# Apify Actors - local dev artifacts
+actors/*/node_modules/
+actors/*/storage/
+actors/*/apify_storage/
+actors/*/crawlee_storage/
+actors/*/.apify/

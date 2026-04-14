@@ -1,0 +1,42 @@
+{
+    "title": "Platts Iron Ore Scraper Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "username": {
+            "title": "Username do Platts",
+            "type": "string",
+            "description": "Seu email/usuário de login no Platts",
+            "editor": "textfield",
+            "isSecret": true,
+            "nullable": true
+        },
+        "password": {
+            "title": "Senha do Platts",
+            "type": "string", 
+            "description": "Sua senha de acesso",
+            "editor": "textfield",
+            "isSecret": true,
+            "nullable": true
+        },
+        "testMode": {
+            "title": "Modo de Teste",
+            "type": "boolean",
+            "description": "Roda com dados fake para testar",
+            "default": false
+        },
+        "saveScreenshots": {
+            "title": "Salvar Screenshots",
+            "type": "boolean",
+            "description": "Salva capturas de tela para debug",
+            "default": true
+        },
+        "useProxy": {
+            "title": "Usar Proxy",
+            "type": "boolean",
+            "description": "Usa proxy residencial (evita bloqueios)",
+            "default": false
+        }
+    },
+    "required": []
+}

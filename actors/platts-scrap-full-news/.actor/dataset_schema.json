@@ -1,0 +1,243 @@
+{
+    "actorSpecification": 1,
+    "fields": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "description": "Run outcome: success, no_data, or error.",
+                "enum": ["success", "no_data", "error"],
+                "nullable": true,
+                "example": "success"
+            },
+            "dateFilter": {
+                "type": "string",
+                "description": "Active date filter mode.",
+                "enum": ["today", "specificDate", "lastXDays", "all"],
+                "nullable": true,
+                "example": "specificDate"
+            },
+            "targetDate": {
+                "type": "string",
+                "description": "Target date in DD/MM/YYYY format when applicable.",
+                "nullable": true,
+                "example": "15/01/2026"
+            },
+            "collectImages": {
+                "type": "boolean",
+                "description": "Whether image collection was enabled for this run.",
+                "nullable": true,
+                "example": true
+            },
+            "message": {
+                "type": "string",
+                "description": "Human-readable message for no_data/error runs.",
+                "nullable": true,
+                "example": "Nenhuma notícia para 15/01/2026"
+            },
+            "error": {
+                "type": "string",
+                "description": "Error message when type is 'error'.",
+                "nullable": true,
+                "example": "Login falhou"
+            },
+            "timestamp": {
+                "type": "string",
+                "description": "ISO 8601 timestamp of the non-success event.",
+                "nullable": true,
+                "example": "2026-01-15T12:00:00.000Z"
+            },
+            "summary": {
+                "type": "object",
+                "description": "Aggregate metrics across extracted articles.",
+                "properties": {
+                    "totalArticles": { "type": "number", "description": "Total articles extracted.", "nullable": true, "example": 9 },
+                    "topNews": { "type": "number", "description": "Articles from the Top News section.", "nullable": true, "example": 3 },
+                    "newsInsights": { "type": "number", "description": "Articles from the News & Insights section.", "nullable": true, "example": 4 },
+                    "marketCommentary": { "type": "number", "description": "Articles from the Market Commentary section.", "nullable": true, "example": 2 },
+                    "totalWords": { "type": "number", "description": "Combined word count across all articles.", "nullable": true, "example": 4820 },
+                    "totalImages": { "type": "number", "description": "Total images detected across articles.", "nullable": true, "example": 12 },
+                    "totalCharts": { "type": "number", "description": "Total chart images detected across articles.", "nullable": true, "example": 5 },
+                    "savedImageFiles": {
+                        "type": "array",
+                        "description": "Filenames of all images saved to the key-value store.",
+                        "items": { "type": "string" },
+                        "nullable": true,
+                        "example": ["sample_article_thumbnail_0.jpg", "sample_article_chart_1.png"]
+                    },
+                    "companiesMentioned": { "type": "array", "description": "Unique companies mentioned across articles.", "items": { "type": "string" }, "nullable": true, "example": ["Vale", "Rio Tinto"] },
+                    "pricesFound": { "type": "array", "description": "Unique price strings detected.", "items": { "type": "string" }, "nullable": true, "example": ["$102.55"] }
+                },
+                "required": [],
+                "additionalProperties": true,
+                "nullable": true,
+                "example": {
+                    "totalArticles": 9,
+                    "topNews": 3,
+                    "newsInsights": 4,
+                    "marketCommentary": 2,
+                    "totalImages": 12,
+                    "totalCharts": 5
+                }
+            },
+            "topNews": {
+                "type": "array",
+                "description": "Articles extracted from the Ferrous Metals Top News slider.",
+                "items": { "type": "object", "additionalProperties": true },
+                "nullable": true,
+                "example": []
+            },
+            "newsInsights": {
+                "type": "array",
+                "description": "Articles from the Iron Ore News & Insights section.",
+                "items": { "type": "object", "additionalProperties": true },
+                "nullable": true,
+                "example": []
+            },
+            "marketCommentary": {
+                "type": "array",
+                "description": "Articles from the Iron Ore Market Commentary section.",
+                "items": { "type": "object", "additionalProperties": true },
+                "nullable": true,
+                "example": []
+            },
+            "allArticles": {
+                "type": "array",
+                "description": "All articles from all sections (superset of topNews, newsInsights, marketCommentary).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "description": "Section the article came from.", "nullable": true, "example": "News & Insights" },
+                        "title": { "type": "string", "description": "Article title.", "nullable": true, "example": "Iron ore fines settle higher on Chinese demand" },
+                        "url": { "type": "string", "description": "Article URL.", "nullable": true, "example": "https://plattsconnect.spglobal.com/article/example" },
+                        "href": { "type": "string", "description": "Original href from the listing page.", "nullable": true, "example": "/article?articleID=example-123" },
+                        "elementId": { "type": "string", "description": "DOM element id used to navigate to the article.", "nullable": true, "example": "market-commentary-title-2" },
+                        "clickMethod": { "type": "string", "description": "Navigation method used: href or element click.", "nullable": true, "example": "href" },
+                        "date": { "type": "string", "description": "Article date as shown on the listing page.", "nullable": true, "example": "15/01/2026 10:00:00 UTC" },
+                        "publishDate": { "type": "string", "description": "Publish date parsed from the article body.", "nullable": true, "example": "15/01/2026 10:00:00 UTC" },
+                        "actualDate": { "type": "string", "description": "Date matched inside the article body.", "nullable": true, "example": "15/01/2026 10:00:00 UTC" },
+                        "author": { "type": "string", "description": "Article author name.", "nullable": true, "example": "Sample Reporter" },
+                        "paragraphs": { "type": "array", "description": "Body paragraphs.", "items": { "type": "string" }, "nullable": true, "example": ["This is the first body paragraph."] },
+                        "fullText": { "type": "string", "description": "Body paragraphs joined with blank lines.", "nullable": true, "example": "This is the first body paragraph.\n\nThis is the second body paragraph." },
+                        "extractedAt": { "type": "string", "description": "ISO 8601 timestamp when the article was extracted.", "nullable": true, "example": "2026-01-15T12:00:00.000Z" },
+                        "metadata": {
+                            "type": "object",
+                            "description": "Derived metadata from the article text and images.",
+                            "properties": {
+                                "highlights": { "type": "array", "description": "Highlight bullets at the top of the article.", "items": { "type": "string" }, "nullable": true, "example": ["IODEX up on the day"] },
+                                "wordCount": { "type": "number", "description": "Word count of fullText.", "nullable": true, "example": 680 },
+                                "paragraphCount": { "type": "number", "description": "Number of body paragraphs.", "nullable": true, "example": 12 },
+                                "prices": { "type": "array", "description": "USD and magnitude price strings.", "items": { "type": "string" }, "nullable": true, "example": ["$1.2 billion", "$102.55"] },
+                                "percentages": { "type": "array", "description": "Percentage strings detected.", "items": { "type": "string" }, "nullable": true, "example": ["0.84%"] },
+                                "commodityPrices": { "type": "array", "description": "Commodity price strings with unit.", "items": { "type": "string" }, "nullable": true, "example": ["$102.55/dmt"] },
+                                "companies": { "type": "array", "description": "Known companies detected in text.", "items": { "type": "string" }, "nullable": true, "example": ["Vale", "Rio Tinto"] },
+                                "imageCount": { "type": "number", "description": "Total images (thumbnail + charts) detected.", "nullable": true, "example": 3 },
+                                "chartCount": { "type": "number", "description": "Chart images detected in article body.", "nullable": true, "example": 2 },
+                                "thumbnailSaved": { "type": "boolean", "description": "Whether the thumbnail image was saved to the key-value store.", "nullable": true, "example": true }
+                            },
+                            "required": [],
+                            "additionalProperties": true,
+                            "nullable": true,
+                            "example": { "wordCount": 680, "companies": ["Vale"] }
+                        },
+                        "images": {
+                            "type": "object",
+                            "description": "Image metadata and references to saved files.",
+                            "properties": {
+                                "articleId": { "type": "string", "description": "Identifier used to namespace image filenames.", "nullable": true, "example": "example-article-id-123" },
+                                "total": { "type": "number", "description": "Total images detected in the article.", "nullable": true, "example": 3 },
+                                "thumbnail": {
+                                    "type": "object",
+                                    "description": "Saved thumbnail image metadata.",
+                                    "properties": {
+                                        "filename": { "type": "string", "description": "Key in the key-value store.", "nullable": true, "example": "example-article-id-123_thumbnail_0.jpg" },
+                                        "type": { "type": "string", "description": "Image type.", "enum": ["thumbnail", "chart"], "nullable": true, "example": "thumbnail" },
+                                        "index": { "type": "number", "description": "Index within its type.", "nullable": true, "example": 0 },
+                                        "width": { "type": "number", "description": "Image width in pixels.", "nullable": true, "example": 1200 },
+                                        "height": { "type": "number", "description": "Image height in pixels.", "nullable": true, "example": 630 },
+                                        "caption": { "type": "string", "description": "Caption text if detected.", "nullable": true, "example": "Example caption" },
+                                        "mimeType": { "type": "string", "description": "MIME type of the image.", "nullable": true, "example": "image/jpeg" },
+                                        "sizeKB": { "type": "number", "description": "Approximate file size in kilobytes.", "nullable": true, "example": 85 },
+                                        "storeKey": { "type": "string", "description": "Key in the key-value store (same as filename).", "nullable": true, "example": "example-article-id-123_thumbnail_0.jpg" }
+                                    },
+                                    "required": [],
+                                    "additionalProperties": true,
+                                    "nullable": true,
+                                    "example": null
+                                },
+                                "charts": {
+                                    "type": "array",
+                                    "description": "Saved chart image metadata.",
+                                    "items": { "type": "object", "additionalProperties": true },
+                                    "nullable": true,
+                                    "example": []
+                                },
+                                "savedFiles": {
+                                    "type": "array",
+                                    "description": "All filenames saved to the key-value store for this article.",
+                                    "items": { "type": "string" },
+                                    "nullable": true,
+                                    "example": ["example-article-id-123_thumbnail_0.jpg"]
+                                }
+                            },
+                            "required": [],
+                            "additionalProperties": true,
+                            "nullable": true,
+                            "example": {
+                                "articleId": "example-article-id-123",
+                                "total": 1,
+                                "savedFiles": ["example-article-id-123_thumbnail_0.jpg"]
+                            }
+                        }
+                    },
+                    "required": [],
+                    "additionalProperties": true
+                },
+                "nullable": true,
+                "example": []
+            },
+            "extractedAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when extraction finished.",
+                "nullable": true,
+                "example": "2026-01-15T12:00:00.000Z"
+            }
+        },
+        "required": [],
+        "additionalProperties": true
+    },
+    "views": {
+        "overview": {
+            "title": "Overview",
+            "description": "Run-level summary of iron ore news and commentary extraction.",
+            "transformation": {
+                "fields": [
+                    "type",
+                    "targetDate",
+                    "summary.totalArticles",
+                    "summary.topNews",
+                    "summary.newsInsights",
+                    "summary.marketCommentary",
+                    "summary.totalImages",
+                    "summary.totalCharts",
+                    "extractedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "type": { "label": "Status", "format": "text" },
+                    "targetDate": { "label": "Target Date", "format": "text" },
+                    "summary.totalArticles": { "label": "Total Articles", "format": "number" },
+                    "summary.topNews": { "label": "Top News", "format": "number" },
+                    "summary.newsInsights": { "label": "News & Insights", "format": "number" },
+                    "summary.marketCommentary": { "label": "Market Commentary", "format": "number" },
+                    "summary.totalImages": { "label": "Images", "format": "number" },
+                    "summary.totalCharts": { "label": "Charts", "format": "number" },
+                    "extractedAt": { "label": "Extracted At", "format": "date" }
+                }
+            }
+        }
+    }
+}

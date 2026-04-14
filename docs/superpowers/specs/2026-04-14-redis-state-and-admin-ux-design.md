@@ -18,7 +18,6 @@ Today the system has no cross-run persistent state outside Google Sheets, so the
 
 - No alerting when a workflow fails silently multiple times in a row (crashes stop at `sys.exit(1)` with no Telegram message).
 - No quick way to check "is everything okay today?" without opening the dashboard.
-- No feedback when tapping a toggle button in `/list` — a 2–3s Sheets API latency leaves the admin uncertain whether the tap registered.
 
 Redis (Upstash free tier) solves the persistence gap cleanly: atomic `INCR` for streak counters, native TTL for future needs (drafts, dedup), and sub-ms reads for a snappy `/status` command.
 
@@ -31,7 +30,6 @@ Redis (Upstash free tier) solves the persistence gap cleanly: atomic `INCR` for 
 - New `ProgressReporter.fail(exception)` method for crash visibility (also fixes P0#6 from the project review).
 - Minimal wiring of `market_news_ingestion.py` and `rationale_ingestion.py` so `/status` can show their state.
 - `/status` command handler in `webhook/app.py`.
-- Toast confirmation on the `/list` toggle callback.
 
 **Out of scope:**
 
@@ -78,7 +76,6 @@ Redis (Upstash free tier) solves the persistence gap cleanly: atomic `INCR` for 
 │    └─► Format + TelegramClient.send_message                       │
 │                                                                   │
 │  tgl:<phone> callback (existing, modified)                        │
-│    └─► answer_callback_query(toast: "✅ Name ativado")            │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -336,7 +333,7 @@ If `REDIS_URL` is absent, the system degrades gracefully: state store is no-op, 
 
 1. Land `state_store.py` + tests. Verify fakeredis tests pass.
 2. Sign up for Upstash Redis, create DB, copy URL to GitHub + Railway.
-3. Land `ProgressReporter` integration + crash handler + `/status` + toggle toast in a single PR. Tests pass.
+3. Land `ProgressReporter` integration + crash handler + `/status` in a single PR. Tests pass.
 4. Observe next scheduled run of each workflow. Verify Redis gets populated. Call `/status` to see.
 5. No feature flag — behavior is additive (no existing UX changes).
 

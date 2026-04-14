@@ -176,3 +176,68 @@ def test_toggle_raises_when_phone_not_found(mock_sheets_client):
 
     with pytest.raises(ValueError, match="not found"):
         mock_sheets_client.toggle_contact("sheet_id", "99999")
+
+
+def test_add_contact_appends_row_with_defaults(mock_sheets_client):
+    rows = [
+        {"ProfileName": "Existing", "MessageType": "button",
+         "SmsStatus": "received", "Body": "Sim, quero receber",
+         "From": "whatsapp:+5511888", "ButtonPayload": "Big",
+         "To": "whatsapp:+5511000000000",
+         "n8n-evo": "5511888@s.whatsapp.net"},
+    ]
+    ws = _setup_toggle_sheet(mock_sheets_client, rows)
+
+    mock_sheets_client.add_contact("sheet_id", "Joao Silva", "5511999999999")
+
+    ws.append_row.assert_called_once()
+    appended = ws.append_row.call_args[0][0]
+    # appended is a list matching headers order
+    headers = list(rows[0].keys())
+    row_dict = dict(zip(headers, appended))
+    assert row_dict["ProfileName"] == "Joao Silva"
+    assert row_dict["MessageType"] == "button"
+    assert row_dict["SmsStatus"] == "received"
+    assert row_dict["Body"] == "Sim, quero receber (via bot)"
+    assert row_dict["From"] == "whatsapp:+5511999999999"
+    assert row_dict["ButtonPayload"] == "Big"
+    assert row_dict["To"] == "whatsapp:+5511000000000"  # copied from last row
+    assert row_dict["n8n-evo"] == "5511999999999@s.whatsapp.net"
+
+
+def test_add_contact_raises_on_duplicate_active(mock_sheets_client):
+    rows = [
+        {"ProfileName": "Joao", "From": "whatsapp:+5511999",
+         "n8n-evo": "5511999@s.whatsapp.net", "ButtonPayload": "Big"},
+    ]
+    _setup_toggle_sheet(mock_sheets_client, rows)
+
+    with pytest.raises(ValueError, match="already exists"):
+        mock_sheets_client.add_contact("sheet_id", "Novo", "5511999")
+
+
+def test_add_contact_raises_on_duplicate_inactive(mock_sheets_client):
+    rows = [
+        {"ProfileName": "Joao", "From": "whatsapp:+5511999",
+         "n8n-evo": "5511999@s.whatsapp.net", "ButtonPayload": "Inactive"},
+    ]
+    _setup_toggle_sheet(mock_sheets_client, rows)
+
+    with pytest.raises(ValueError, match="already exists"):
+        mock_sheets_client.add_contact("sheet_id", "Novo", "5511999")
+
+
+def test_add_contact_empty_sheet_uses_empty_to(mock_sheets_client):
+    """When sheet is empty, 'To' field defaults to empty string (no last row to copy)."""
+    ws = MagicMock()
+    ws.get_all_records.return_value = []
+    ws.row_values.return_value = ["ProfileName", "From", "ButtonPayload", "To"]
+    mock_sheets_client.gc.open_by_key.return_value.worksheet.return_value = ws
+
+    mock_sheets_client.add_contact("sheet_id", "Primeiro", "5511111")
+
+    ws.append_row.assert_called_once()
+    appended = ws.append_row.call_args[0][0]
+    # Find index of "To" in headers
+    to_idx = ws.row_values.return_value.index("To")
+    assert appended[to_idx] == ""

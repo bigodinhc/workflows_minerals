@@ -185,6 +185,64 @@ class SheetsClient:
             self.logger.error("toggle_contact failed", {"error": str(e)})
             raise
 
+    def add_contact(self, sheet_id, profile_name, phone, sheet_name="Página1"):
+        """
+        Append a new contact row with sensible defaults.
+        Raises ValueError if phone already exists (active or inactive).
+        """
+        try:
+            sh = self.gc.open_by_key(sheet_id)
+            try:
+                worksheet = sh.worksheet(sheet_name)
+            except Exception:
+                worksheet = sh.sheet1
+
+            headers = worksheet.row_values(1)
+            records = worksheet.get_all_records()
+
+            # Duplicate check
+            needle = _digits_only(phone)
+            for row in records:
+                row_phone = (
+                    row.get("Evolution-api")
+                    or row.get("n8n-evo")
+                    or row.get("From")
+                    or ""
+                )
+                if _digits_only(str(row_phone)) == needle:
+                    status = str(row.get("ButtonPayload", "")).strip()
+                    existing = row.get("ProfileName", "—")
+                    raise ValueError(
+                        f"Contact {existing!r} already exists with phone {phone} "
+                        f"(status: {status or 'unknown'})"
+                    )
+
+            # Copy 'To' from last row (if any) for consistency
+            to_value = ""
+            if records:
+                to_value = records[-1].get("To", "") or ""
+
+            digits = _digits_only(phone)
+
+            defaults = {
+                "ProfileName": profile_name,
+                "MessageType": "button",
+                "SmsStatus": "received",
+                "Body": "Sim, quero receber (via bot)",
+                "From": f"whatsapp:+{digits}",
+                "ButtonPayload": "Big",
+                "To": to_value,
+                "n8n-evo": f"{digits}@s.whatsapp.net",
+            }
+
+            row_values = [defaults.get(h, "") for h in headers]
+            worksheet.append_row(row_values)
+        except ValueError:
+            raise
+        except Exception as e:
+            self.logger.error("add_contact failed", {"error": str(e)})
+            raise
+
     def _get_or_create_control_sheet(self, sheet_id):
         """Helper to get Control sheet, creating if likely missing."""
         try:

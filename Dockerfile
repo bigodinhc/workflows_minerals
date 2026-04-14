@@ -8,6 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY webhook/ .
 
+# Copy shared execution module (DeliveryReporter + deps)
+COPY execution/ ./execution/
+
 # Railway provides PORT env var
 ENV PORT=8080
 EXPOSE 8080

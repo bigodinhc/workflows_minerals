@@ -16,7 +16,11 @@ import anthropic
 from pathlib import Path
 from flask import Flask, request, jsonify
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_HERE = Path(__file__).resolve().parent
+# Railway: /app/execution/ lives alongside app.py after Docker COPY
+sys.path.insert(0, str(_HERE))
+# Local dev: <repo>/execution/ is sibling to webhook/
+sys.path.insert(0, str(_HERE.parent))
 from execution.core.delivery_reporter import DeliveryReporter, Contact
 
 # Setup logging

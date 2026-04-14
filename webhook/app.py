@@ -1317,6 +1317,21 @@ def telegram_webhook():
             _render_list_view(chat_id, page=1, search=search, message_id=None)
             return jsonify({"ok": True})
 
+        if text.startswith("/reprocess"):
+            if not contact_admin.is_authorized(chat_id):
+                return jsonify({"ok": True})
+            parts = text.split(None, 1)
+            if len(parts) < 2 or not parts[1].strip():
+                send_telegram_message(
+                    chat_id,
+                    "Uso: `/reprocess <item_id>`\n\n"
+                    "O item_id é o `🆔` mostrado no rodapé dos cards de curadoria.\n"
+                    "Busca em staging (48h) e depois em archive (7d).",
+                )
+                return jsonify({"ok": True})
+            _reprocess_item(chat_id, parts[1].strip())
+            return jsonify({"ok": True})
+
         return jsonify({"ok": True})  # unknown command
     
     # ── Check if user is in admin add flow ──
@@ -1382,6 +1397,65 @@ def _run_pipeline_and_archive(chat_id, raw_text, progress_msg_id, item_id):
         redis_client.archive(item_id, date, chat_id=chat_id)
     except Exception as exc:
         logger.warning(f"archive post-success failed for {item_id}: {exc}")
+
+
+def _find_curation_item(item_id):
+    """Look up a Platts curation item by id in staging → today/yesterday archive.
+
+    Returns the item dict or None if not found anywhere.
+    """
+    from execution.curation import redis_client
+    try:
+        item = redis_client.get_staging(item_id)
+    except Exception as exc:
+        logger.warning(f"reprocess staging lookup failed for {item_id}: {exc}")
+        item = None
+    if item is not None:
+        return item
+    now_utc = datetime.now(timezone.utc)
+    for offset in (0, 1):
+        date = (now_utc - timedelta(days=offset)).strftime("%Y-%m-%d")
+        try:
+            item = redis_client.get_archive(date, item_id)
+        except Exception as exc:
+            logger.warning(f"reprocess archive lookup failed ({date}, {item_id}): {exc}")
+            continue
+        if item is not None:
+            return item
+    return None
+
+
+def _reprocess_item(chat_id, item_id):
+    """Re-run the 3-agent pipeline on a curation item pulled from Redis.
+
+    Looks up the item in staging → today/yesterday archive, then feeds its
+    raw text into the same pipeline used by `curate_pipeline`. This lets the
+    admin recover items whose buttons have already been consumed (e.g. when
+    a previous click hit a bug or the draft was lost on redeploy).
+    """
+    item = _find_curation_item(item_id)
+    if item is None:
+        send_telegram_message(
+            chat_id,
+            f"❌ Item `{item_id}` não encontrado em staging nem archive recente.",
+        )
+        return
+    raw_text = (
+        f"Title: {item.get('title','')}\n"
+        f"Date: {item.get('publishDate','')}\n"
+        f"Source: {item.get('source','')}\n\n"
+        f"{item.get('fullText','')}"
+    )
+    progress = send_telegram_message(
+        chat_id,
+        f"🤖 Reprocessando item `{item_id}` nos 3 agents...",
+    )
+    progress_msg_id = progress.get("result", {}).get("message_id") if progress else None
+    threading.Thread(
+        target=_run_pipeline_and_archive,
+        args=(chat_id, raw_text, progress_msg_id, item_id),
+        daemon=True,
+    ).start()
 
 
 def handle_callback(callback_query):

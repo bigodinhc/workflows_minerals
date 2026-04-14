@@ -48,6 +48,8 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           UAZAPI_URL: ${{ vars.UAZAPI_URL }}
           UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           DATE_ARG=""
           if [ -n "${{ github.event.inputs.check_date }}" ]; then

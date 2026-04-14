@@ -23,3 +23,4 @@ pytest-mock>=3.10.0
 redis>=5.0,<6.0
 croniter>=2.0,<3.0
 fakeredis>=2.20,<3.0
+pyyaml>=6.0,<7.0

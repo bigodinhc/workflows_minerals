@@ -395,3 +395,56 @@ def test_finish_empty_noop_when_disabled():
 
     reporter.finish_empty("nothing")
     fake_client.edit_message_text.assert_not_called()
+
+
+def test_full_lifecycle_start_dispatch_finish(monkeypatch):
+    """Integration: start → 100 ticks → finish. Verify call sequence and
+    that finish text matches what _format_telegram_message would produce."""
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 999
+    fake_client.edit_message_text.return_value = True
+
+    fake_time = [200.0]
+    monkeypatch.setattr("time.monotonic", lambda: fake_time[0])
+
+    reporter = ProgressReporter(
+        workflow="morning_check",
+        chat_id="chat-x",
+        gh_run_id="RUN123",
+        telegram_client=fake_client,
+    )
+    reporter.start("Buscando dados...")
+
+    # Simulate 100-contact dispatch
+    for i in range(1, 101):
+        reporter.on_dispatch_tick(i, 100, _dummy_result())
+
+    results = [
+        DeliveryResult(contact=Contact(name=f"U{i}", phone=str(i)), success=True, error=None, duration_ms=0)
+        for i in range(100)
+    ]
+    report = _make_report("morning_check", results)
+    reporter.finish(report)
+
+    # 1 sendMessage (start) + at least 10 edits (10% steps + final) + 1 finish edit
+    assert fake_client.send_message.call_count == 1
+    assert fake_client.edit_message_text.call_count >= 10
+
+    # Final edit should contain the summary
+    final_call = fake_client.edit_message_text.call_args_list[-1]
+    assert "✅" in final_call.kwargs["new_text"]
+    assert "Total: 100" in final_call.kwargs["new_text"]
+    assert "RUN123" in final_call.kwargs["new_text"]  # link includes run_id
+
+
+def test_update_called_before_start_is_noop():
+    """Calling update() before start() must be a no-op, not a crash."""
+    fake_client = MagicMock()
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    # Do not call start()
+    reporter.update("anything")
+    fake_client.edit_message_text.assert_not_called()

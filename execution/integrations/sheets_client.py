@@ -98,6 +98,47 @@ class SheetsClient:
             self.logger.error("Failed to fetch contacts", {"error": str(e), "traceback": tb})
             raise e
 
+    def list_contacts(
+        self,
+        sheet_id,
+        sheet_name="Página1",
+        search=None,
+        page=1,
+        per_page=10,
+    ):
+        """
+        List all contacts (both active and inactive) for admin view.
+        Optionally filtered by case-insensitive substring on ProfileName.
+        Returns (contacts_on_page, total_pages).
+        """
+        import math
+        try:
+            sh = self.gc.open_by_key(sheet_id)
+            try:
+                worksheet = sh.worksheet(sheet_name)
+            except gspread.WorksheetNotFound:
+                worksheet = sh.sheet1
+
+            records = worksheet.get_all_records()
+
+            if search:
+                needle = search.lower()
+                records = [
+                    r for r in records
+                    if needle in str(r.get("ProfileName", "")).lower()
+                ]
+
+            total = len(records)
+            if total == 0:
+                return [], 0
+            total_pages = math.ceil(total / per_page)
+            start = (page - 1) * per_page
+            end = start + per_page
+            return records[start:end], total_pages
+        except Exception as e:
+            self.logger.error("list_contacts failed", {"error": str(e)})
+            raise
+
     def _get_or_create_control_sheet(self, sheet_id):
         """Helper to get Control sheet, creating if likely missing."""
         try:

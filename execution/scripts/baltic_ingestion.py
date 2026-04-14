@@ -22,6 +22,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 from execution.core.logger import WorkflowLogger
+from execution.core.progress_reporter import ProgressReporter
 from execution.integrations.baltic_client import BalticClient
 from execution.integrations.claude_client import ClaudeClient
 from execution.integrations.sheets_client import SheetsClient
@@ -182,18 +183,26 @@ def ingest_to_ironmarket(data):
 
 def main():
     logger = WorkflowLogger("BalticIngestion")
-    
+
+    progress = ProgressReporter(
+        workflow="baltic",
+        chat_id=os.getenv("TELEGRAM_CHAT_ID_BALTIC") or os.getenv("TELEGRAM_CHAT_ID"),
+        gh_run_id=os.getenv("GITHUB_RUN_ID"),
+    )
+    progress.start("Preparando dados Baltic...")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Skip sending and saving state")
     args = parser.parse_args()
-    
+
     # 1. Check Control Sheet
     sheets = SheetsClient()
     today_str = datetime.now().strftime("%Y-%m-%d")
-    
+
     if not args.dry_run:
         if sheets.check_daily_status(SHEET_ID, today_str, REPORT_TYPE):
             logger.info("Baltic report already processed today. Exiting.")
+            progress.finish_empty("report ja enviado hoje")
             return
 
     # 2. Fetch Email & PDF
@@ -204,10 +213,12 @@ def main():
         msg = baltic.find_latest_email()
     except Exception as e:
         logger.error(f"Failed to fetch emails: {e}")
+        progress.finish_empty("erro ao buscar email Baltic")
         sys.exit(1)
-        
+
     if not msg:
         logger.info("No matching email found in the last 24h.")
+        progress.finish_empty("sem dados Baltic disponiveis")
         sys.exit(0)
     
     # NEW: Validate if email is actually from TODAY
@@ -223,6 +234,7 @@ def main():
         if email_dt != today_dt:
             logger.info(f"Found email but it is from {email_dt} (not today {today_dt}). Report not released yet.")
             logger.info(f"Subject: {msg['subject']}")
+            progress.finish_empty("sem dados Baltic disponiveis")
             sys.exit(0)
             
     except Exception as e:
@@ -234,6 +246,7 @@ def main():
     
     if not pdf_bytes:
         logger.warning("No PDF attachment found in the email.")
+        progress.finish_empty("sem dados Baltic disponiveis")
         sys.exit(0)
         
     logger.info(f"Downloaded PDF: {filename}")
@@ -246,6 +259,7 @@ def main():
     if not data or data.get('extraction_confidence') == 'low':
         logger.error("Extraction failed or low confidence.")
         # We could notify admin here
+        progress.finish_empty("falha na extracao do PDF Baltic")
         sys.exit(1)
         
     logger.info(f"Extraction successful. Date: {data.get('report_date')}")
@@ -266,6 +280,7 @@ def main():
     if args.dry_run:
         print("\n--- WHATSAPP PREVIEW ---\n")
         print(message)
+        progress.finish_empty("dry-run")
         return
 
     contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
@@ -273,12 +288,25 @@ def main():
 
     delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
 
+    if not delivery_contacts:
+        logger.warning("No active contacts found.")
+        progress.finish_empty("nenhum contato ativo")
+        return
+
+    progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
+
     reporter = DeliveryReporter(
         workflow="baltic",
         send_fn=uazapi.send_message,
+        notify_telegram=False,
         gh_run_id=os.getenv("GITHUB_RUN_ID"),
     )
-    report = reporter.dispatch(delivery_contacts, message)
+    report = reporter.dispatch(
+        delivery_contacts,
+        message,
+        on_progress=progress.on_dispatch_tick,
+    )
+    progress.finish(report)
     logger.info(
         f"Baltic broadcast complete. Sent: {report.success_count}, "
         f"Failed: {report.failure_count}"

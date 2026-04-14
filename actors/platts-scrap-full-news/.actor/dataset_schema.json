@@ -52,10 +52,29 @@
                 "type": "object",
                 "description": "Aggregate metrics across extracted articles.",
                 "properties": {
-                    "totalArticles": { "type": "number", "description": "Total articles extracted.", "nullable": true, "example": 9 },
+                    "totalArticles": { "type": "number", "description": "Total articles extracted (padrão A + RMW).", "nullable": true, "example": 25 },
                     "topNews": { "type": "number", "description": "Articles from the Top News section.", "nullable": true, "example": 3 },
+                    "latest": { "type": "number", "description": "Articles from the Latest infinite list.", "nullable": true, "example": 15 },
                     "newsInsights": { "type": "number", "description": "Articles from the News & Insights section.", "nullable": true, "example": 4 },
-                    "marketCommentary": { "type": "number", "description": "Articles from the Market Commentary section.", "nullable": true, "example": 2 },
+                    "marketCommentary": { "type": "number", "description": "Deprecated: Iron Ore Market Commentary (agora vem via RMW).", "nullable": true, "example": 0 },
+                    "flash": { "type": "number", "description": "FLASH banner items captured.", "nullable": true, "example": 1 },
+                    "rmwArticles": { "type": "number", "description": "Total articles from Raw Materials Workspace (across all tabs).", "nullable": true, "example": 8 },
+                    "rmwTabs": {
+                        "type": "array",
+                        "description": "Counts per RMW sub-tab.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tabName": { "type": "string", "nullable": true, "example": "IODEX Commentary and Rationale" },
+                                "articleCount": { "type": "number", "nullable": true, "example": 3 }
+                            },
+                            "required": [],
+                            "additionalProperties": true
+                        },
+                        "nullable": true,
+                        "example": []
+                    },
+                    "iodexPrices": { "type": "array", "description": "Unique IODEX price values extracted across articles.", "items": { "type": "string" }, "nullable": true, "example": ["102.55"] },
                     "totalWords": { "type": "number", "description": "Combined word count across all articles.", "nullable": true, "example": 4820 },
                     "totalImages": { "type": "number", "description": "Total images detected across articles.", "nullable": true, "example": 12 },
                     "totalCharts": { "type": "number", "description": "Total chart images detected across articles.", "nullable": true, "example": 5 },
@@ -67,7 +86,8 @@
                         "example": ["sample_article_thumbnail_0.jpg", "sample_article_chart_1.png"]
                     },
                     "companiesMentioned": { "type": "array", "description": "Unique companies mentioned across articles.", "items": { "type": "string" }, "nullable": true, "example": ["Vale", "Rio Tinto"] },
-                    "pricesFound": { "type": "array", "description": "Unique price strings detected.", "items": { "type": "string" }, "nullable": true, "example": ["$102.55"] }
+                    "pricesFound": { "type": "array", "description": "Unique price strings detected.", "items": { "type": "string" }, "nullable": true, "example": ["$102.55"] },
+                    "failedArticles": { "type": "number", "description": "Number of articles that failed to extract.", "nullable": true, "example": 0 }
                 },
                 "required": [],
                 "additionalProperties": true,
@@ -95,9 +115,58 @@
                 "nullable": true,
                 "example": []
             },
+            "latest": {
+                "type": "array",
+                "description": "Articles from the Latest infinite list (allInsights).",
+                "items": { "type": "object", "additionalProperties": true },
+                "nullable": true,
+                "example": []
+            },
+            "flash": {
+                "type": "array",
+                "description": "FLASH banner items (breaking news). Each has isFlash: true.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": { "type": "string", "nullable": true, "example": "allInsights.flash" },
+                        "isFlash": { "type": "boolean", "nullable": true, "example": true },
+                        "title": { "type": "string", "nullable": true, "example": "Supreme Court strikes down global tariffs" },
+                        "date": { "type": "string", "nullable": true, "example": "20/02/2026 15:09:42 UTC" },
+                        "gridDateTime": { "type": "string", "nullable": true, "example": "20/02/2026 15:09:42 UTC" },
+                        "fullText": { "type": "string", "nullable": true, "example": "20/02/2026 15:09:42 UTC: Supreme Court strikes down Trump's global tariffs" },
+                        "extractedAt": { "type": "string", "nullable": true, "example": "2026-01-15T12:00:00.000Z" }
+                    },
+                    "required": [],
+                    "additionalProperties": true
+                },
+                "nullable": true,
+                "example": []
+            },
+            "rmw": {
+                "type": "array",
+                "description": "Raw Materials Workspace commentary/rationale results grouped by sub-tab.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tabName": { "type": "string", "nullable": true, "example": "IODEX Commentary and Rationale" },
+                        "tabId": { "type": "string", "nullable": true, "example": "2-widget-area-tab-IODEX Commentary and Rationale" },
+                        "articles": {
+                            "type": "array",
+                            "description": "Articles extracted from this tab's reading pane.",
+                            "items": { "type": "object", "additionalProperties": true },
+                            "nullable": true,
+                            "example": []
+                        }
+                    },
+                    "required": [],
+                    "additionalProperties": true
+                },
+                "nullable": true,
+                "example": []
+            },
             "marketCommentary": {
                 "type": "array",
-                "description": "Articles from the Iron Ore Market Commentary section.",
+                "description": "Deprecated: Iron Ore Market Commentary. Kept as empty array for backward compatibility; content now lives in rmw[].articles.",
                 "items": { "type": "object", "additionalProperties": true },
                 "nullable": true,
                 "example": []
@@ -121,6 +190,24 @@
                         "paragraphs": { "type": "array", "description": "Body paragraphs.", "items": { "type": "string" }, "nullable": true, "example": ["This is the first body paragraph."] },
                         "fullText": { "type": "string", "description": "Body paragraphs joined with blank lines.", "nullable": true, "example": "This is the first body paragraph.\n\nThis is the second body paragraph." },
                         "extractedAt": { "type": "string", "description": "ISO 8601 timestamp when the article was extracted.", "nullable": true, "example": "2026-01-15T12:00:00.000Z" },
+                        "gridDateTime": { "type": "string", "description": "Timestamp as shown in the listing grid, captured before click.", "nullable": true, "example": "15/01/2026 10:00:00 UTC" },
+                        "rawHtml": { "type": "string", "description": "Raw innerHTML of the article body (only present when includeRawHtml input is true).", "nullable": true, "example": "<p>Example body paragraph.</p>" },
+                        "tables": {
+                            "type": "array",
+                            "description": "Tables parsed from the article body.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "headers": { "type": "array", "items": { "type": "string" }, "nullable": true, "example": ["Symbol", "Price"] },
+                                    "rows": { "type": "array", "items": { "type": "array", "items": { "type": "string" } }, "nullable": true, "example": [["IODBZ00", "102.55"]] },
+                                    "caption": { "type": "string", "nullable": true, "example": "Iron ore assessments" }
+                                },
+                                "required": [],
+                                "additionalProperties": true
+                            },
+                            "nullable": true,
+                            "example": []
+                        },
                         "metadata": {
                             "type": "object",
                             "description": "Derived metadata from the article text and images.",

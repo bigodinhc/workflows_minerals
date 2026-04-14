@@ -42,10 +42,61 @@ ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 # Google Sheets for contacts
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
 
-# In-memory state
-DRAFTS = {}         # draft_id → {message, status, original_text, uazapi_token, uazapi_url}
+# In-memory state (ADJUST_STATE + SEEN_ARTICLES are ephemeral; DRAFTS now in Redis)
 ADJUST_STATE = {}   # chat_id → {draft_id, awaiting_feedback: True}
 SEEN_ARTICLES = {}  # date_str → set of article titles (for market_news dedup)
+
+
+# ── Persistent drafts store (Redis, 7d TTL) ──
+# Replaces the in-memory DRAFTS dict so drafts survive Railway redeploys.
+_DRAFT_KEY_PREFIX = "webhook:draft:"
+_DRAFT_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days
+
+
+def _drafts_client():
+    """Return Redis client used for draft persistence (same keyspace helper as curation)."""
+    from execution.curation.redis_client import _get_client
+    return _get_client()
+
+
+def drafts_get(draft_id):
+    """Return draft dict or None if missing/unreachable."""
+    try:
+        raw = _drafts_client().get(f"{_DRAFT_KEY_PREFIX}{draft_id}")
+        if raw:
+            return json.loads(raw)
+    except Exception as exc:
+        logger.warning(f"drafts_get({draft_id}) failed: {exc}")
+    return None
+
+
+def drafts_set(draft_id, draft):
+    """Persist draft with 7d TTL. Logs but does not raise on Redis failure."""
+    try:
+        _drafts_client().set(
+            f"{_DRAFT_KEY_PREFIX}{draft_id}",
+            json.dumps(draft),
+            ex=_DRAFT_TTL_SECONDS,
+        )
+    except Exception as exc:
+        logger.error(f"drafts_set({draft_id}) failed: {exc}")
+
+
+def drafts_contains(draft_id):
+    try:
+        return bool(_drafts_client().exists(f"{_DRAFT_KEY_PREFIX}{draft_id}"))
+    except Exception as exc:
+        logger.warning(f"drafts_contains({draft_id}) failed: {exc}")
+        return False
+
+
+def drafts_update(draft_id, **fields):
+    """Read-modify-write for partial field updates."""
+    draft = drafts_get(draft_id)
+    if draft is None:
+        return
+    draft.update(fields)
+    drafts_set(draft_id, draft)
 
 ALL_WORKFLOWS = [
     "morning_check",
@@ -904,13 +955,13 @@ def process_news_async(chat_id, raw_text, progress_msg_id):
         # Store draft
         import time
         draft_id = f"news_{int(time.time())}"
-        DRAFTS[draft_id] = {
+        drafts_set(draft_id, {
             "message": final_message,
             "status": "pending",
             "original_text": raw_text,
             "uazapi_token": None,
             "uazapi_url": None
-        }
+        })
 
         # Remove progress message and send approval
         edit_message(chat_id, progress_msg_id, "✅ Processamento concluído!")
@@ -927,17 +978,18 @@ def process_adjustment_async(chat_id, draft_id, feedback):
     progress_msg_id = progress.get("result", {}).get("message_id") if progress.get("ok") else None
     
     try:
-        draft = DRAFTS.get(draft_id)
+        draft = drafts_get(draft_id)
         if not draft:
             send_telegram_message(chat_id, "❌ Draft não encontrado.")
             return
 
         adjusted = run_adjuster(draft["message"], feedback, draft["original_text"])
-        
-        # Update draft
+
+        # Update draft (persist back to Redis)
         draft["message"] = adjusted
         draft["status"] = "pending"
-        
+        drafts_set(draft_id, draft)
+
         if progress_msg_id:
             edit_message(chat_id, progress_msg_id, "✅ Ajuste concluído!")
         
@@ -1107,9 +1159,9 @@ def preview_item(item_id):
 
 @app.route("/health", methods=["GET"])
 def health():
+    # drafts_count is approximate — SCAN could be slow with many keys, so we skip it
     return jsonify({
         "status": "ok",
-        "drafts_count": len(DRAFTS),
         "seen_articles_dates": len(SEEN_ARTICLES),
         "uazapi_token_set": bool(UAZAPI_TOKEN),
         "uazapi_url": UAZAPI_URL,
@@ -1138,16 +1190,17 @@ def store_draft():
     if not draft_id or not message:
         return jsonify({"error": "Missing draft_id or message"}), 400
     
-    DRAFTS[draft_id] = {
+    draft = {
         "message": message,
         "status": "pending",
         "original_text": "",
         "uazapi_token": (data.get("uazapi_token") or "").strip() or None,
         "uazapi_url": (data.get("uazapi_url") or "").strip() or None
     }
-    
-    if DRAFTS[draft_id]["uazapi_token"]:
-        logger.info(f"Draft includes UAZAPI token: {DRAFTS[draft_id]['uazapi_token'][:8]}...")
+    drafts_set(draft_id, draft)
+
+    if draft["uazapi_token"]:
+        logger.info(f"Draft includes UAZAPI token: {draft['uazapi_token'][:8]}...")
     else:
         logger.info(f"Draft has no UAZAPI token, will use env var")
     
@@ -1395,20 +1448,20 @@ def handle_callback(callback_query):
     action, draft_id = parts
 
     if action == "approve":
-        draft = DRAFTS.get(draft_id)
+        draft = drafts_get(draft_id)
         if not draft:
             logger.warning(f"Draft not found: {draft_id}")
             answer_callback(callback_id, "❌ Draft não encontrado")
             send_telegram_message(chat_id, "❌ DRAFT EXPIRADO\n\nRode o workflow novamente.")
             return jsonify({"ok": True})
-        
+
         if draft["status"] != "pending":
             answer_callback(callback_id, "⚠️ Já processado")
             return jsonify({"ok": True})
-        
-        draft["status"] = "approved"
+
+        drafts_update(draft_id, status="approved")
         answer_callback(callback_id, "✅ Aprovado! Enviando...")
-        
+
         thread = threading.Thread(
             target=process_approval_async,
             args=(chat_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
@@ -1416,15 +1469,15 @@ def handle_callback(callback_query):
         thread.daemon = True
         thread.start()
         return jsonify({"ok": True})
-    
+
     elif action == "test_approve":
-        draft = DRAFTS.get(draft_id)
+        draft = drafts_get(draft_id)
         if not draft:
             answer_callback(callback_id, "❌ Draft não encontrado")
             return jsonify({"ok": True})
-        
+
         answer_callback(callback_id, "🧪 Enviando teste para 1 contato...")
-        
+
         thread = threading.Thread(
             target=process_test_send_async,
             args=(chat_id, draft_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
@@ -1432,21 +1485,21 @@ def handle_callback(callback_query):
         thread.daemon = True
         thread.start()
         return jsonify({"ok": True})
-    
+
     elif action == "adjust":
-        draft = DRAFTS.get(draft_id)
+        draft = drafts_get(draft_id)
         if not draft:
             answer_callback(callback_id, "❌ Draft não encontrado")
             return jsonify({"ok": True})
-        
+
         # Set adjustment state
         ADJUST_STATE[chat_id] = {
             "draft_id": draft_id,
             "awaiting_feedback": True
         }
-        
+
         answer_callback(callback_id, "✏️ Modo ajuste")
-        send_telegram_message(chat_id, 
+        send_telegram_message(chat_id,
             "✏️ *MODO AJUSTE*\n\n"
             "Envie uma mensagem descrevendo o que quer ajustar.\n\n"
             "Exemplos:\n"
@@ -1455,12 +1508,12 @@ def handle_callback(callback_query):
             "• _Resuma em menos linhas_\n"
             "• _Mude o título para X_")
         return jsonify({"ok": True})
-    
+
     elif action == "reject":
         answer_callback(callback_id, "❌ Rejeitado")
         send_telegram_message(chat_id, "❌ REJEITADO\n\nEste relatório foi descartado.")
-        if draft_id in DRAFTS:
-            DRAFTS[draft_id]["status"] = "rejected"
+        if drafts_contains(draft_id):
+            drafts_update(draft_id, status="rejected")
         return jsonify({"ok": True})
 
     elif action == "curate_archive":

@@ -10,6 +10,11 @@ from contact_admin import (
     parse_add_input,
     is_authorized,
     digits_only,
+    start_add_flow,
+    get_state,
+    clear_state,
+    is_awaiting_add,
+    ADMIN_STATE,
 )
 
 
@@ -93,3 +98,60 @@ def test_is_authorized_rejects_other(monkeypatch):
 def test_is_authorized_rejects_when_env_missing(monkeypatch):
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     assert is_authorized(12345) is False
+
+
+# ── State machine helpers ──
+
+def test_start_add_flow_sets_state():
+    ADMIN_STATE.clear()
+    start_add_flow(123)
+    assert is_awaiting_add(123) is True
+
+
+def test_clear_state_removes_entry():
+    ADMIN_STATE.clear()
+    start_add_flow(123)
+    clear_state(123)
+    assert is_awaiting_add(123) is False
+
+
+def test_clear_state_on_missing_chat_is_noop():
+    ADMIN_STATE.clear()
+    clear_state(999)  # no raise
+    assert is_awaiting_add(999) is False
+
+
+def test_is_awaiting_add_false_when_no_state():
+    ADMIN_STATE.clear()
+    assert is_awaiting_add(123) is False
+
+
+def test_expired_state_treated_as_not_awaiting():
+    from datetime import datetime, timedelta
+    ADMIN_STATE.clear()
+    ADMIN_STATE[123] = {
+        "awaiting": "add_data",
+        "expires_at": datetime.now() - timedelta(minutes=1),
+    }
+    assert is_awaiting_add(123) is False
+
+
+def test_expired_state_cleaned_up_on_check():
+    from datetime import datetime, timedelta
+    ADMIN_STATE.clear()
+    ADMIN_STATE[123] = {
+        "awaiting": "add_data",
+        "expires_at": datetime.now() - timedelta(minutes=1),
+    }
+    is_awaiting_add(123)  # triggers cleanup
+    assert 123 not in ADMIN_STATE
+
+
+def test_start_add_flow_overwrites_existing_state():
+    ADMIN_STATE.clear()
+    start_add_flow(123)
+    first_expiry = ADMIN_STATE[123]["expires_at"]
+    # Start again
+    start_add_flow(123)
+    # Expiry should be reset to a time >= the previous expiry
+    assert ADMIN_STATE[123]["expires_at"] >= first_expiry

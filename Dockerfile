@@ -11,6 +11,9 @@ COPY webhook/ .
 # Copy shared execution module (DeliveryReporter + deps)
 COPY execution/ ./execution/
 
+# Copy GH Actions workflow YAMLs so /status can parse cron schedules
+COPY .github/workflows/ ./.github/workflows/
+
 # Railway provides PORT env var
 ENV PORT=8080
 EXPOSE 8080

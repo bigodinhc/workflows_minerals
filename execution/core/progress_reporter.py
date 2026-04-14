@@ -47,6 +47,7 @@ class ProgressReporter:
     def start(self, phase_text: str = "Preparando dados...") -> None:
         """Send initial message and store message_id. Never raises."""
         self._started_at = datetime.now().astimezone()
+        self._last_edit_at = time.monotonic()
         text = self._header("⏳", phase_text)
         try:
             client = self._get_client()
@@ -75,3 +76,35 @@ class ProgressReporter:
         except Exception as exc:
             print(f"[WARN] ProgressReporter.update failed: {exc}")
         self._last_edit_at = time.monotonic()
+
+    def on_dispatch_tick(self, processed: int, total: int, result) -> None:
+        """Called once per DeliveryReporter progress event. Throttles edits.
+        Edits when any of: (pct delta >= 10) OR (>=5s since last edit) OR
+        (processed == total, force final).
+        """
+        if self._disabled or self._message_id is None or total <= 0:
+            return
+        now = time.monotonic()
+        pct = int(processed * 100 / total)
+        pct_delta = pct - self._last_edit_pct
+        time_delta = now - self._last_edit_at
+        is_final = processed == total
+
+        should_edit = (pct_delta >= 10) or (time_delta >= 5.0) or is_final
+        if not should_edit:
+            return
+
+        body = f"📤 Enviando pra {total} contatos... ({processed}/{total})"
+        full = self._header("⏳", body)
+        try:
+            client = self._get_client()
+            client.edit_message_text(
+                chat_id=self.chat_id,
+                message_id=self._message_id,
+                new_text=full,
+            )
+        except Exception as exc:
+            print(f"[WARN] ProgressReporter.on_dispatch_tick edit failed: {exc}")
+
+        self._last_edit_at = now
+        self._last_edit_pct = pct

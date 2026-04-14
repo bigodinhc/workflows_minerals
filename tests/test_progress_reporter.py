@@ -111,3 +111,148 @@ def test_update_swallows_exceptions():
     reporter.start()
     # Must not raise
     reporter.update("anything")
+
+
+from execution.core.delivery_reporter import Contact, DeliveryResult
+
+
+def _dummy_result():
+    return DeliveryResult(
+        contact=Contact(name="x", phone="1"),
+        success=True,
+        error=None,
+        duration_ms=0,
+    )
+
+
+def test_on_dispatch_tick_no_edit_before_10_percent(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+
+    fake_time = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: fake_time[0])
+
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    # 5/100 = 5%, below 10% threshold
+    reporter.on_dispatch_tick(5, 100, _dummy_result())
+    fake_client.edit_message_text.assert_not_called()
+
+
+def test_on_dispatch_tick_edits_at_10_percent(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+
+    fake_time = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: fake_time[0])
+
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    reporter.on_dispatch_tick(10, 100, _dummy_result())
+    fake_client.edit_message_text.assert_called_once()
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert "(10/100)" in kwargs["new_text"]
+    assert "📤" in kwargs["new_text"]
+
+
+def test_on_dispatch_tick_edits_after_5_seconds(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+
+    fake_time = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: fake_time[0])
+
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    # Below 10% threshold
+    reporter.on_dispatch_tick(3, 100, _dummy_result())
+    fake_client.edit_message_text.assert_not_called()
+
+    # Advance time past 5s, still below 10%
+    fake_time[0] = 106.0
+    reporter.on_dispatch_tick(4, 100, _dummy_result())
+    fake_client.edit_message_text.assert_called_once()
+
+
+def test_on_dispatch_tick_always_edits_on_final(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+
+    fake_time = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: fake_time[0])
+
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    # On very small lists, the only tick is processed == total
+    reporter.on_dispatch_tick(3, 3, _dummy_result())
+    fake_client.edit_message_text.assert_called_once()
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert "(3/3)" in kwargs["new_text"]
+
+
+def test_on_dispatch_tick_noop_when_disabled():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = None  # disabled
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    reporter.on_dispatch_tick(50, 100, _dummy_result())
+    fake_client.edit_message_text.assert_not_called()
+
+
+def test_on_dispatch_tick_throttle_count_for_100_contacts(monkeypatch):
+    """For a 100-contact dispatch with near-zero time between ticks, we expect
+    ~10 edits (one per 10% step), never more than 12 (including start)."""
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+
+    fake_time = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: fake_time[0])
+
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    for i in range(1, 101):
+        reporter.on_dispatch_tick(i, 100, _dummy_result())
+
+    edit_count = fake_client.edit_message_text.call_count
+    assert 9 <= edit_count <= 12, f"Expected 9-12 edits, got {edit_count}"

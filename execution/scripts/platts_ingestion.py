@@ -7,6 +7,7 @@ Scheduled 3x/day (9h, 12h, 15h BRT) via Railway cron.
 import argparse
 import os
 import sys
+import traceback
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -28,6 +29,7 @@ def _flatten_dataset(items: list) -> list:
 
     The actor returns a single wrapper with keys flash/topNews/latest/newsInsights/rmw.
     RMW is nested one level deeper as [{tabName, articles: [...]}].
+    Defensive against malformed payloads — non-dict entries are skipped.
     """
     flat = []
     for item in items:
@@ -35,13 +37,24 @@ def _flatten_dataset(items: list) -> list:
             continue
         if any(k in item for k in ("topNews", "latest", "newsInsights", "rmw", "flash")):
             for key in ("flash", "topNews", "latest", "newsInsights"):
-                flat.extend(item.get(key) or [])
-            for group in item.get("rmw") or []:
-                tab = group.get("tabName", "")
-                for a in group.get("articles") or []:
-                    a = dict(a)
-                    a.setdefault("tabName", tab)
-                    flat.append(a)
+                val = item.get(key)
+                if isinstance(val, list):
+                    flat.extend(a for a in val if isinstance(a, dict))
+            rmw_groups = item.get("rmw")
+            if isinstance(rmw_groups, list):
+                for group in rmw_groups:
+                    if not isinstance(group, dict):
+                        continue
+                    tab = group.get("tabName", "")
+                    articles = group.get("articles")
+                    if not isinstance(articles, list):
+                        continue
+                    for a in articles:
+                        if not isinstance(a, dict):
+                            continue
+                        a = dict(a)
+                        a.setdefault("tabName", tab)
+                        flat.append(a)
         else:
             flat.append(item)
     return flat
@@ -101,15 +114,24 @@ def main():
             items = [{
                 "type": "success",
                 "topNews": [{
-                    "title": "DryRun Test Item",
-                    "fullText": "Test body with some prices $104.80/dmt CFR.",
+                    "title": "DryRun Top",
+                    "fullText": "Test body with prices $104.80/dmt CFR.",
                     "publishDate": today_br,
                     "source": "Top News - Ferrous Metals",
                     "author": "Test Author",
                     "tabName": "",
                 }],
-                "rmw": [],
-                "summary": {"totalArticles": 1},
+                "rmw": [{
+                    "tabName": "CFR North China Iron Ore 65% Fe Rationale",
+                    "articles": [{
+                        "title": "DryRun Rationale",
+                        "fullText": "Platts assessed the 65% Fe index at $123.35/dmt CFR North China.",
+                        "gridDateTime": today_br,
+                        "source": "rmw.CFR North China Iron Ore 65% Fe Rationale",
+                        "tabName": "CFR North China Iron Ore 65% Fe Rationale",
+                    }],
+                }],
+                "summary": {"totalArticles": 2},
             }]
         else:
             logger.info(f"Running Apify Actor: {ACTOR_ID}")
@@ -141,8 +163,10 @@ def main():
         state_store.record_success(WORKFLOW_NAME, counters, 0)
 
     except Exception as e:
-        logger.critical(f"Workflow failed: {e}")
-        state_store.record_crash(WORKFLOW_NAME, str(e)[:200])
+        logger.critical(
+            f"Workflow failed ({type(e).__name__}): {e}\n{traceback.format_exc()}"
+        )
+        state_store.record_crash(WORKFLOW_NAME, f"{type(e).__name__}: {str(e)}"[:200])
         raise
 
 

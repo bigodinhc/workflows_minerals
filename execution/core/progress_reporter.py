@@ -173,3 +173,24 @@ class ProgressReporter:
             )
         except Exception as exc:
             print(f"[WARN] ProgressReporter.finish_empty edit failed: {exc}")
+
+    def fail(self, exception: Exception) -> None:
+        """Edit message with crash marker and record to state store.
+        Called from outer try/except in script main(). Never raises."""
+        exc_text = str(exception)[:200]
+        if not self._disabled and self._message_id is not None:
+            text = self._header("🚨", f"CRASH: {exc_text}")
+            try:
+                client = self._get_client()
+                client.edit_message_text(
+                    chat_id=self.chat_id,
+                    message_id=self._message_id,
+                    new_text=text,
+                )
+            except Exception as e:
+                print(f"[WARN] ProgressReporter.fail telegram edit failed: {e}")
+        try:
+            from execution.core import state_store
+            state_store.record_crash(self.workflow, exc_text)
+        except Exception as e:
+            print(f"[WARN] ProgressReporter.fail state_store failed: {e}")

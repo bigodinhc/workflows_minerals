@@ -520,3 +520,96 @@ def test_finish_truncates_long_message_to_fit_telegram_limit():
     assert len(kwargs["new_text"]) <= 4096
     # Must contain truncation marker
     assert "truncada" in kwargs["new_text"]
+
+
+def test_fail_edits_message_with_crash_marker():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    reporter = ProgressReporter(
+        workflow="morning_check",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+
+    reporter.fail(RuntimeError("LSEG down"))
+
+    fake_client.edit_message_text.assert_called_once()
+    kwargs = fake_client.edit_message_text.call_args.kwargs
+    assert "🚨" in kwargs["new_text"]
+    assert "CRASH" in kwargs["new_text"]
+    assert "LSEG down" in kwargs["new_text"]
+
+
+def test_fail_records_crash_to_state_store(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+    calls = []
+    monkeypatch.setattr(
+        "execution.core.state_store.record_crash",
+        lambda wf, txt: calls.append((wf, txt)),
+    )
+    reporter = ProgressReporter(
+        workflow="morning_check",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    reporter.fail(RuntimeError("boom!"))
+    assert len(calls) == 1
+    assert calls[0][0] == "morning_check"
+    assert "boom!" in calls[0][1]
+
+
+def test_fail_noop_telegram_when_disabled_but_still_records():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = None  # disabled
+    calls = []
+    from unittest.mock import patch
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    fake_client.reset_mock()
+    with patch("execution.core.state_store.record_crash", lambda wf, txt: calls.append(wf)):
+        reporter.fail(RuntimeError("x"))
+    fake_client.edit_message_text.assert_not_called()
+    assert calls == ["test"]
+
+
+def test_fail_swallows_telegram_exception():
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.side_effect = RuntimeError("telegram down")
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    # Must not raise
+    reporter.fail(RuntimeError("original"))
+
+
+def test_fail_swallows_state_store_exception(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.send_message.return_value = 42
+    fake_client.edit_message_text.return_value = True
+
+    def broken_record(wf, txt):
+        raise RuntimeError("redis down")
+    monkeypatch.setattr("execution.core.state_store.record_crash", broken_record)
+
+    reporter = ProgressReporter(
+        workflow="test",
+        chat_id="chat-1",
+        telegram_client=fake_client,
+    )
+    reporter.start()
+    # Must not raise
+    reporter.fail(RuntimeError("original"))

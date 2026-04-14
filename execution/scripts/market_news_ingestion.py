@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import sys
 import os
@@ -17,10 +16,12 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 from execution.integrations.apify_client import ApifyClient
 from execution.agents.market_news_agent import MarketNewsAgent
 from execution.core.logger import WorkflowLogger
+from execution.core import state_store
 
 # Actor: platts-scrap-full-news
 ACTOR_ID = os.getenv("APIFY_MARKET_NEWS_ACTOR_ID", "bigodeio05/platts-scrap-full-news")
 DRAFTS_FILE = os.path.join(os.path.dirname(__file__), "../../data/news_drafts.json")
+WORKFLOW_NAME = "market_news"
 
 
 def save_draft(draft):
@@ -148,6 +149,7 @@ def main():
 
         if not items:
             logger.warning("No articles found today.")
+            state_store.record_empty(WORKFLOW_NAME, "scrape vazio ou falhou")
             return
 
         # Actor returns wrapper: {type, topNews, allArticles, summary}
@@ -162,6 +164,7 @@ def main():
 
         if not articles:
             logger.warning("No articles in dataset.")
+            state_store.record_empty(WORKFLOW_NAME, "scrape vazio ou falhou")
             return
 
         logger.info(f"Found {len(articles)} articles from actor.")
@@ -175,6 +178,7 @@ def main():
 
         if not new_articles:
             logger.info("No new articles after dedup. Exiting cleanly.")
+            state_store.record_empty(WORKFLOW_NAME, "sem noticias novas")
             return
 
         # 5. Aggregate Text for AI
@@ -185,6 +189,7 @@ def main():
 
         if not combined_text.strip():
             logger.warning("Articles have no text content.")
+            state_store.record_empty(WORKFLOW_NAME, "sem noticias novas")
             return
 
         if len(combined_text) < 200:
@@ -249,13 +254,19 @@ def main():
 
             except Exception as tg_err:
                 logger.error(f"Failed to send Telegram notification: {tg_err}")
+                state_store.record_empty(WORKFLOW_NAME, "falha ao enviar approval request")
+                return
+
+            summary = {"total": 1, "success": 1, "failure": 0}
+            state_store.record_success(WORKFLOW_NAME, summary, 0)
         else:
             logger.info("[DRY RUN] Draft generated but not saved:")
             print(draft_text)
 
     except Exception as e:
         logger.critical(f"Workflow failed: {e}")
-        sys.exit(1)
+        state_store.record_crash(WORKFLOW_NAME, str(e)[:200])
+        raise
 
 
 if __name__ == "__main__":

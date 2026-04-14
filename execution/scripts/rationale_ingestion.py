@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import sys
 import os
@@ -17,15 +16,17 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 from execution.integrations.apify_client import ApifyClient
 from execution.agents.rationale_agent import RationaleAgent
 from execution.core.logger import WorkflowLogger
+from execution.core import state_store
 
 # Actor from n8n: "PLATTS_NEWS_ONLY"
 ACTOR_ID = os.getenv("APIFY_ACTOR_ID", "BgIGjvJDUhFgyE881")
 DRAFTS_FILE = os.path.join(os.path.dirname(__file__), "../../data/news_drafts.json")
+WORKFLOW_NAME = "rationale_news"
 
 def save_draft(draft):
     """Saves a draft to the JSON storage"""
     os.makedirs(os.path.dirname(DRAFTS_FILE), exist_ok=True)
-    
+
     if os.path.exists(DRAFTS_FILE):
         with open(DRAFTS_FILE, 'r') as f:
             try:
@@ -34,10 +35,10 @@ def save_draft(draft):
                 drafts = []
     else:
         drafts = []
-        
+
     # Append new draft
     drafts.append(draft)
-    
+
     with open(DRAFTS_FILE, 'w') as f:
         json.dump(drafts, f, indent=2, ensure_ascii=False)
 
@@ -57,7 +58,7 @@ def main():
         else:
             today_br = datetime.now().strftime("%d/%m/%Y")
         logger.info(f"Starting ingestion for date: {today_br}")
-        
+
         # Check if webhook already has a draft (avoid duplicate sends on retry crons)
         webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "")
         if webhook_url and not args.dry_run:
@@ -66,14 +67,15 @@ def main():
                 health = requests.get(f"{webhook_url}/health", timeout=5).json()
                 if health.get("drafts_count", 0) > 0:
                     logger.info(f"Webhook already has {health['drafts_count']} draft(s). Skipping to avoid duplicate.")
+                    state_store.record_empty(WORKFLOW_NAME, "draft ja existente no webhook")
                     return
             except Exception:
                 pass  # If webhook unreachable, continue anyway
-        
+
         # 2. Run Apify
         client = ApifyClient()
         logger.info(f"Targeting Apify Actor ID: {ACTOR_ID}")
-        
+
         run_input = {
             "username": os.getenv("PLATTS_USERNAME", ""),
             "password": os.getenv("PLATTS_PASSWORD", ""),
@@ -83,7 +85,7 @@ def main():
         if args.target_date:
             run_input["targetDate"] = args.target_date
             run_input["dateFormat"] = "BR"
-        
+
         if args.dry_run:
             logger.info("[DRY RUN] Would run Apify with input: " + str(run_input))
             # Test Mock Data
@@ -92,9 +94,10 @@ def main():
             logger.info("Running Apify Actor...")
             dataset_id = client.run_actor(ACTOR_ID, run_input, memory_mbytes=2048)
             items = client.get_dataset_items(dataset_id)
-            
+
         if not items:
             logger.warning("No articles found today.")
+            state_store.record_empty(WORKFLOW_NAME, "scrape vazio ou falhou")
             return
 
         # Dataset returns wrapper object with "articles" array inside
@@ -103,9 +106,10 @@ def main():
             articles = items[0].get("articles", [])
         else:
             articles = items
-            
+
         if not articles:
             logger.warning("No articles in dataset.")
+            state_store.record_empty(WORKFLOW_NAME, "scrape vazio ou falhou")
             return
 
         # 3. Aggregate Text for AI
@@ -114,10 +118,11 @@ def main():
             f"=== ARTICLE {i+1} ===\nTitle: {item.get('title')}\nDate: {item.get('gridDateTime')}\n\n{item.get('fullText', '')}"
             for i, item in enumerate(articles)
         ])
-        
+
         # Check for empty content
         if not combined_text.strip():
             logger.warning("Articles have no text content.")
+            state_store.record_empty(WORKFLOW_NAME, "sem noticias novas")
             return
 
         # Check for minimal content to avoid hallucinations
@@ -128,10 +133,10 @@ def main():
             # 4. Generate Draft via AI
             logger.info("Generating AI Draft...")
             agent = RationaleAgent()
-            
+
             # Pass today's date for title formatting
             draft_text = agent.process(combined_text, today_br)
-        
+
         # 5. Save Draft (Human-in-the-loop)
         draft_obj = {
             "id": f"draft_{int(datetime.now().timestamp())}",
@@ -142,17 +147,17 @@ def main():
             "ai_text": draft_text,
             "source_summary": (articles[0].get('title') or "Sem Título") + "..." # Brief preview
         }
-        
+
         if not args.dry_run:
             save_draft(draft_obj)
             logger.info("Draft saved successfully!")
-            
+
             # 6. Send to Telegram for approval
             logger.info("Sending to Telegram for approval...")
             try:
                 from execution.integrations.telegram_client import TelegramClient
                 telegram = TelegramClient()
-                
+
                 # Also store draft on webhook server for callback processing
                 webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "")
                 if webhook_url:
@@ -170,25 +175,30 @@ def main():
                         )
                     except Exception as store_err:
                         logger.warning(f"Could not store draft on webhook: {store_err}")
-                
+
                 # Send Telegram message with buttons
                 telegram.send_approval_request(
                     draft_id=draft_obj["id"],
                     preview_text=draft_text
                 )
                 logger.info("Telegram notification sent!")
-                
+
             except Exception as tg_err:
                 logger.error(f"Failed to send Telegram notification: {tg_err}")
+                state_store.record_empty(WORKFLOW_NAME, "falha ao enviar approval request")
+                return
                 # Don't fail workflow - draft is still saved for Dashboard
+
+            summary = {"total": 1, "success": 1, "failure": 0}
+            state_store.record_success(WORKFLOW_NAME, summary, 0)
         else:
             logger.info("[DRY RUN] Draft generated but not saved:")
             print(draft_text)
 
     except Exception as e:
         logger.critical(f"Workflow failed: {e}")
-        sys.exit(1)
+        state_store.record_crash(WORKFLOW_NAME, str(e)[:200])
+        raise
 
 if __name__ == "__main__":
     main()
-

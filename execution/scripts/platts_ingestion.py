@@ -98,6 +98,7 @@ def main():
             "sources": ["allInsights", "ironOreTopic", "rmw"],
             "includeFlash": True,
             "includeLatest": True,
+            "maxArticles": 50,
             "maxArticlesPerRmwTab": 5,
             "latestMaxItems": 15,
             "dateFilter": "today",
@@ -136,7 +137,7 @@ def main():
         else:
             logger.info(f"Running Apify Actor: {ACTOR_ID}")
             client = ApifyClient()
-            dataset_id = client.run_actor(ACTOR_ID, run_input, memory_mbytes=2048)
+            dataset_id = client.run_actor(ACTOR_ID, run_input, memory_mbytes=8192)
             items = client.get_dataset_items(dataset_id)
 
         articles = _flatten_dataset(items)

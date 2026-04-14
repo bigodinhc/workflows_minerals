@@ -150,3 +150,72 @@ def test_route_items_skips_rationale_if_already_processed(fake_redis, monkeypatc
         rationale_processor=fake_rationale,
     )
     assert rationale_calls == []
+
+
+def test_route_items_returns_full_counters(fake_redis, monkeypatch):
+    from execution.curation import router, redis_client
+    from execution.curation.id_gen import generate_id
+
+    monkeypatch.setattr(router, "_post_for_curation", lambda *a, **kw: None)
+
+    # Pre-mark one curation item as seen
+    seen_item = {"source": "Top News - Ferrous Metals", "title": "Already", "fullText": "x", "tabName": ""}
+    seen_id = generate_id(seen_item["source"], seen_item["title"])
+    redis_client.mark_seen("2026-04-14", seen_id)
+
+    fresh_item = {"source": "Top News - Ferrous Metals", "title": "Fresh", "fullText": "x", "tabName": ""}
+    rationale_item = {"source": "rmw.Lump", "tabName": "Lump", "title": "R1", "fullText": "r1"}
+
+    counters = router.route_items(
+        items=[seen_item, fresh_item, rationale_item],
+        today_date="2026-04-14",
+        today_br="14/04/2026",
+        chat_id=99,
+        preview_base_url="https://example.com",
+        rationale_processor=lambda rationale_items, today_br: True,
+    )
+    assert counters == {
+        "total": 3,
+        "rationale_processed": 1,
+        "rationale_failed": 0,
+        "curation_posted": 1,
+        "curation_post_failed": 0,
+        "skipped_seen": 1,
+    }
+
+
+def test_route_items_tracks_rationale_failure(fake_redis, monkeypatch):
+    from execution.curation import router
+
+    monkeypatch.setattr(router, "_post_for_curation", lambda *a, **kw: None)
+
+    counters = router.route_items(
+        items=[{"source": "rmw.Lump", "tabName": "Lump", "title": "R1", "fullText": "r1"}],
+        today_date="2026-04-14",
+        today_br="14/04/2026",
+        chat_id=99,
+        preview_base_url="https://example.com",
+        rationale_processor=lambda rationale_items, today_br: False,  # simulate failure
+    )
+    assert counters["rationale_processed"] == 0
+    assert counters["rationale_failed"] == 1
+
+
+def test_route_items_tracks_post_failure(fake_redis, monkeypatch):
+    from execution.curation import router
+
+    def fake_post_fails(chat_id, item, preview_base_url):
+        raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(router, "_post_for_curation", fake_post_fails)
+
+    counters = router.route_items(
+        items=[{"source": "Top News - Ferrous Metals", "title": "Fresh", "fullText": "x", "tabName": ""}],
+        today_date="2026-04-14",
+        today_br="14/04/2026",
+        chat_id=99,
+        preview_base_url="https://example.com",
+        rationale_processor=lambda rationale_items, today_br: True,
+    )
+    assert counters["curation_posted"] == 0
+    assert counters["curation_post_failed"] == 1

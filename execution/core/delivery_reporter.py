@@ -56,13 +56,26 @@ from typing import Callable, Iterable
 
 
 def _categorize_error(exc: Exception) -> str:
-    """Convert exception into short error category string."""
+    """Convert exception into short error category string.
+    For HTTP errors, tries to extract 'error' or 'message' field from JSON
+    bodies (UazAPI style) before falling back to truncated raw body.
+    """
     import requests as _rq
+    import json as _json
     if isinstance(exc, _rq.Timeout):
         return "timeout"
     if isinstance(exc, _rq.HTTPError) and exc.response is not None:
-        body = (exc.response.text or "")[:100]
-        return f"HTTP {exc.response.status_code}: {body}"
+        status = exc.response.status_code
+        body = exc.response.text or ""
+        try:
+            parsed = _json.loads(body)
+            if isinstance(parsed, dict):
+                reason = parsed.get("error") or parsed.get("message")
+                if reason:
+                    return f"HTTP {status}: {str(reason)[:120]}"
+        except (ValueError, TypeError):
+            pass
+        return f"HTTP {status}: {body[:100]}"
     return str(exc)[:200]
 
 

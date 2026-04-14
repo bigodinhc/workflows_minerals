@@ -52,6 +52,13 @@ logger.info(f"UAZAPI_TOKEN: {'SET (' + UAZAPI_TOKEN[:8] + '...)' if UAZAPI_TOKEN
 logger.info(f"TELEGRAM_BOT_TOKEN: {'SET' if TELEGRAM_BOT_TOKEN else 'NOT SET'}")
 logger.info(f"ANTHROPIC_API_KEY: {'SET' if ANTHROPIC_API_KEY else 'NOT SET'}")
 
+_telegram_chat_id_env = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+if _telegram_chat_id_env:
+    _masked = _telegram_chat_id_env[:3] + "***" + _telegram_chat_id_env[-2:] if len(_telegram_chat_id_env) > 6 else "***"
+    logger.info(f"TELEGRAM_CHAT_ID: SET ({_masked})")
+else:
+    logger.info("TELEGRAM_CHAT_ID: NOT SET (admin commands will silently fail)")
+
 # ============================================================
 # AI AGENT PROMPTS (from n8n workflow)
 # ============================================================
@@ -1082,6 +1089,7 @@ def telegram_webhook():
 
         if text == "/add":
             if not contact_admin.is_authorized(chat_id):
+                logger.warning(f"/add rejected: chat_id={chat_id} not in TELEGRAM_CHAT_ID env")
                 return jsonify({"ok": True})  # silent ignore
             contact_admin.start_add_flow(chat_id)
             send_telegram_message(chat_id, contact_admin.render_add_prompt())
@@ -1089,6 +1097,7 @@ def telegram_webhook():
 
         if text.startswith("/list"):
             if not contact_admin.is_authorized(chat_id):
+                logger.warning(f"/list rejected: chat_id={chat_id} not in TELEGRAM_CHAT_ID env")
                 return jsonify({"ok": True})
             parts = text.split(None, 1)
             search = parts[1].strip() if len(parts) > 1 else None

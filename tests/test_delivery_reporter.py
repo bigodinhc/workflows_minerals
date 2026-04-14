@@ -104,7 +104,31 @@ def test_error_categorization_http_error():
         raise err
     reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
     report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
-    assert report.failures[0].error.startswith("HTTP 400")
+    # JSON error field is extracted cleanly, not dumped raw
+    assert report.failures[0].error == "HTTP 400: invalid number"
+
+
+def test_error_categorization_extracts_json_message_field():
+    def send_fn(phone, text):
+        resp = requests.Response()
+        resp.status_code = 500
+        resp._content = b'{"message":"rate limit exceeded"}'
+        raise requests.HTTPError(response=resp)
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
+    assert report.failures[0].error == "HTTP 500: rate limit exceeded"
+
+
+def test_error_categorization_falls_back_to_raw_body_when_not_json():
+    def send_fn(phone, text):
+        resp = requests.Response()
+        resp.status_code = 503
+        resp._content = b'Service Unavailable'
+        raise requests.HTTPError(response=resp)
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    report = reporter.dispatch([Contact(name="A", phone="111")], message="hi")
+    assert report.failures[0].error.startswith("HTTP 503")
+    assert "Service Unavailable" in report.failures[0].error
 
 
 def test_dispatch_tracks_duration():

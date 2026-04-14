@@ -60,7 +60,8 @@ def _format_status_lines(states: dict, next_runs: dict) -> list:
     max_name = max(len(w) for w in states.keys()) if states else 0
     lines = []
     for workflow, st in states.items():
-        label = f"{workflow}:".ljust(max_name + 2)
+        # Escape underscores so Telegram Markdown doesn't interpret them as italic markers
+        label = (workflow.replace("_", r"\_") + ":").ljust(max_name + 4)
         if st is not None and st.get("streak", 0) >= 3:
             lines.append(f"{label} 🚨 {st['streak']} falhas seguidas")
             continue

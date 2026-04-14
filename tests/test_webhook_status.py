@@ -73,8 +73,9 @@ def test_format_status_lines_handles_all_states(app_module):
     lines = app_module._format_status_lines(states, next_runs)
     joined = "\n".join(lines)
 
-    assert "✅" in joined and "morning_check" in joined and "100/100" in joined
-    assert "❌" in joined and "daily_report" in joined
+    # Workflow names are rendered with escaped underscores for Telegram Markdown
+    assert "✅" in joined and r"morning\_check" in joined and "100/100" in joined
+    assert "❌" in joined and r"daily\_report" in joined
     assert "⏳ proximo" in joined and "16:00" in joined
     assert "ℹ️" in joined and "sem noticias novas" in joined
     assert "🚨" in joined and "3 falhas seguidas" in joined

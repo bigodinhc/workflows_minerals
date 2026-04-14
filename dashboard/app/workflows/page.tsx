@@ -41,20 +41,12 @@ const WORKFLOW_CATALOG = [
         dataPoints: ["IO Swap Fev/26", "IO Swap Mar/26", "IO Swap Abr/26", "..."]
     },
     {
-        id: "rationale_news.yml",
-        name: "RATIONALE NEWS",
-        description: "Coleta notícias Apify, processa com 3 agentes IA (Writer → Critique → Curator), preview Telegram e disparo WhatsApp.",
-        schedule: "12:00, 12:30, 13:00 BRT",
-        tags: ["TELEGRAM", "CLAUDE_AI", "WHATSAPP", "APIFY"],
-        dataPoints: ["Notícias de Mercado", "Análise IA", "Aprovação Manual", "Disparo WhatsApp"]
-    },
-    {
         id: "market_news.yml",
-        name: "MARKET NEWS",
-        description: "Coleta notícias amplas do mercado via Platts (empresas, trades, oferta/demanda), processa com 2 agentes IA (Curator → Localizer), dedup entre runs, preview Telegram e disparo WhatsApp.",
-        schedule: "09:00, 12:00, 15:00, 18:00 BRT",
-        tags: ["MARKET", "CLAUDE_AI", "WHATSAPP", "APIFY", "TELEGRAM"],
-        dataPoints: ["Notícias de Mercado Amplas", "Dedup Cross-Run", "Curadoria IA", "Disparo WhatsApp"]
+        name: "PLATTS INGESTION",
+        description: "Unified: coleta Platts (allInsights + ironOreTopic + RMW), dedup Redis, roteia rationales pro RationaleAgent (AI auto + aprovação Telegram → WhatsApp) e demais notícias pra curadoria individual no Telegram (4 botões: Ler completo, Arquivar, Recusar, 3 Agents).",
+        schedule: "09:00, 12:00, 15:00 BRT (seg-sex)",
+        tags: ["PLATTS", "APIFY", "REDIS", "TELEGRAM", "CLAUDE_AI", "WHATSAPP"],
+        dataPoints: ["FLASH Banner", "Top News + Latest", "News & Insights", "RMW Rationales (CFR/IODEX/Lump)", "Curadoria Item-a-Item", "Arquivo Redis p/ Consumer Externo"]
     }
 ];
 

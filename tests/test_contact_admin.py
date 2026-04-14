@@ -15,6 +15,9 @@ from contact_admin import (
     clear_state,
     is_awaiting_add,
     ADMIN_STATE,
+    render_add_prompt,
+    render_list_message,
+    build_list_keyboard,
 )
 
 
@@ -155,3 +158,92 @@ def test_start_add_flow_overwrites_existing_state():
     start_add_flow(123)
     # Expiry should be reset to a time >= the previous expiry
     assert ADMIN_STATE[123]["expires_at"] >= first_expiry
+
+
+# ── render_add_prompt ──
+
+def test_render_add_prompt_has_format_and_example():
+    msg = render_add_prompt()
+    assert "Nome Telefone" in msg
+    assert "Exemplo" in msg
+    assert "/cancel" in msg
+
+
+# ── render_list_message ──
+
+def test_render_list_message_with_contacts():
+    contacts = [
+        {"ProfileName": "A", "From": "whatsapp:+111", "ButtonPayload": "Big"},
+        {"ProfileName": "B", "From": "whatsapp:+222", "ButtonPayload": "Inactive"},
+    ]
+    msg = render_list_message(contacts, total=25, page=2, per_page=10, search=None)
+    assert "25" in msg  # total shown
+    assert "Página 2" in msg or "Pagina 2" in msg
+
+
+def test_render_list_message_with_search():
+    contacts = [{"ProfileName": "Joao", "From": "whatsapp:+111", "ButtonPayload": "Big"}]
+    msg = render_list_message(contacts, total=1, page=1, per_page=10, search="joao")
+    assert "joao" in msg.lower()
+
+
+def test_render_list_message_empty_with_search():
+    msg = render_list_message([], total=0, page=1, per_page=10, search="xyz")
+    assert "xyz" in msg
+    assert "Nenhum" in msg or "nenhum" in msg.lower()
+
+
+def test_render_list_message_empty_without_search():
+    msg = render_list_message([], total=0, page=1, per_page=10, search=None)
+    assert "/add" in msg
+
+
+# ── build_list_keyboard ──
+
+def test_build_list_keyboard_has_toggle_buttons():
+    contacts = [
+        {"ProfileName": "A", "From": "whatsapp:+5511111", "ButtonPayload": "Big"},
+        {"ProfileName": "B", "From": "whatsapp:+5511222", "ButtonPayload": "Inactive"},
+    ]
+    kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None)
+    rows = kb["inline_keyboard"]
+    # First 2 rows = contact toggles
+    assert rows[0][0]["callback_data"] == "tgl:5511111"
+    assert "✅" in rows[0][0]["text"]  # Big = active
+    assert "A" in rows[0][0]["text"]
+    assert rows[1][0]["callback_data"] == "tgl:5511222"
+    assert "❌" in rows[1][0]["text"]  # Inactive
+
+
+def test_build_list_keyboard_includes_nav_when_multiple_pages():
+    contacts = [{"ProfileName": "A", "From": "whatsapp:+111", "ButtonPayload": "Big"}]
+    kb = build_list_keyboard(contacts, page=2, total_pages=5, search=None)
+    rows = kb["inline_keyboard"]
+    # Last row = navigation
+    nav = rows[-1]
+    callbacks = [b["callback_data"] for b in nav]
+    assert "pg:1" in callbacks  # prev
+    assert "pg:3" in callbacks  # next
+    assert "nop" in callbacks  # center indicator
+
+
+def test_build_list_keyboard_nav_with_search():
+    contacts = [{"ProfileName": "A", "From": "whatsapp:+111", "ButtonPayload": "Big"}]
+    kb = build_list_keyboard(contacts, page=2, total_pages=3, search="joao")
+    nav = kb["inline_keyboard"][-1]
+    callbacks = [b["callback_data"] for b in nav]
+    assert "pg:1:joao" in callbacks
+    assert "pg:3:joao" in callbacks
+
+
+def test_build_list_keyboard_no_nav_when_single_page():
+    contacts = [{"ProfileName": "A", "From": "whatsapp:+111", "ButtonPayload": "Big"}]
+    kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None)
+    # Only 1 row (the single contact), no nav row
+    assert len(kb["inline_keyboard"]) == 1
+
+
+def test_build_list_keyboard_empty_contacts():
+    kb = build_list_keyboard([], page=1, total_pages=0, search=None)
+    # Empty keyboard is OK (caller uses render message instead)
+    assert kb["inline_keyboard"] == []

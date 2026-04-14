@@ -104,3 +104,77 @@ def is_awaiting_add(chat_id) -> bool:
     """True if chat_id is currently in add_data wait state (non-expired)."""
     state = get_state(chat_id)
     return state is not None and state.get("awaiting") == "add_data"
+
+
+# ── Message formatting ──
+
+def render_add_prompt() -> str:
+    """Message shown when user types /add."""
+    return (
+        "📝 *ADICIONAR CONTATO*\n\n"
+        "Envie no formato:\n"
+        "`Nome Telefone`\n\n"
+        "Exemplo: `Joao Silva 5511999999999`\n\n"
+        "Use /cancel pra desistir."
+    )
+
+
+def render_list_message(contacts: list, total: int, page: int, per_page: int,
+                        search: Optional[str]) -> str:
+    """Message text for /list. Renders the header — contacts go in keyboard buttons."""
+    if not contacts:
+        if search:
+            return f"📋 Nenhum contato encontrado pra \"{search}\""
+        return "📋 Nenhum contato cadastrado. Use /add"
+
+    import math
+    total_pages = math.ceil(total / per_page) if per_page else 1
+
+    if search:
+        header = f"📋 *RESULTADO BUSCA* \"{search}\" ({total})"
+    else:
+        header = f"📋 *CONTATOS* ({total}) — Página {page}/{total_pages}"
+
+    return header + "\n\nToque pra ativar/desativar."
+
+
+def build_list_keyboard(contacts: list, page: int, total_pages: int,
+                        search: Optional[str]) -> dict:
+    """
+    Build inline_keyboard dict with one toggle button per contact,
+    plus a bottom nav row if total_pages > 1.
+    """
+    rows = []
+
+    for c in contacts:
+        name = c.get("ProfileName", "—")
+        raw_phone = (
+            c.get("Evolution-api")
+            or c.get("n8n-evo")
+            or c.get("From")
+            or ""
+        )
+        phone_digits = digits_only(str(raw_phone))
+        status = str(c.get("ButtonPayload", "")).strip()
+        emoji = "✅" if status == "Big" else "❌"
+        label = f"{emoji} {name} — {phone_digits}"
+        # Telegram button text limit: 64 chars
+        if len(label) > 60:
+            label = label[:57] + "..."
+        rows.append([{
+            "text": label,
+            "callback_data": f"tgl:{phone_digits}",
+        }])
+
+    # Navigation row (only when >1 page)
+    if total_pages > 1:
+        prev_page = max(1, page - 1)
+        next_page = min(total_pages, page + 1)
+        suffix = f":{search}" if search else ""
+        rows.append([
+            {"text": "◀", "callback_data": f"pg:{prev_page}{suffix}"},
+            {"text": f"{page}/{total_pages}", "callback_data": "nop"},
+            {"text": "▶", "callback_data": f"pg:{next_page}{suffix}"},
+        ])
+
+    return {"inline_keyboard": rows}

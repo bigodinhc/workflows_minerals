@@ -13,6 +13,13 @@ def fake_redis(monkeypatch):
     return fake
 
 
+@pytest.fixture(autouse=True)
+def _reset_client_cache(monkeypatch):
+    """Ensure no cached client leaks between tests."""
+    from execution.curation import redis_client
+    monkeypatch.setattr(redis_client, "_client", None)
+
+
 def test_set_and_get_staging_roundtrip(fake_redis):
     from execution.curation.redis_client import set_staging, get_staging
     item = {"id": "abc123", "title": "Test", "fullText": "body"}

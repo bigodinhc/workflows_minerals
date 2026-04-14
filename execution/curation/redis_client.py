@@ -17,14 +17,36 @@ _STAGING_TTL_SECONDS = 48 * 60 * 60           # 48h
 _SEEN_TTL_SECONDS = 30 * 24 * 60 * 60         # 30d
 _RATIONALE_FLAG_TTL_SECONDS = 30 * 60 * 60    # 30h
 
+_client = None
+
 
 def _get_client():
-    """Return a Redis client using REDIS_URL env var. Raises if unset/unreachable."""
+    """Return a cached Redis client using REDIS_URL.
+
+    Raises RuntimeError if REDIS_URL is unset.
+
+    Unlike state_store.py (which silently no-ops on Redis failure for
+    observability workflows), this module raises because curation state
+    (staging/archive) is load-bearing: losing a staged item silently
+    would be worse than crashing the ingestion run.
+
+    Connect and socket timeouts are 3s to prevent hanging the Telegram
+    webhook handler on an unreachable Redis.
+    """
+    global _client
+    if _client is not None:
+        return _client
     import redis
     url = os.getenv("REDIS_URL", "").strip()
     if not url:
         raise RuntimeError("REDIS_URL env var not set")
-    return redis.Redis.from_url(url, decode_responses=True)
+    _client = redis.Redis.from_url(
+        url,
+        socket_connect_timeout=3,
+        socket_timeout=3,
+        decode_responses=True,
+    )
+    return _client
 
 
 def _staging_key(item_id: str) -> str:
@@ -59,7 +81,13 @@ def get_staging(item_id: str) -> Optional[dict]:
 
 
 def archive(item_id: str, date: str, chat_id: int) -> Optional[dict]:
-    """Move item from staging to archive. Returns archived dict or None if staging missing."""
+    """Move item from staging to archive atomically.
+
+    SET + DELETE run in a pipeline transaction so a mid-operation failure
+    cannot leave the item in both keyspaces.
+
+    Returns archived dict or None if staging missing.
+    """
     item = get_staging(item_id)
     if item is None:
         return None
@@ -67,8 +95,10 @@ def archive(item_id: str, date: str, chat_id: int) -> Optional[dict]:
     item["archivedAt"] = datetime.now(timezone.utc).isoformat()
     item["archivedBy"] = chat_id
     client = _get_client()
-    client.set(_archive_key(date, item_id), json.dumps(item, ensure_ascii=False))
-    client.delete(_staging_key(item_id))
+    pipe = client.pipeline(transaction=True)
+    pipe.set(_archive_key(date, item_id), json.dumps(item, ensure_ascii=False))
+    pipe.delete(_staging_key(item_id))
+    pipe.execute()
     return item
 
 

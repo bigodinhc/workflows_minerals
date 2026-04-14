@@ -191,131 +191,136 @@ def main():
     )
     progress.start("Preparando dados Baltic...")
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true", help="Skip sending and saving state")
-    args = parser.parse_args()
-
-    # 1. Check Control Sheet
-    sheets = SheetsClient()
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    if not args.dry_run:
-        if sheets.check_daily_status(SHEET_ID, today_str, REPORT_TYPE):
-            logger.info("Baltic report already processed today. Exiting.")
-            progress.finish_empty("report ja enviado hoje")
-            return
-
-    # 2. Fetch Email & PDF
-    logger.info("Checking Outlook for Baltic Exchange email...")
-    baltic = BalticClient()
-    
     try:
-        msg = baltic.find_latest_email()
-    except Exception as e:
-        logger.error(f"Failed to fetch emails: {e}")
-        progress.finish_empty("erro ao buscar email Baltic")
-        sys.exit(1)
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--dry-run", action="store_true", help="Skip sending and saving state")
+        args = parser.parse_args()
 
-    if not msg:
-        logger.info("No matching email found in the last 24h.")
-        progress.finish_empty("sem dados Baltic disponiveis")
-        sys.exit(0)
-    
-    # NEW: Validate if email is actually from TODAY
-    # Graph API returns UTC ISO string: 2026-02-05T16:00:00Z
-    # We want to ensure we don't re-process yesterday's email if today's hasn't arrived
-    email_date_str = msg['receivedDateTime']
-    try:
-        # Parse ISO format (handle Z if present)
-        email_date_str_clean = email_date_str.replace("Z", "+00:00")
-        email_dt = datetime.fromisoformat(email_date_str_clean).date()
-        today_dt = datetime.utcnow().date()
-        
-        if email_dt != today_dt:
-            logger.info(f"Found email but it is from {email_dt} (not today {today_dt}). Report not released yet.")
-            logger.info(f"Subject: {msg['subject']}")
+        # 1. Check Control Sheet
+        sheets = SheetsClient()
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        if not args.dry_run:
+            if sheets.check_daily_status(SHEET_ID, today_str, REPORT_TYPE):
+                logger.info("Baltic report already processed today. Exiting.")
+                progress.finish_empty("report ja enviado hoje")
+                return
+
+        # 2. Fetch Email & PDF
+        logger.info("Checking Outlook for Baltic Exchange email...")
+        baltic = BalticClient()
+
+        try:
+            msg = baltic.find_latest_email()
+        except Exception as e:
+            logger.error(f"Failed to fetch emails: {e}")
+            progress.finish_empty("erro ao buscar email Baltic")
+            sys.exit(1)
+
+        if not msg:
+            logger.info("No matching email found in the last 24h.")
             progress.finish_empty("sem dados Baltic disponiveis")
             sys.exit(0)
-            
-    except Exception as e:
-        logger.warning(f"Could not validate email date: {e}. Proceeding with caution.")
 
-    logger.info(f"Found email: {msg['subject']} ({msg['receivedDateTime']})")
-    
-    pdf_bytes, filename = baltic.get_pdf_attachment(msg['id'])
-    
-    if not pdf_bytes:
-        logger.warning("No PDF attachment found in the email.")
-        progress.finish_empty("sem dados Baltic disponiveis")
-        sys.exit(0)
-        
-    logger.info(f"Downloaded PDF: {filename}")
-    
-    # 3. Extract Data (Claude)
-    logger.info("Sending to Claude for extraction...")
-    claude = ClaudeClient()
-    data = claude.extract_data_from_pdf(pdf_bytes)
-    
-    if not data or data.get('extraction_confidence') == 'low':
-        logger.error("Extraction failed or low confidence.")
-        # We could notify admin here
-        progress.finish_empty("falha na extracao do PDF Baltic")
-        sys.exit(1)
-        
-    logger.info(f"Extraction successful. Date: {data.get('report_date')}")
-    
-    if args.dry_run:
-        print(json.dumps(data, indent=2))
-        
-    # 4. Ingest to IronMarket (always runs, even in dry-run, for testing)
-    success, err = ingest_to_ironmarket(data)
-    if success:
-        logger.info("Ingested C3 to IronMarket API.")
-    else:
-        logger.error(f"IronMarket Ingestion Failed: {err}")
-            
-    # 5. Send WhatsApp via DeliveryReporter
-    message = format_whatsapp_message(data)
+        # NEW: Validate if email is actually from TODAY
+        # Graph API returns UTC ISO string: 2026-02-05T16:00:00Z
+        # We want to ensure we don't re-process yesterday's email if today's hasn't arrived
+        email_date_str = msg['receivedDateTime']
+        try:
+            # Parse ISO format (handle Z if present)
+            email_date_str_clean = email_date_str.replace("Z", "+00:00")
+            email_dt = datetime.fromisoformat(email_date_str_clean).date()
+            today_dt = datetime.utcnow().date()
 
-    if args.dry_run:
-        print("\n--- WHATSAPP PREVIEW ---\n")
-        print(message)
-        progress.finish_empty("dry-run")
-        return
+            if email_dt != today_dt:
+                logger.info(f"Found email but it is from {email_dt} (not today {today_dt}). Report not released yet.")
+                logger.info(f"Subject: {msg['subject']}")
+                progress.finish_empty("sem dados Baltic disponiveis")
+                sys.exit(0)
 
-    contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
-    uazapi = UazapiClient()
+        except Exception as e:
+            logger.warning(f"Could not validate email date: {e}. Proceeding with caution.")
 
-    delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
+        logger.info(f"Found email: {msg['subject']} ({msg['receivedDateTime']})")
 
-    if not delivery_contacts:
-        logger.warning("No active contacts found.")
-        progress.finish_empty("nenhum contato ativo")
-        return
+        pdf_bytes, filename = baltic.get_pdf_attachment(msg['id'])
 
-    progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
+        if not pdf_bytes:
+            logger.warning("No PDF attachment found in the email.")
+            progress.finish_empty("sem dados Baltic disponiveis")
+            sys.exit(0)
 
-    reporter = DeliveryReporter(
-        workflow="baltic",
-        send_fn=uazapi.send_message,
-        notify_telegram=False,
-        gh_run_id=os.getenv("GITHUB_RUN_ID"),
-    )
-    report = reporter.dispatch(
-        delivery_contacts,
-        message,
-        on_progress=progress.on_dispatch_tick,
-    )
-    progress.finish(report, message=message)
-    logger.info(
-        f"Baltic broadcast complete. Sent: {report.success_count}, "
-        f"Failed: {report.failure_count}"
-    )
+        logger.info(f"Downloaded PDF: {filename}")
 
-    # 6. Mark Complete
-    if report.success_count > 0:
-        sheets.mark_daily_status(SHEET_ID, today_str, REPORT_TYPE)
-        logger.info("Marked as complete in control sheet.")
+        # 3. Extract Data (Claude)
+        logger.info("Sending to Claude for extraction...")
+        claude = ClaudeClient()
+        data = claude.extract_data_from_pdf(pdf_bytes)
+
+        if not data or data.get('extraction_confidence') == 'low':
+            logger.error("Extraction failed or low confidence.")
+            # We could notify admin here
+            progress.finish_empty("falha na extracao do PDF Baltic")
+            sys.exit(1)
+
+        logger.info(f"Extraction successful. Date: {data.get('report_date')}")
+
+        if args.dry_run:
+            print(json.dumps(data, indent=2))
+
+        # 4. Ingest to IronMarket (always runs, even in dry-run, for testing)
+        success, err = ingest_to_ironmarket(data)
+        if success:
+            logger.info("Ingested C3 to IronMarket API.")
+        else:
+            logger.error(f"IronMarket Ingestion Failed: {err}")
+
+        # 5. Send WhatsApp via DeliveryReporter
+        message = format_whatsapp_message(data)
+
+        if args.dry_run:
+            print("\n--- WHATSAPP PREVIEW ---\n")
+            print(message)
+            progress.finish_empty("dry-run")
+            return
+
+        contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
+        uazapi = UazapiClient()
+
+        delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
+
+        if not delivery_contacts:
+            logger.warning("No active contacts found.")
+            progress.finish_empty("nenhum contato ativo")
+            return
+
+        progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
+
+        reporter = DeliveryReporter(
+            workflow="baltic",
+            send_fn=uazapi.send_message,
+            notify_telegram=False,
+            gh_run_id=os.getenv("GITHUB_RUN_ID"),
+        )
+        report = reporter.dispatch(
+            delivery_contacts,
+            message,
+            on_progress=progress.on_dispatch_tick,
+        )
+        progress.finish(report, message=message)
+        logger.info(
+            f"Baltic broadcast complete. Sent: {report.success_count}, "
+            f"Failed: {report.failure_count}"
+        )
+
+        # 6. Mark Complete
+        if report.success_count > 0:
+            sheets.mark_daily_status(SHEET_ID, today_str, REPORT_TYPE)
+            logger.info("Marked as complete in control sheet.")
+
+    except Exception as exc:
+        progress.fail(exc)
+        raise
 
 if __name__ == "__main__":
     main()

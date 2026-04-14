@@ -203,93 +203,98 @@ def main():
     )
     progress.start("Preparando dados...")
 
-    # 2. Check Control Sheet
-    sheets = SheetsClient()
-    
-    if not args.dry_run:
-        if sheets.check_daily_status(SHEET_ID, date_str, REPORT_TYPE):
-            logger.info("Report already sent today. Exiting.")
-            progress.finish_empty("report ja enviado hoje")
+    try:
+        # 2. Check Control Sheet
+        sheets = SheetsClient()
+
+        if not args.dry_run:
+            if sheets.check_daily_status(SHEET_ID, date_str, REPORT_TYPE):
+                logger.info("Report already sent today. Exiting.")
+                progress.finish_empty("report ja enviado hoje")
+                return
+
+        # 3. Fetch Data
+        platts = PlattsClient()
+        # We use today for fetching. The client handles prev day calculation.
+        report_items = platts.get_report_data(datetime.combine(today, datetime.min.time()))
+
+        if not report_items:
+            logger.info("No data available yet from Platts. Will retry later.")
+            progress.finish_empty("sem dados do Platts ainda")
+            sys.exit(0) # Exit success (so GitHub Action doesn't fail, just finishes)
+
+        # --- VALIDATION: Check minimum items collected ---
+        MIN_ITEMS_EXPECTED = 10  # Threshold - should collect at least 10 symbols
+        TOTAL_SYMBOLS = 26  # Total configured in SYMBOLS_DETAILS
+
+        logger.info(f"Items collected: {len(report_items)}/{TOTAL_SYMBOLS}")
+
+        if len(report_items) < MIN_ITEMS_EXPECTED:
+            logger.warning(f"⚠️ INCOMPLETE DATA: Only {len(report_items)}/{TOTAL_SYMBOLS} items collected!")
+            logger.warning(f"   Threshold is {MIN_ITEMS_EXPECTED}. Skipping send, will retry on next scheduled run.")
+            progress.finish_empty(f"dados incompletos ({len(report_items)}/{TOTAL_SYMBOLS})")
+            sys.exit(0)  # Exit gracefully - next scheduled action will retry
+
+        # DEBUG: Print items to see why filtering failed
+        if args.dry_run:
+            logger.info("--- DEBUG: RAW ITEMS FROM PLATTS ---")
+            for i in report_items:
+                logger.info(f"Item: {i}")
+            logger.info("------------------------------------")
+
+        # 4. Format Message
+        message = build_message(report_items, date_fmt_br)
+
+        logger.info("Message formatted.")
+        if args.dry_run:
+            print("\n--- MESSAGE PREVIEW ---\n")
+            print(message)
+            print("\n-----------------------\n")
+
+        # 5. Send & Mark using shared DeliveryReporter
+        contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
+
+        if not contacts:
+            logger.warning("No contacts found.")
+            progress.finish_empty("nenhum contato ativo")
             return
 
-    # 3. Fetch Data
-    platts = PlattsClient()
-    # We use today for fetching. The client handles prev day calculation.
-    report_items = platts.get_report_data(datetime.combine(today, datetime.min.time()))
-    
-    if not report_items:
-        logger.info("No data available yet from Platts. Will retry later.")
-        progress.finish_empty("sem dados do Platts ainda")
-        sys.exit(0) # Exit success (so GitHub Action doesn't fail, just finishes)
-    
-    # --- VALIDATION: Check minimum items collected ---
-    MIN_ITEMS_EXPECTED = 10  # Threshold - should collect at least 10 symbols
-    TOTAL_SYMBOLS = 26  # Total configured in SYMBOLS_DETAILS
-    
-    logger.info(f"Items collected: {len(report_items)}/{TOTAL_SYMBOLS}")
-    
-    if len(report_items) < MIN_ITEMS_EXPECTED:
-        logger.warning(f"⚠️ INCOMPLETE DATA: Only {len(report_items)}/{TOTAL_SYMBOLS} items collected!")
-        logger.warning(f"   Threshold is {MIN_ITEMS_EXPECTED}. Skipping send, will retry on next scheduled run.")
-        progress.finish_empty(f"dados incompletos ({len(report_items)}/{TOTAL_SYMBOLS})")
-        sys.exit(0)  # Exit gracefully - next scheduled action will retry
-        
-    # DEBUG: Print items to see why filtering failed
-    if args.dry_run:
-        logger.info("--- DEBUG: RAW ITEMS FROM PLATTS ---")
-        for i in report_items:
-            logger.info(f"Item: {i}")
-        logger.info("------------------------------------")
+        uazapi = UazapiClient()
 
-    # 4. Format Message
-    message = build_message(report_items, date_fmt_br)
-    
-    logger.info("Message formatted.")
-    if args.dry_run:
-        print("\n--- MESSAGE PREVIEW ---\n")
-        print(message)
-        print("\n-----------------------\n")
-        
-    # 5. Send & Mark using shared DeliveryReporter
-    contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
+        delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
 
-    if not contacts:
-        logger.warning("No contacts found.")
-        progress.finish_empty("nenhum contato ativo")
-        return
+        if args.dry_run:
+            logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+            progress.finish_empty("dry-run")
+            return
 
-    uazapi = UazapiClient()
+        progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
 
-    delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
+        reporter = DeliveryReporter(
+            workflow="morning_check",
+            send_fn=uazapi.send_message,
+            notify_telegram=False,
+            gh_run_id=os.getenv("GITHUB_RUN_ID"),
+        )
+        report = reporter.dispatch(
+            delivery_contacts,
+            message,
+            on_progress=progress.on_dispatch_tick,
+        )
 
-    if args.dry_run:
-        logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
-        progress.finish_empty("dry-run")
-        return
+        progress.finish(report, message=message)
 
-    progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
+        logger.info(
+            f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"
+        )
 
-    reporter = DeliveryReporter(
-        workflow="morning_check",
-        send_fn=uazapi.send_message,
-        notify_telegram=False,
-        gh_run_id=os.getenv("GITHUB_RUN_ID"),
-    )
-    report = reporter.dispatch(
-        delivery_contacts,
-        message,
-        on_progress=progress.on_dispatch_tick,
-    )
+        if report.success_count > 0:
+            sheets.mark_daily_status(SHEET_ID, date_str, REPORT_TYPE)
+            logger.info("Control sheet updated.")
 
-    progress.finish(report, message=message)
-
-    logger.info(
-        f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"
-    )
-
-    if report.success_count > 0:
-        sheets.mark_daily_status(SHEET_ID, date_str, REPORT_TYPE)
-        logger.info("Control sheet updated.")
+    except Exception as exc:
+        progress.fail(exc)
+        raise
 
 if __name__ == "__main__":
     main()

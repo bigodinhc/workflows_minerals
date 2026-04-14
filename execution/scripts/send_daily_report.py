@@ -172,7 +172,8 @@ def main():
 
     except Exception as e:
         logger.critical("Workflow disrupted", {"error": str(e)})
-        # Don't fail the action if it's just a connection glitch? 
+        progress.fail(e)
+        # Don't fail the action if it's just a connection glitch?
         # Better to fail so we get notified.
         sys.exit(1)
     finally:

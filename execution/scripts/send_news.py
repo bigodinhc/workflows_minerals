@@ -39,64 +39,69 @@ def main():
     )
     progress.start("Preparando dados...")
 
-    if args.file:
-        with open(args.file, 'r', encoding='utf-8') as f:
-            msg = f.read()
-    elif args.message:
-        msg = args.message
-    else:
-        logger.critical("Either --message or --file is required")
-        progress.finish_empty("falha na ingestao")
-        sys.exit(1)
-
-    # 1. Fetch Contacts
-    logger.info("Fetching contacts...")
     try:
-        sheets = SheetsClient()
-        contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME)
-    except Exception as e:
-        logger.critical(f"Failed to fetch contacts: {e}")
-        progress.finish_empty("falha na ingestao")
-        sys.exit(1)
+        if args.file:
+            with open(args.file, 'r', encoding='utf-8') as f:
+                msg = f.read()
+        elif args.message:
+            msg = args.message
+        else:
+            logger.critical("Either --message or --file is required")
+            progress.finish_empty("falha na ingestao")
+            sys.exit(1)
 
-    if not contacts:
-        logger.warning("No contacts found.")
-        progress.finish_empty("nenhum contato ativo")
-        sys.exit(0)
+        # 1. Fetch Contacts
+        logger.info("Fetching contacts...")
+        try:
+            sheets = SheetsClient()
+            contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME)
+        except Exception as e:
+            logger.critical(f"Failed to fetch contacts: {e}")
+            progress.finish_empty("falha na ingestao")
+            sys.exit(1)
 
-    # 2. Send via DeliveryReporter
-    uazapi = UazapiClient()
+        if not contacts:
+            logger.warning("No contacts found.")
+            progress.finish_empty("nenhum contato ativo")
+            sys.exit(0)
 
-    delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
+        # 2. Send via DeliveryReporter
+        uazapi = UazapiClient()
 
-    if not delivery_contacts:
-        logger.warning("No valid delivery contacts after filtering.")
-        progress.finish_empty("nenhum contato ativo")
-        sys.exit(0)
+        delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
 
-    if args.dry_run:
-        logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
-        progress.finish_empty("dry-run")
-        return
+        if not delivery_contacts:
+            logger.warning("No valid delivery contacts after filtering.")
+            progress.finish_empty("nenhum contato ativo")
+            sys.exit(0)
 
-    progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
+        if args.dry_run:
+            logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+            progress.finish_empty("dry-run")
+            return
 
-    reporter = DeliveryReporter(
-        workflow=workflow_name,
-        send_fn=uazapi.send_message,
-        notify_telegram=False,
-        gh_run_id=os.getenv("GITHUB_RUN_ID"),
-    )
-    report = reporter.dispatch(
-        delivery_contacts,
-        msg,
-        on_progress=progress.on_dispatch_tick,
-    )
-    progress.finish(report, message=msg)
-    logger.info(
-        f"News broadcast complete. Sent: {report.success_count}, "
-        f"Failed: {report.failure_count}"
-    )
+        progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
+
+        reporter = DeliveryReporter(
+            workflow=workflow_name,
+            send_fn=uazapi.send_message,
+            notify_telegram=False,
+            gh_run_id=os.getenv("GITHUB_RUN_ID"),
+        )
+        report = reporter.dispatch(
+            delivery_contacts,
+            msg,
+            on_progress=progress.on_dispatch_tick,
+        )
+        progress.finish(report, message=msg)
+        logger.info(
+            f"News broadcast complete. Sent: {report.success_count}, "
+            f"Failed: {report.failure_count}"
+        )
+
+    except Exception as exc:
+        progress.fail(exc)
+        raise
 
 if __name__ == "__main__":
     main()

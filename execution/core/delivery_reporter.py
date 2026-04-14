@@ -136,6 +136,41 @@ def _build_telegram_client():
     return TelegramClient()
 
 
+def build_contact_from_row(row: dict) -> Optional[Contact]:
+    """
+    Convert a Google Sheets row dict into a Contact.
+    Returns None if no phone field is present/usable.
+    Priority for name: ProfileName > Nome > Name > "—".
+    Priority for phone: Evolution-api > n8n-evo > Telefone > Phone > From.
+    Phone normalization: strip "whatsapp:", "+", "@s.whatsapp.net".
+    """
+    name = (
+        row.get("ProfileName")
+        or row.get("Nome")
+        or row.get("Name")
+        or "—"
+    )
+    raw_phone = (
+        row.get("Evolution-api")
+        or row.get("n8n-evo")
+        or row.get("Telefone")
+        or row.get("Phone")
+        or row.get("From")
+    )
+    if not raw_phone:
+        return None
+    phone = (
+        str(raw_phone)
+        .replace("whatsapp:", "")
+        .replace("@s.whatsapp.net", "")
+        .replace("+", "")
+        .strip()
+    )
+    if not phone:
+        return None
+    return Contact(name=name, phone=phone)
+
+
 class DeliveryReporter:
     """Shared delivery tracker for WhatsApp workflows."""
 

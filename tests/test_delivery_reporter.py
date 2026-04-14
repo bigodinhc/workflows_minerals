@@ -345,3 +345,63 @@ def test_on_progress_exception_does_not_abort():
     )
     assert report.total == 2
     assert report.success_count == 2
+from execution.core.delivery_reporter import build_contact_from_row
+
+
+def test_build_contact_uses_profile_name_first():
+    row = {"ProfileName": "Joao Silva", "Nome": "Wrong", "From": "whatsapp:+5511999"}
+    c = build_contact_from_row(row)
+    assert c.name == "Joao Silva"
+
+
+def test_build_contact_falls_back_to_nome():
+    row = {"Nome": "Maria", "From": "whatsapp:+5521888"}
+    c = build_contact_from_row(row)
+    assert c.name == "Maria"
+
+
+def test_build_contact_falls_back_to_name():
+    row = {"Name": "Carlos", "From": "whatsapp:+5531777"}
+    c = build_contact_from_row(row)
+    assert c.name == "Carlos"
+
+
+def test_build_contact_name_placeholder_when_missing():
+    row = {"From": "whatsapp:+5511999"}
+    c = build_contact_from_row(row)
+    assert c.name == "—"
+
+
+def test_build_contact_phone_from_evolution_api_column():
+    row = {"ProfileName": "A", "Evolution-api": "5511999999999"}
+    c = build_contact_from_row(row)
+    assert c.phone == "5511999999999"
+
+
+def test_build_contact_phone_from_n8n_evo_column():
+    row = {"ProfileName": "A", "n8n-evo": "5511999999999@s.whatsapp.net"}
+    c = build_contact_from_row(row)
+    assert c.phone == "5511999999999"
+
+
+def test_build_contact_phone_from_from_column():
+    row = {"ProfileName": "A", "From": "whatsapp:+5511999999999"}
+    c = build_contact_from_row(row)
+    assert c.phone == "5511999999999"
+
+
+def test_build_contact_phone_strips_prefixes_and_suffixes():
+    row = {"ProfileName": "A", "From": "whatsapp:+5511 999-99999"}
+    c = build_contact_from_row(row)
+    # After strip: whatsapp: gone, + gone, spaces/hyphens kept as-is (not digits)
+    assert c.phone == "5511 999-99999"  # spaces/hyphens preserved, plus/whatsapp stripped
+
+
+def test_build_contact_returns_none_when_no_phone():
+    row = {"ProfileName": "Ghost"}
+    assert build_contact_from_row(row) is None
+
+
+def test_build_contact_returns_none_when_phone_empty():
+    row = {"ProfileName": "Ghost", "From": ""}
+    assert build_contact_from_row(row) is None

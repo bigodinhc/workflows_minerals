@@ -22,6 +22,8 @@ sys.path.insert(0, str(_HERE))
 # Local dev: <repo>/execution/ is sibling to webhook/
 sys.path.insert(0, str(_HERE.parent))
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
+import contact_admin
+from execution.integrations.sheets_client import SheetsClient
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -591,6 +593,74 @@ def send_approval_message(chat_id, draft_id, preview_text):
     
     return send_telegram_message(chat_id, f"📋 *PREVIEW*\n\n{display_text}", buttons)
 
+
+def _render_list_view(chat_id, page, search, message_id=None):
+    """Fetch contacts and render list message with keyboard.
+    If message_id is None → sends new message.
+    Otherwise → edits existing message."""
+    try:
+        sheets = SheetsClient()
+        per_page = 10
+        contacts, total_pages = sheets.list_contacts(
+            SHEET_ID, search=search, page=page, per_page=per_page,
+        )
+        all_contacts, _ = sheets.list_contacts(
+            SHEET_ID, search=search, page=1, per_page=10_000,
+        )
+        total = len(all_contacts)
+
+        msg = contact_admin.render_list_message(
+            contacts, total=total, page=page, per_page=per_page, search=search,
+        )
+        kb = contact_admin.build_list_keyboard(
+            contacts, page=page, total_pages=total_pages, search=search,
+        )
+
+        if message_id is None:
+            send_telegram_message(chat_id, msg, reply_markup=kb)
+        else:
+            edit_message(chat_id, message_id, msg, reply_markup=kb)
+    except Exception as e:
+        logger.error(f"_render_list_view failed: {e}")
+        err_msg = "❌ Erro ao acessar planilha. Tente novamente."
+        if message_id:
+            edit_message(chat_id, message_id, err_msg)
+        else:
+            send_telegram_message(chat_id, err_msg)
+
+
+def _handle_add_data(chat_id, text):
+    """Process the user's 'Nome Telefone' message after /add prompt."""
+    try:
+        name, phone = contact_admin.parse_add_input(text)
+    except ValueError as e:
+        send_telegram_message(chat_id, f"❌ {e}")
+        return  # keep state so user can retry
+
+    try:
+        sheets = SheetsClient()
+        sheets.add_contact(SHEET_ID, name, phone)
+    except ValueError as e:
+        send_telegram_message(chat_id, f"❌ {e}")
+        contact_admin.clear_state(chat_id)
+        return
+    except Exception as e:
+        logger.error(f"add_contact failed: {e}")
+        send_telegram_message(chat_id, "❌ Erro ao gravar na planilha. Tente novamente.")
+        contact_admin.clear_state(chat_id)
+        return
+
+    try:
+        sheets = SheetsClient()
+        all_contacts, _ = sheets.list_contacts(SHEET_ID, page=1, per_page=10_000)
+        active = sum(1 for c in all_contacts if str(c.get("ButtonPayload", "")).strip() == "Big")
+    except Exception:
+        active = "?"
+
+    send_telegram_message(chat_id, f"✅ {name} adicionado\nTotal ativos: {active}")
+    contact_admin.clear_state(chat_id)
+
+
 # ============================================================
 # GOOGLE SHEETS (contacts)
 # ============================================================
@@ -988,18 +1058,53 @@ def telegram_webhook():
     if not text or not chat_id:
         return jsonify({"ok": True})
     
-    # Ignore bot commands for now
+    # Bot commands
     if text.startswith("/"):
+        # Any new command cancels in-progress /add
+        if contact_admin.is_awaiting_add(chat_id):
+            contact_admin.clear_state(chat_id)
+
         if text == "/start":
-            send_telegram_message(chat_id, 
+            send_telegram_message(chat_id,
                 "👋 *Minerals Trading Bot*\n\n"
-                "Envie uma notícia de mercado e eu vou:\n"
-                "1️⃣ Analisar com IA\n"
-                "2️⃣ Formatar para WhatsApp\n"
-                "3️⃣ Enviar para aprovação\n\n"
-                "Basta colar o texto da notícia aqui!")
-        return jsonify({"ok": True})
+                "*Notícias:*\n"
+                "Cole texto — viro relatório via IA e envio pra aprovação.\n\n"
+                "*Contatos (admin):*\n"
+                "`/add` — adicionar contato\n"
+                "`/list [busca]` — listar e ativar/desativar\n"
+                "`/cancel` — desistir do /add em curso")
+            return jsonify({"ok": True})
+
+        if text == "/cancel":
+            if contact_admin.is_authorized(chat_id):
+                send_telegram_message(chat_id, "Cancelado.")
+            return jsonify({"ok": True})
+
+        if text == "/add":
+            if not contact_admin.is_authorized(chat_id):
+                return jsonify({"ok": True})  # silent ignore
+            contact_admin.start_add_flow(chat_id)
+            send_telegram_message(chat_id, contact_admin.render_add_prompt())
+            return jsonify({"ok": True})
+
+        if text.startswith("/list"):
+            if not contact_admin.is_authorized(chat_id):
+                return jsonify({"ok": True})
+            parts = text.split(None, 1)
+            search = parts[1].strip() if len(parts) > 1 else None
+            _render_list_view(chat_id, page=1, search=search, message_id=None)
+            return jsonify({"ok": True})
+
+        return jsonify({"ok": True})  # unknown command
     
+    # ── Check if user is in admin add flow ──
+    if contact_admin.is_awaiting_add(chat_id):
+        if not contact_admin.is_authorized(chat_id):
+            contact_admin.clear_state(chat_id)
+            return jsonify({"ok": True})
+        _handle_add_data(chat_id, text)
+        return jsonify({"ok": True})
+
     # ── Check if user is in adjustment mode ──
     adjust = ADJUST_STATE.get(chat_id)
     if adjust and adjust.get("awaiting_feedback"):
@@ -1045,13 +1150,61 @@ def handle_callback(callback_query):
     
     logger.info(f"Callback: {callback_data} from chat {chat_id}")
     
+    # Contact admin callbacks
+    if callback_data == "nop":
+        answer_callback(callback_id, "")
+        return jsonify({"ok": True})
+
+    if callback_data.startswith("tgl:"):
+        if not contact_admin.is_authorized(chat_id):
+            answer_callback(callback_id, "Não autorizado")
+            return jsonify({"ok": True})
+        phone = callback_data[4:]
+        try:
+            sheets = SheetsClient()
+            name, new_status = sheets.toggle_contact(SHEET_ID, phone)
+        except ValueError as e:
+            answer_callback(callback_id, f"❌ {str(e)[:100]}")
+            return jsonify({"ok": True})
+        except Exception as e:
+            logger.error(f"toggle_contact failed: {e}")
+            answer_callback(callback_id, "❌ Erro")
+            return jsonify({"ok": True})
+
+        toast = f"✅ {name} ativado" if new_status == "Big" else f"❌ {name} desativado"
+        answer_callback(callback_id, toast)
+
+        message_id = callback_query["message"]["message_id"]
+        _render_list_view(chat_id, page=1, search=None, message_id=message_id)
+        return jsonify({"ok": True})
+
+    if callback_data.startswith("pg:"):
+        if not contact_admin.is_authorized(chat_id):
+            answer_callback(callback_id, "Não autorizado")
+            return jsonify({"ok": True})
+        rest = callback_data[3:]
+        if ":" in rest:
+            page_str, search = rest.split(":", 1)
+        else:
+            page_str, search = rest, None
+        try:
+            page = int(page_str)
+        except ValueError:
+            answer_callback(callback_id, "Página inválida")
+            return jsonify({"ok": True})
+
+        answer_callback(callback_id, "")
+        message_id = callback_query["message"]["message_id"]
+        _render_list_view(chat_id, page=page, search=search, message_id=message_id)
+        return jsonify({"ok": True})
+
     parts = callback_data.split(":", 1)
     if len(parts) != 2:
         answer_callback(callback_id, "Erro: dados inválidos")
         return jsonify({"ok": True})
-    
+
     action, draft_id = parts
-    
+
     if action == "approve":
         draft = DRAFTS.get(draft_id)
         if not draft:

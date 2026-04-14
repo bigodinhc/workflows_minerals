@@ -11,11 +11,14 @@ from typing import List
 from execution.agents.rationale_agent import RationaleAgent
 from execution.core import state_store
 from execution.core.logger import WorkflowLogger
+from execution.integrations.telegram_client import TelegramClient
 
 _WORKFLOW_NAME = "rationale_news"
 _DRAFTS_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "news_drafts.json")
 
 
+# NOT concurrency-safe — assumes cron serialization. Do not call from
+# overlapping processes.
 def _save_draft(draft: dict) -> None:
     """Append draft to news_drafts.json."""
     drafts_path = os.path.abspath(_DRAFTS_FILE)
@@ -59,6 +62,9 @@ def process(rationale_items: List[dict], today_br: str, logger: WorkflowLogger =
         for i, item in enumerate(rationale_items)
     ])
 
+    # Unlike the deprecated rationale_ingestion.py we do NOT generate a
+    # "Sem Destaques Relevantes" placeholder draft here — caller decides
+    # whether to dispatch a fallback message.
     if len(combined_text.strip()) < 200:
         log.warning(f"Combined rationale text too short ({len(combined_text)} chars). Skipping AI.")
         state_store.record_empty(_WORKFLOW_NAME, "conteudo insuficiente")
@@ -81,6 +87,8 @@ def process(rationale_items: List[dict], today_br: str, logger: WorkflowLogger =
     log.info("Draft saved.")
 
     webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+    # Best-effort: webhook store is only needed for Telegram-button approvals.
+    # Dashboard approval works without it, so we tolerate failures.
     if webhook_url:
         import requests
         try:
@@ -97,7 +105,6 @@ def process(rationale_items: List[dict], today_br: str, logger: WorkflowLogger =
         except Exception as exc:
             log.warning(f"Could not store draft on webhook: {exc}")
 
-    from execution.integrations.telegram_client import TelegramClient
     telegram = TelegramClient()
     telegram.send_approval_request(draft_id=draft_obj["id"], preview_text=draft_text)
     log.info("Telegram approval sent.")

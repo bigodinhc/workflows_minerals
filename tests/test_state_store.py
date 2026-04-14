@@ -75,3 +75,51 @@ def test_record_crash_increments_streak(fake_redis):
     data = json.loads(raw)
     assert data["status"] == "crash"
     assert "LSEG" in data["reason"]
+
+
+def test_get_status_returns_parsed_dict(fake_redis):
+    from execution.core.state_store import record_success, get_status
+    record_success("test", summary={"total": 3, "success": 3, "failure": 0}, duration_ms=1000)
+    status = get_status("test")
+    assert status["status"] == "success"
+    assert status["summary"]["total"] == 3
+    assert status["streak"] == 0
+
+
+def test_get_status_includes_streak_for_failures(fake_redis):
+    from execution.core.state_store import record_failure, get_status
+    record_failure("test", summary={"total": 1, "success": 0, "failure": 1}, duration_ms=100)
+    record_failure("test", summary={"total": 1, "success": 0, "failure": 1}, duration_ms=100)
+    status = get_status("test")
+    assert status["streak"] == 2
+
+
+def test_get_status_returns_none_for_unknown_workflow(fake_redis):
+    from execution.core.state_store import get_status
+    assert get_status("nonexistent") is None
+
+
+def test_get_all_status_returns_dict_keyed_by_workflow(fake_redis):
+    from execution.core.state_store import record_success, record_failure, get_all_status
+    record_success("a", summary={"total": 1, "success": 1, "failure": 0}, duration_ms=100)
+    record_failure("b", summary={"total": 1, "success": 0, "failure": 1}, duration_ms=100)
+    result = get_all_status(["a", "b", "c"])
+    assert result["a"]["status"] == "success"
+    assert result["b"]["status"] == "failure"
+    assert result["c"] is None
+
+
+def test_get_status_when_redis_unavailable_returns_none(monkeypatch):
+    from execution.core import state_store
+    monkeypatch.setattr(state_store, "_get_client", lambda: None)
+    assert state_store.get_status("anything") is None
+
+
+def test_record_functions_noop_when_redis_unavailable(monkeypatch):
+    from execution.core import state_store
+    monkeypatch.setattr(state_store, "_get_client", lambda: None)
+    # Must not raise
+    state_store.record_success("x", {"total": 1, "success": 1, "failure": 0}, 100)
+    state_store.record_failure("x", {"total": 1, "success": 0, "failure": 1}, 100)
+    state_store.record_empty("x", "reason")
+    state_store.record_crash("x", "boom")

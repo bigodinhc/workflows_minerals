@@ -123,3 +123,27 @@ def record_crash(workflow: str, exc_text: str) -> None:
         client.incr(f"wf:streak:{workflow}")
     except Exception as exc:
         logger.warning(f"state_store.record_crash failed: {exc}")
+
+
+def get_status(workflow: str) -> Optional[dict]:
+    """Return the stored state for one workflow, or None if absent/unavailable.
+    Return shape: { status, time_iso, summary?, duration_ms?, reason?, streak }"""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(f"wf:last_run:{workflow}")
+        if raw is None:
+            return None
+        data = json.loads(raw)
+        streak_raw = client.get(f"wf:streak:{workflow}")
+        data["streak"] = int(streak_raw) if streak_raw is not None else 0
+        return data
+    except Exception as exc:
+        logger.warning(f"state_store.get_status failed: {exc}")
+        return None
+
+
+def get_all_status(workflows: list) -> dict:
+    """Return dict mapping each workflow name to its status dict or None."""
+    return {wf: get_status(wf) for wf in workflows}

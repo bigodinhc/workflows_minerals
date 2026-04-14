@@ -104,3 +104,75 @@ def test_list_includes_both_active_and_inactive(mock_sheets_client):
 
     contacts, total_pages = mock_sheets_client.list_contacts("sheet_id", per_page=100)
     assert len(contacts) == 5
+
+
+def _setup_toggle_sheet(mock_client, rows):
+    worksheet = MagicMock()
+    worksheet.get_all_records.return_value = rows
+    # headers: first row of sheet
+    if rows:
+        worksheet.row_values.return_value = list(rows[0].keys())
+    else:
+        worksheet.row_values.return_value = []
+    mock_client.gc.open_by_key.return_value.worksheet.return_value = worksheet
+    return worksheet
+
+
+def test_toggle_big_to_inactive(mock_sheets_client):
+    rows = [
+        {"ProfileName": "Joao", "n8n-evo": "5511999@s.whatsapp.net",
+         "From": "whatsapp:+5511999", "ButtonPayload": "Big"},
+    ]
+    ws = _setup_toggle_sheet(mock_sheets_client, rows)
+
+    name, new_status = mock_sheets_client.toggle_contact("sheet_id", "5511999")
+    assert name == "Joao"
+    assert new_status == "Inactive"
+    # Verify cell update called
+    ws.update_cell.assert_called_once()
+    call_args = ws.update_cell.call_args
+    # update_cell(row, col, value) — row=2 (data row 1), col=idx of ButtonPayload+1
+    expected_col = list(rows[0].keys()).index("ButtonPayload") + 1
+    assert call_args[0][0] == 2  # row 2 (row 1 is header)
+    assert call_args[0][1] == expected_col
+    assert call_args[0][2] == "Inactive"
+
+
+def test_toggle_inactive_to_big(mock_sheets_client):
+    rows = [
+        {"ProfileName": "Joao", "n8n-evo": "5511999@s.whatsapp.net",
+         "From": "whatsapp:+5511999", "ButtonPayload": "Inactive"},
+    ]
+    ws = _setup_toggle_sheet(mock_sheets_client, rows)
+
+    name, new_status = mock_sheets_client.toggle_contact("sheet_id", "5511999")
+    assert name == "Joao"
+    assert new_status == "Big"
+    ws.update_cell.assert_called_once()
+    assert ws.update_cell.call_args[0][2] == "Big"
+
+
+def test_toggle_matches_phone_by_digits_only(mock_sheets_client):
+    """Phone lookup should match by digits, ignoring format differences."""
+    rows = [
+        {"ProfileName": "Joao",
+         "From": "whatsapp:+5511999",
+         "n8n-evo": "5511999@s.whatsapp.net",
+         "ButtonPayload": "Big"},
+    ]
+    ws = _setup_toggle_sheet(mock_sheets_client, rows)
+
+    # Phone arg has different formatting — should still match
+    name, _ = mock_sheets_client.toggle_contact("sheet_id", "+5511999")
+    assert name == "Joao"
+
+
+def test_toggle_raises_when_phone_not_found(mock_sheets_client):
+    rows = [
+        {"ProfileName": "Joao", "From": "whatsapp:+5511999",
+         "n8n-evo": "5511999@s.whatsapp.net", "ButtonPayload": "Big"},
+    ]
+    _setup_toggle_sheet(mock_sheets_client, rows)
+
+    with pytest.raises(ValueError, match="not found"):
+        mock_sheets_client.toggle_contact("sheet_id", "99999")

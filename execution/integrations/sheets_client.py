@@ -4,6 +4,11 @@ import base64
 import json
 from ..core.logger import WorkflowLogger
 
+
+def _digits_only(s: str) -> str:
+    """Return only digits from a string."""
+    return "".join(c for c in str(s) if c.isdigit())
+
 class SheetsClient:
     def __init__(self):
         # Escopos explicitos garantem acesso
@@ -137,6 +142,47 @@ class SheetsClient:
             return records[start:end], total_pages
         except Exception as e:
             self.logger.error("list_contacts failed", {"error": str(e)})
+            raise
+
+    def toggle_contact(self, sheet_id, phone, sheet_name="Página1"):
+        """
+        Flip ButtonPayload between 'Big' and 'Inactive' for the row matching phone.
+        Phone matching normalizes both sides to digits only.
+        Returns (profile_name, new_status).
+        Raises ValueError if not found.
+        """
+        try:
+            sh = self.gc.open_by_key(sheet_id)
+            try:
+                worksheet = sh.worksheet(sheet_name)
+            except Exception:
+                worksheet = sh.sheet1
+
+            headers = worksheet.row_values(1)
+            if "ButtonPayload" not in headers:
+                raise ValueError("ButtonPayload column not found in sheet")
+            button_col_idx = headers.index("ButtonPayload") + 1  # 1-indexed
+
+            needle = _digits_only(phone)
+            records = worksheet.get_all_records()
+            for i, row in enumerate(records):
+                row_phone = (
+                    row.get("Evolution-api")
+                    or row.get("n8n-evo")
+                    or row.get("From")
+                    or ""
+                )
+                if _digits_only(str(row_phone)) == needle:
+                    current = str(row.get("ButtonPayload", "")).strip()
+                    new_status = "Inactive" if current == "Big" else "Big"
+                    worksheet.update_cell(i + 2, button_col_idx, new_status)
+                    return (row.get("ProfileName", "—"), new_status)
+
+            raise ValueError(f"Contact with phone {phone} not found")
+        except ValueError:
+            raise
+        except Exception as e:
+            self.logger.error("toggle_contact failed", {"error": str(e)})
             raise
 
     def _get_or_create_control_sheet(self, sheet_id):

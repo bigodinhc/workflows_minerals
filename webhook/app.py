@@ -1027,6 +1027,40 @@ def process_test_send_async(chat_id, draft_id, draft_message, uazapi_token=None,
 # ROUTES
 # ============================================================
 
+@app.route("/preview/<item_id>", methods=["GET"])
+def preview_item(item_id):
+    """Render Platts item HTML preview for Telegram in-app browser.
+
+    Looks up item in Redis staging first, then in today's archive,
+    then returns a 404 HTML message if missing/expired.
+    """
+    from datetime import datetime
+    from flask import render_template
+    from execution.curation import redis_client
+
+    item = None
+    try:
+        item = redis_client.get_staging(item_id)
+    except Exception as exc:
+        logger.warning(f"Preview redis staging lookup failed: {exc}")
+
+    if item is None:
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        try:
+            client = redis_client._get_client()
+            raw = client.get(f"platts:archive:{today}:{item_id}")
+            if raw:
+                import json
+                item = json.loads(raw)
+        except Exception as exc:
+            logger.warning(f"Preview redis archive lookup failed: {exc}")
+
+    if item is None:
+        return "<h1>Item not found</h1><p>Expired (48h) or already processed.</p>", 404
+
+    return render_template("preview.html", item=item)
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({

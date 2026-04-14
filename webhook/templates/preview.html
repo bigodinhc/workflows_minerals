@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ item.title | default("Platts — Preview") }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+  <main class="max-w-3xl mx-auto p-6">
+    <article class="space-y-6">
+      <header class="space-y-3 border-b border-slate-700 pb-4">
+        <h1 class="text-2xl font-bold text-white">{{ item.title }}</h1>
+        <dl class="grid grid-cols-2 gap-2 text-sm text-slate-400">
+          {% if item.source %}
+          <div><dt class="inline font-semibold">Fonte:</dt> <dd class="inline">{{ item.source }}</dd></div>
+          {% endif %}
+          {% if item.tabName %}
+          <div><dt class="inline font-semibold">Tab:</dt> <dd class="inline">{{ item.tabName }}</dd></div>
+          {% endif %}
+          {% if item.author %}
+          <div><dt class="inline font-semibold">Autor:</dt> <dd class="inline">{{ item.author }}</dd></div>
+          {% endif %}
+          {% if item.publishDate %}
+          <div><dt class="inline font-semibold">Data:</dt> <dd class="inline">{{ item.publishDate }}</dd></div>
+          {% endif %}
+        </dl>
+      </header>
+
+      <section class="prose prose-invert max-w-none">
+        {% for paragraph in (item.fullText or "").split("\n\n") %}
+          {% if paragraph.strip() %}
+            <p class="text-slate-200 leading-relaxed">{{ paragraph }}</p>
+          {% endif %}
+        {% endfor %}
+      </section>
+
+      {% if item.tables %}
+      <section>
+        <h2 class="text-lg font-semibold text-white mb-3">Tabelas</h2>
+        {% for table in item.tables %}
+          <table class="w-full text-sm border border-slate-700 mb-4">
+            {% if table.headers %}
+            <thead class="bg-slate-800">
+              <tr>
+                {% for h in table.headers %}<th class="px-3 py-2 text-left border border-slate-700">{{ h }}</th>{% endfor %}
+              </tr>
+            </thead>
+            {% endif %}
+            <tbody>
+              {% for row in table.rows %}
+              <tr class="border-t border-slate-700">
+                {% for cell in row %}<td class="px-3 py-2 border border-slate-700">{{ cell }}</td>{% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endfor %}
+      </section>
+      {% endif %}
+
+      {% if item.url %}
+      <footer class="pt-4 border-t border-slate-700">
+        <a href="{{ item.url }}" target="_blank" rel="noopener"
+           class="text-sky-400 underline hover:text-sky-300">Abrir no Platts →</a>
+      </footer>
+      {% endif %}
+    </article>
+  </main>
+</body>
+</html>

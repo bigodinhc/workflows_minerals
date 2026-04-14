@@ -87,3 +87,68 @@ def test_post_for_curation_calls_send_with_keyboard(monkeypatch):
     assert sent["chat_id"] == 99
     assert "Test" in sent["text"]
     assert sent["reply_markup"] is not None
+
+
+def test_format_message_escapes_markdown_specials_in_title():
+    from execution.curation.telegram_poster import format_message
+    item = {
+        "id": "x1",
+        "title": "US-China trade_war [update] *flash* `test`",
+        "fullText": "body",
+        "publishDate": "date",
+        "source": "Source",
+        "author": "",
+        "tabName": "",
+    }
+    msg = format_message(item)
+    # Every special char in the dynamic title must be preceded by a backslash
+    assert "\\_" in msg
+    assert "\\*" in msg
+    assert "\\[" in msg
+    assert "\\`" in msg
+
+
+def test_format_message_escapes_source_and_id():
+    from execution.curation.telegram_poster import format_message
+    item = {
+        "id": "abc_123",
+        "title": "Normal",
+        "fullText": "body",
+        "publishDate": "date",
+        "source": "Source *X*",
+        "author": "",
+        "tabName": "",
+    }
+    msg = format_message(item)
+    assert "Source \\*X\\*" in msg
+    assert "abc\\_123" in msg
+
+
+def test_post_for_curation_raises_on_missing_id(monkeypatch):
+    from execution.curation import telegram_poster
+    monkeypatch.setattr(telegram_poster, "_send_message", lambda *a, **k: None)
+    import pytest
+    with pytest.raises(ValueError, match="item\\['id'\\]"):
+        telegram_poster.post_for_curation(
+            chat_id=1,
+            item={"title": "no id"},
+            preview_base_url="https://example.com",
+        )
+
+
+def test_post_for_curation_raises_on_invalid_preview_url(monkeypatch):
+    from execution.curation import telegram_poster
+    monkeypatch.setattr(telegram_poster, "_send_message", lambda *a, **k: None)
+    import pytest
+    with pytest.raises(ValueError, match="absolute http"):
+        telegram_poster.post_for_curation(
+            chat_id=1,
+            item={"id": "x"},
+            preview_base_url="",
+        )
+    with pytest.raises(ValueError, match="absolute http"):
+        telegram_poster.post_for_curation(
+            chat_id=1,
+            item={"id": "x"},
+            preview_base_url="example.com/no-protocol",
+        )

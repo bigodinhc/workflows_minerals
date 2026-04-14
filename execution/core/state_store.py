@@ -73,7 +73,7 @@ def record_success(workflow: str, summary: dict, duration_ms: int) -> None:
 
 
 def record_failure(workflow: str, summary: dict, duration_ms: int) -> None:
-    """Record a delivery failure (100% failed). Increments streak."""
+    """Record a delivery failure (100% failed). Increments streak. May trigger alert."""
     client = _get_client()
     if client is None:
         return
@@ -87,9 +87,16 @@ def record_failure(workflow: str, summary: dict, duration_ms: int) -> None:
             "duration_ms": duration_ms,
         })
         _push_failure(client, workflow, reason, now)
-        client.incr(f"wf:streak:{workflow}")
+        new_streak = client.incr(f"wf:streak:{workflow}")
     except Exception as exc:
         logger.warning(f"state_store.record_failure failed: {exc}")
+        return
+    if new_streak >= _STREAK_THRESHOLD:
+        try:
+            failures = client.lrange(f"wf:failures:{workflow}", 0, 2) or []
+            _send_streak_alert(workflow, int(new_streak), failures)
+        except Exception as exc:
+            logger.warning(f"streak alert trigger failed: {exc}")
 
 
 def record_empty(workflow: str, reason: str) -> None:
@@ -108,7 +115,7 @@ def record_empty(workflow: str, reason: str) -> None:
 
 
 def record_crash(workflow: str, exc_text: str) -> None:
-    """Record a workflow crash (uncaught exception). Increments streak."""
+    """Record a workflow crash (uncaught exception). Increments streak. May trigger alert."""
     client = _get_client()
     if client is None:
         return
@@ -120,9 +127,16 @@ def record_crash(workflow: str, exc_text: str) -> None:
             "reason": exc_text[:200],
         })
         _push_failure(client, workflow, f"crash: {exc_text[:120]}", now)
-        client.incr(f"wf:streak:{workflow}")
+        new_streak = client.incr(f"wf:streak:{workflow}")
     except Exception as exc:
         logger.warning(f"state_store.record_crash failed: {exc}")
+        return
+    if new_streak >= _STREAK_THRESHOLD:
+        try:
+            failures = client.lrange(f"wf:failures:{workflow}", 0, 2) or []
+            _send_streak_alert(workflow, int(new_streak), failures)
+        except Exception as exc:
+            logger.warning(f"streak alert trigger failed: {exc}")
 
 
 def get_status(workflow: str) -> Optional[dict]:
@@ -147,3 +161,36 @@ def get_status(workflow: str) -> Optional[dict]:
 def get_all_status(workflows: list) -> dict:
     """Return dict mapping each workflow name to its status dict or None."""
     return {wf: get_status(wf) for wf in workflows}
+
+
+_STREAK_THRESHOLD = 3
+
+
+def _send_streak_alert(workflow: str, streak: int, failures: list) -> None:
+    """Send a distinct Telegram message (not an edit) summarizing the streak.
+    Overridable in tests. Never raises."""
+    try:
+        from execution.integrations.telegram_client import TelegramClient
+    except Exception as exc:
+        logger.warning(f"_send_streak_alert: telegram import failed: {exc}")
+        return
+    lines = [f"🚨 ALERTA: {workflow.upper().replace('_', ' ')} falhou {streak}x seguidas", ""]
+    if failures:
+        lines.append("Ultimas falhas:")
+        for f in failures[:3]:
+            try:
+                entry = json.loads(f) if isinstance(f, str) else f
+                t = entry.get("time", "")[:16].replace("T", " ")
+                reason = entry.get("reason", "?")
+                lines.append(f"• {t} — {reason}")
+            except Exception:
+                lines.append(f"• {f}")
+    dashboard = os.getenv("DASHBOARD_BASE_URL", "https://workflows-minerals.vercel.app")
+    lines.append("")
+    lines.append(f"[Ver dashboard]({dashboard}/)")
+    text = "\n".join(lines)
+    try:
+        client = TelegramClient()
+        client.send_message(text=text, chat_id=os.getenv("TELEGRAM_CHAT_ID"))
+    except Exception as exc:
+        logger.warning(f"_send_streak_alert: send failed: {exc}")

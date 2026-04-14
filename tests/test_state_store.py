@@ -123,3 +123,51 @@ def test_record_functions_noop_when_redis_unavailable(monkeypatch):
     state_store.record_failure("x", {"total": 1, "success": 0, "failure": 1}, 100)
     state_store.record_empty("x", "reason")
     state_store.record_crash("x", "boom")
+
+
+def test_streak_alert_fires_when_streak_reaches_3(fake_redis, monkeypatch):
+    from execution.core import state_store
+    calls = []
+    monkeypatch.setattr(state_store, "_send_streak_alert", lambda wf, streak, failures: calls.append((wf, streak, len(failures))))
+    state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
+    assert calls == []  # streak=1
+    state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
+    assert calls == []  # streak=2
+    state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
+    assert len(calls) == 1
+    wf, streak, n_failures = calls[0]
+    assert wf == "test"
+    assert streak == 3
+    assert n_failures == 3
+
+
+def test_streak_alert_fires_on_crash_too(fake_redis, monkeypatch):
+    from execution.core import state_store
+    calls = []
+    monkeypatch.setattr(state_store, "_send_streak_alert", lambda wf, streak, failures: calls.append(wf))
+    state_store.record_crash("test", "err1")
+    state_store.record_crash("test", "err2")
+    state_store.record_crash("test", "err3")
+    assert calls == ["test"]
+
+
+def test_streak_alert_fires_again_on_4th_and_5th(fake_redis, monkeypatch):
+    from execution.core import state_store
+    calls = []
+    monkeypatch.setattr(state_store, "_send_streak_alert", lambda wf, streak, failures: calls.append(streak))
+    for _ in range(5):
+        state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
+    assert calls == [3, 4, 5]
+
+
+def test_streak_alert_exception_does_not_propagate(fake_redis, monkeypatch):
+    from execution.core import state_store
+    def broken_alert(wf, streak, failures):
+        raise RuntimeError("telegram down")
+    monkeypatch.setattr(state_store, "_send_streak_alert", broken_alert)
+    # Must not raise
+    state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
+    state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
+    state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
+    # Streak still updated
+    assert fake_redis.get("wf:streak:test") == "3"

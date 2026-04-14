@@ -5,11 +5,12 @@
 
 ## Goal
 
-Introduce a small Redis-backed state store that persists workflow run results across the 5 scheduled workflows, and use it to deliver three admin-facing UX improvements:
+Introduce a small Redis-backed state store that persists workflow run results across the 5 scheduled workflows, and use it to deliver two admin-facing UX improvements:
 
 1. Consecutive-failure alerts on Telegram (threshold 3)
 2. A `/status` command that returns a one-screen snapshot of every workflow
-3. A visible toast confirmation on the `/list` contact toggle
+
+> Scope note: A third item considered during brainstorm (toggle confirmation on `/list`) was dropped after verifying it is already implemented at `webhook/app.py:1183-1184`.
 
 ## Motivation
 
@@ -279,36 +280,6 @@ rationale_news:   🚨 3 falhas seguidas
 - Column alignment: use Python f-string left-pad to the longest workflow name length (17 chars as of today).
 - All workflows without Redis data: `/status` still works, just shows "⏳ proximo" for everyone.
 
-## `/list` Toggle Confirmation
-
-**Change in `webhook/app.py` callback handler for `tgl:<phone>`:**
-
-After the successful `toggle_contact(...)` call and before re-rendering the list, call:
-
-```python
-new_status_text = "ativado" if toggled_to_big else "desativado"
-telegram_client.answer_callback_query(
-    callback_query_id,
-    text=f"✅ {contact_name} {new_status_text}",
-    show_alert=False,
-)
-```
-
-On exception from `toggle_contact`:
-
-```python
-telegram_client.answer_callback_query(
-    callback_query_id,
-    text=f"❌ Erro: {str(exc)[:100]}",
-    show_alert=False,
-)
-return  # do not re-render; preserve previous state
-```
-
-**Extend `TelegramClient.answer_callback_query`:**
-
-Current signature `answer_callback_query(callback_query_id, text="Processado!")`. Add optional `show_alert: bool = False` parameter, forwarded to the Telegram API call.
-
 ## Testing
 
 `tests/test_state_store.py` — ~12 unit tests using `fakeredis`:
@@ -338,15 +309,6 @@ Current signature `answer_callback_query(callback_query_id, text="Processado!")`
 - `/status` when state_store returns all None for all workflows shows fallback message
 - `/status` with empty status shows ℹ️ + reason
 - Next-run parsing handles multiple cron schedules and returns earliest
-
-`tests/test_webhook_toggle_confirm.py` — new, ~3 tests:
-- Successful toggle calls `answer_callback_query` with name + "ativado"/"desativado"
-- Failed toggle calls `answer_callback_query` with "❌ Erro" text
-- `show_alert=False` is passed (toast, not modal)
-
-`tests/test_telegram_client.py` — new, ~2 tests (client didn't have tests before):
-- `answer_callback_query` with `show_alert=True` forwards param
-- Default `show_alert=False`
 
 ## Dependencies
 

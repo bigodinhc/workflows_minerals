@@ -649,6 +649,33 @@ def edit_message(chat_id, message_id, text, reply_markup=None):
         data["reply_markup"] = reply_markup
     return telegram_api("editMessageText", data)
 
+
+def finalize_card(chat_id, callback_query, status_text):
+    """Final feedback for curation buttons: edit the original card; on failure send a new plain-text message.
+
+    Removes the inline keyboard so the user can't double-click, and guarantees
+    a visual confirmation even if the Markdown edit fails (old message, parse
+    errors, etc.).
+    """
+    message_id = callback_query.get("message", {}).get("message_id")
+    if not message_id:
+        logger.warning("finalize_card: missing message_id in callback_query")
+        send_telegram_message(chat_id, status_text)
+        return
+
+    edit_result = edit_message(chat_id, message_id, status_text, reply_markup=None)
+    if edit_result.get("ok"):
+        return
+
+    # Edit failed (markdown parse error, msg too old, etc.) — fallback to a new plain message
+    logger.warning(
+        f"finalize_card: edit_message failed for msg_id={message_id}: "
+        f"{edit_result.get('description', 'unknown')} — sending fallback"
+    )
+    # Strip markdown for safety in fallback
+    plain = status_text.replace("*", "").replace("`", "").replace("_", "")
+    send_telegram_message(chat_id, plain)
+
 def send_approval_message(chat_id, draft_id, preview_text):
     """Send preview with 3 approval buttons."""
     # Truncate preview for Telegram (max ~4096 chars)
@@ -1450,19 +1477,13 @@ def handle_callback(callback_query):
             return jsonify({"ok": True})
         if archived is None:
             answer_callback(callback_id, "⚠️ Item expirou ou já processado")
-            edit_message(
-                chat_id,
-                callback_query["message"]["message_id"],
-                "⚠️ Item expirou ou já processado",
-                reply_markup=None,
-            )
+            finalize_card(chat_id, callback_query, "⚠️ Item expirou ou já processado")
             return jsonify({"ok": True})
         answer_callback(callback_id, "✅ Arquivado")
-        edit_message(
+        finalize_card(
             chat_id,
-            callback_query["message"]["message_id"],
+            callback_query,
             f"✅ *Arquivado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n🆔 `{item_id}`",
-            reply_markup=None,
         )
         return jsonify({"ok": True})
 
@@ -1479,11 +1500,10 @@ def handle_callback(callback_query):
             answer_callback(callback_id, "⚠️ Redis indisponível")
             return jsonify({"ok": True})
         answer_callback(callback_id, "❌ Recusado")
-        edit_message(
+        finalize_card(
             chat_id,
-            callback_query["message"]["message_id"],
+            callback_query,
             f"❌ *Recusado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n🆔 `{item_id}`",
-            reply_markup=None,
         )
         return jsonify({"ok": True})
 
@@ -1501,12 +1521,7 @@ def handle_callback(callback_query):
             return jsonify({"ok": True})
         if item is None:
             answer_callback(callback_id, "⚠️ Item expirou")
-            edit_message(
-                chat_id,
-                callback_query["message"]["message_id"],
-                "⚠️ Item expirou ou já processado",
-                reply_markup=None,
-            )
+            finalize_card(chat_id, callback_query, "⚠️ Item expirou ou já processado")
             return jsonify({"ok": True})
         raw_text = (
             f"Title: {item.get('title','')}\n"
@@ -1517,12 +1532,11 @@ def handle_callback(callback_query):
         answer_callback(callback_id, "🤖 Processando nos 3 agents...")
         progress = send_telegram_message(chat_id, f"🤖 Processando item `{item_id}` nos 3 agents...")
         progress_msg_id = progress.get("result", {}).get("message_id") if progress else None
-        # Edit the original card BEFORE starting the thread so user sees confirmation immediately
-        edit_message(
+        # Finalize the original card BEFORE starting the thread so user sees confirmation immediately
+        finalize_card(
             chat_id,
-            callback_query["message"]["message_id"],
+            callback_query,
             f"🤖 *Enviado aos 3 agents* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n🆔 `{item_id}`",
-            reply_markup=None,
         )
         import threading
         threading.Thread(

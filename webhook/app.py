@@ -1424,15 +1424,25 @@ def handle_callback(callback_query):
         if not draft:
             logger.warning(f"Draft not found: {draft_id}")
             answer_callback(callback_id, "❌ Draft não encontrado")
-            send_telegram_message(chat_id, "❌ DRAFT EXPIRADO\n\nRode o workflow novamente.")
+            finalize_card(chat_id, callback_query, "❌ *DRAFT EXPIRADO*\n\nRode o workflow novamente.")
             return jsonify({"ok": True})
 
         if draft["status"] != "pending":
             answer_callback(callback_id, "⚠️ Já processado")
+            finalize_card(
+                chat_id,
+                callback_query,
+                f"⚠️ *Já processado* ({draft['status']})",
+            )
             return jsonify({"ok": True})
 
         drafts_update(draft_id, status="approved")
         answer_callback(callback_id, "✅ Aprovado! Enviando...")
+        finalize_card(
+            chat_id,
+            callback_query,
+            f"✅ *Aprovado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC — envio em andamento",
+        )
 
         thread = threading.Thread(
             target=process_approval_async,
@@ -1446,9 +1456,15 @@ def handle_callback(callback_query):
         draft = drafts_get(draft_id)
         if not draft:
             answer_callback(callback_id, "❌ Draft não encontrado")
+            finalize_card(chat_id, callback_query, "❌ *Draft não encontrado*")
             return jsonify({"ok": True})
 
         answer_callback(callback_id, "🧪 Enviando teste para 1 contato...")
+        finalize_card(
+            chat_id,
+            callback_query,
+            f"🧪 *Teste em andamento* — {datetime.now(timezone.utc).strftime('%H:%M')} UTC",
+        )
 
         thread = threading.Thread(
             target=process_test_send_async,
@@ -1462,6 +1478,7 @@ def handle_callback(callback_query):
         draft = drafts_get(draft_id)
         if not draft:
             answer_callback(callback_id, "❌ Draft não encontrado")
+            finalize_card(chat_id, callback_query, "❌ *Draft não encontrado*")
             return jsonify({"ok": True})
 
         # Set adjustment state
@@ -1471,6 +1488,11 @@ def handle_callback(callback_query):
         }
 
         answer_callback(callback_id, "✏️ Modo ajuste")
+        finalize_card(
+            chat_id,
+            callback_query,
+            "✏️ *Em modo ajuste* — envie o feedback na próxima mensagem",
+        )
         send_telegram_message(chat_id,
             "✏️ *MODO AJUSTE*\n\n"
             "Envie uma mensagem descrevendo o que quer ajustar.\n\n"
@@ -1483,9 +1505,13 @@ def handle_callback(callback_query):
 
     elif action == "reject":
         answer_callback(callback_id, "❌ Rejeitado")
-        send_telegram_message(chat_id, "❌ REJEITADO\n\nEste relatório foi descartado.")
         if drafts_contains(draft_id):
             drafts_update(draft_id, status="rejected")
+        finalize_card(
+            chat_id,
+            callback_query,
+            f"❌ *Recusado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC",
+        )
         return jsonify({"ok": True})
 
     elif action == "curate_archive":

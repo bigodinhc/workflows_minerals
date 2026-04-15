@@ -8,6 +8,7 @@ The handlers here do not know about Flask, requests, or Telegram — they
 consume webhook.redis_queries and produce text. app.py wires them to
 the chat.
 """
+from datetime import datetime, timezone
 from execution.curation.telegram_poster import _escape_md
 from webhook import redis_queries
 
@@ -82,4 +83,29 @@ def format_stats(date_iso: str) -> str:
         f"Recusados   {stats['rejected']}",
         f"Pipeline    {stats['pipeline']}",
     ]
+    return "\n".join(lines)
+
+
+def _format_hhmm(epoch_seconds: float) -> str:
+    """Epoch seconds -> 'HH:MM' UTC."""
+    try:
+        return datetime.fromtimestamp(float(epoch_seconds), tz=timezone.utc).strftime("%H:%M")
+    except (ValueError, OSError):
+        return "??:??"
+
+
+def format_rejections(limit: int = 10) -> str:
+    """Return /rejections text — last N feedback entries."""
+    entries = redis_queries.list_feedback(limit=limit)
+    if not entries:
+        return "*RECUSAS*\n\nNenhuma recusa registrada."
+    lines = [f"*RECUSAS · últimas {len(entries)}*", ""]
+    for i, entry in enumerate(entries, start=1):
+        when = _format_hhmm(entry.get("timestamp") or 0)
+        reason = entry.get("reason") or ""
+        if reason:
+            reason_fmt = f'"{_escape_md(_truncate(reason, 80))}"'
+        else:
+            reason_fmt = "_(sem razão)_"
+        lines.append(f"{i}. {when} · {reason_fmt}")
     return "\n".join(lines)

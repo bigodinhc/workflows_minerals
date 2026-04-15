@@ -1,6 +1,5 @@
 """Tests for webhook.redis_queries."""
 import json
-import time
 import pytest
 import fakeredis
 

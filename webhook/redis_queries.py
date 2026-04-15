@@ -17,7 +17,6 @@ can swap in fakeredis. Same pattern as execution.curation.redis_client.
 """
 import json
 import os
-import time
 from typing import Optional
 
 _FEEDBACK_TTL_SECONDS = 30 * 24 * 60 * 60   # 30 days

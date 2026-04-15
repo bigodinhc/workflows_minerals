@@ -8,7 +8,7 @@ from execution.integrations.telegram_client import TelegramClient
 
 _PREVIEW_CHAR_LIMIT = 400
 
-_MD_SPECIAL_CHARS = ("\\", "_", "*", "`", "[")
+_MD_SPECIAL_CHARS = ("\\", "_", "*", "`", "[", "]")
 
 
 def _escape_md(text: str) -> str:

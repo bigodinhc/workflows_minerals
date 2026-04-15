@@ -8,6 +8,7 @@ The handlers here do not know about Flask, requests, or Telegram — they
 consume webhook.redis_queries and produce text. app.py wires them to
 the chat.
 """
+from execution.curation.telegram_poster import _escape_md
 from webhook import redis_queries
 
 
@@ -27,27 +28,10 @@ _MONTHS_PT = [
     "jul", "ago", "set", "out", "nov", "dez",
 ]
 
-_MD_SPECIALS = ("\\", "*", "_", "[", "]", "`")
-
 
 def format_help() -> str:
     """Return the /help text (static)."""
     return _HELP_TEXT
-
-
-def _escape_md(text) -> str:
-    """Escape Telegram Markdown (legacy) specials so dynamic content does
-    not break parse_mode=Markdown sends.
-
-    Order matters: backslash must be first so subsequent replacements do
-    not double-escape inserted backslashes.
-    """
-    if text is None:
-        return ""
-    s = str(text)
-    for ch in _MD_SPECIALS:
-        s = s.replace(ch, "\\" + ch)
-    return s
 
 
 def _format_short_date(iso_date: str) -> str:

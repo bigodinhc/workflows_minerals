@@ -31,9 +31,10 @@ Depois da v1 (5 comandos navegacionais + captura de razão), três dores permane
 
 ### Fora
 - **Bug de duplicatas no scrap** — `platts:seen:<date>` às vezes deixa passar items repetidos. Não é polish. Fica pra um fix separado depois desse.
-- **Deletar `rationale_dispatcher.py`** — depois que rationale passa pela curadoria, o auto-dispatcher fica órfão. Mas remover agora é scope creep (e ele ainda pode ser útil como utilitário chamado manualmente). Deixar como dead-code flag pra revisitar.
+- **Deletar `rationale_dispatcher.py`** — depois que rationale passa pela curadoria, o auto-dispatcher fica órfão. Decisão: **mantém no codebase com um comentário TODO no topo** marcando "órfão após v1.1, revisitar em fase futura" (pode ser útil chamado manualmente via script).
 - **Rebatizar outras mensagens que não estão na lista acima** (ex: `/start`, `/help`, erros de autenticação) — mantém como está; se incomodar depois, vira v1.2.
-- **Mudanças no WhatsApp formatter ou nos prompts dos 3 agents** — fora de escopo. Só reorganiza o feedback na tela do operador.
+- **Ajustes nos prompts dos 3 agents** (Writer/Reviewer/Finalizer) — **fica pra próxima fase dedicada de prompts**. Rationale items vão passar pelos prompts atuais como se fossem notícia comum; se o output ficar ruim, é sinal pra priorizar o spec de ajuste de prompts.
+- **Mudanças no WhatsApp formatter** — fora de escopo. Só reorganiza o feedback na tela do operador.
 
 ## Arquitetura
 
@@ -303,24 +304,22 @@ Formato atual exemplo:
 Formato novo:
 ```
 ✅ *Arquivado*
-🕒 15:32 UTC · 🆔 `17c1e97d`
+🕒 15:32 UTC · 🆔 `17c1e97db96c`
 ```
 
 - Meta (data + ID) em 1 linha só.
-- ID truncado a 8 chars (primeiros) — suficiente pro operador referenciar, e o `/reprocess <id>` aceita prefixo (se não aceitar hoje, essa é outra pequena mudança).
-
-> **Decisão pendente:** `/reprocess` hoje exige item_id completo. Se truncarmos pra 8 chars nas confirmações, o operador perde a capacidade de copiar o ID pra usar com `/reprocess`. **Alternativa:** manter ID completo no confirm, e documentar que esse é seu propósito. Revisar antes do plano.
+- **ID mantém-se completo** nos cards e confirmações — serve pra copiar quando o operador precisa usar `/reprocess <id>`. Truncamento só aparece em `/history` e `/rejections` (onde ID é só leitura).
 
 Mesmo formato pra **Recusado**, **Enviado para o Writer**:
 ```
 🖋️ *Enviado para o Writer*
-🕒 15:32 UTC · 🆔 `17c1e97d`
+🕒 15:32 UTC · 🆔 `17c1e97db96c`
 ```
 
 Prompt de razão pós-Recusar:
 ```
 ❌ *Recusado*
-🕒 15:32 UTC · 🆔 `17c1e97d`
+🕒 15:32 UTC · 🆔 `17c1e97db96c`
 
 💭 Por quê? (opcional — responda ou `pular`)
 ```
@@ -408,12 +407,6 @@ Nenhuma nova lib Python. Usa:
 7. `execution/curation/telegram_poster.py` — card polido (título com ícone no topo, meta em 1 linha, botões 2x2).
 8. Testes: `tests/test_digest.py`, `tests/test_agents_progress.py` novos + atualizações em `tests/test_query_handlers.py`, `tests/test_curation_router.py`, `tests/test_curation_telegram_poster.py`.
 9. Commits atômicos (seguindo padrão do projeto).
-10. Follow-up task aberta: **investigar bug de duplicatas no scrap** (`platts:seen:<date>` deixando passar repetidos).
-
-## Aberto pra decisão antes do plano
-
-1. **`/reprocess` aceita prefixo de ID?** Se truncarmos ID nas confirmações, validar que `/reprocess` aceita 8-char prefix OU manter ID completo. Recomendação: manter ID completo no card e confirmação, truncar só em `/history` e `/rejections`.
-
-2. **`rationale_dispatcher.py` fica ou sai?** Recomendação: fica, mas com TODO marcando "órfão após v1.1, revisitar".
-
-3. **Texto do botão quando é rationale: tem algum agente dedicado pra rationale ou vai pros mesmos 3 agents de notícia comum?** Precisa confirmar com o operador se rationale exige prompts diferentes. Se sim, o Writer precisa detectar `type` e escolher prompt. Se não, vai como notícia comum.
+10. Follow-up tasks abertas:
+    - **Investigar bug de duplicatas no scrap** (`platts:seen:<date>` deixando passar repetidos).
+    - **Fase dedicada de ajuste de prompts dos 3 agents** (Writer/Reviewer/Finalizer) — incluindo lógica diferenciada pra rationale se o output atual mostrar problemas.

@@ -1,0 +1,13 @@
+{
+    "actorSpecification": 1,
+    "name": "platts-scrap-reports",
+    "title": "Platts Reports PDF Downloader",
+    "description": "Downloads Market + Research Report PDFs to Google Drive and Telegram.",
+    "version": "0.1",
+    "input": "./input_schema.json",
+    "output": "./output_schema.json",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "dockerfile": "../Dockerfile"
+}

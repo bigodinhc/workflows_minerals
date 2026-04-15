@@ -67,3 +67,19 @@ def format_history(limit: int = 10) -> str:
         date = _format_short_date(item.get("archived_date") or "")
         lines.append(f"{i}. {title} — {date}")
     return "\n".join(lines)
+
+
+def format_stats(date_iso: str) -> str:
+    """Return /stats text for the given ISO date."""
+    stats = redis_queries.stats_for_date(date_iso)
+    short = _format_short_date(date_iso) or date_iso
+    lines = [
+        f"*HOJE · {short}*",
+        "",
+        f"Scraped     {stats['scraped']}",
+        f"Staging     {stats['staging']}",
+        f"Arquivados  {stats['archived']}",
+        f"Recusados   {stats['rejected']}",
+        f"Pipeline    {stats['pipeline']}",
+    ]
+    return "\n".join(lines)

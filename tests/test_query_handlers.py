@@ -85,3 +85,28 @@ def test_escape_md_helper():
     assert _escape_md("a*b_c[d]`e") == r"a\*b\_c\[d\]\`e"
     assert _escape_md("") == ""
     assert _escape_md(None) == ""
+
+
+def test_stats_empty_day(fake_redis):
+    from webhook.query_handlers import format_stats
+    text = format_stats("2026-04-15")
+    assert "*HOJE · 15/abr*" in text
+    assert "Scraped     0" in text
+    assert "Staging     0" in text
+    assert "Arquivados  0" in text
+    assert "Recusados   0" in text
+    assert "Pipeline    0" in text
+
+
+def test_stats_populated(fake_redis):
+    from webhook.query_handlers import format_stats
+    fake_redis.sadd("platts:seen:2026-04-15", "a", "b", "c", "d")
+    fake_redis.set("platts:staging:s1", json.dumps({"id": "s1"}))
+    fake_redis.set("platts:archive:2026-04-15:x1", json.dumps({"id": "x1"}))
+    fake_redis.set("platts:archive:2026-04-15:x2", json.dumps({"id": "x2"}))
+    fake_redis.sadd("platts:pipeline:processed:2026-04-15", "p1")
+    text = format_stats("2026-04-15")
+    assert "Scraped     4" in text
+    assert "Staging     1" in text
+    assert "Arquivados  2" in text
+    assert "Pipeline    1" in text

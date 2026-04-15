@@ -50,7 +50,12 @@ const summary = {
     would_download: [],
 };
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+    headless: process.env.HEADLESS !== 'false',
+    slowMo: process.env.SLOW_MO ? parseInt(process.env.SLOW_MO, 10) : 0,
+    channel: 'chrome',
+    args: ['--no-sandbox'],
+});
 const ctx = await browser.newContext({ acceptDownloads: true });
 const page = await ctx.newPage();
 const pageLog = { info: (m) => log.info(m), warn: (m) => log.warning(m), error: (m) => log.error(m) };
@@ -58,8 +63,12 @@ const pageLog = { info: (m) => log.info(m), warn: (m) => log.warning(m), error: 
 async function run() {
     const loginResult = await loginPlatts(page, username, password, pageLog);
     if (!loginResult.ok) {
+        try {
+            await page.screenshot({ path: 'login-failure.png', fullPage: true });
+            log.warning('Saved login-failure.png');
+        } catch (_) { /* ignore */ }
         summary.type = 'error';
-        summary.errors.push({ stage: 'login', message: loginResult.reason || 'unknown' });
+        summary.errors.push({ stage: 'login', message: loginResult.reason || 'unknown', detail: loginResult.error });
         await Actor.pushData(summary);
         return;
     }

@@ -7,12 +7,14 @@
             "title": "Platts username",
             "type": "string",
             "editor": "textfield",
+            "description": "Platts Connect SSO email/username.",
             "isSecret": true
         },
         "password": {
             "title": "Platts password",
             "type": "string",
             "editor": "textfield",
+            "description": "Platts Connect SSO password.",
             "isSecret": true
         },
         "reportTypes": {
@@ -39,6 +41,7 @@
         "maxReportsPerType": {
             "title": "Max reports per category",
             "type": "integer",
+            "description": "Upper bound of rows processed per report-type grid (safety cap).",
             "default": 50,
             "minimum": 1,
             "maximum": 200
@@ -46,11 +49,13 @@
         "dryRun": {
             "title": "Dry run (no Drive upload, no Telegram)",
             "type": "boolean",
+            "description": "If true, extracts and downloads PDFs but skips Drive upload and Telegram distribution.",
             "default": false
         },
         "forceRedownload": {
             "title": "Ignore Redis dedup, re-download everything",
             "type": "boolean",
+            "description": "If true, ignores the platts:report:seen dedup keys and processes every row.",
             "default": false
         },
         "gdriveFolderId": {

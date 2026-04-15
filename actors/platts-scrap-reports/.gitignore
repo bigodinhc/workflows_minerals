@@ -8,3 +8,4 @@ dist
 node_modules
 apify_storage
 /storage
+login-failure.png

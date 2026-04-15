@@ -1,5 +1,6 @@
 """Tests for webhook.redis_queries."""
 import json
+import time
 import pytest
 import fakeredis
 
@@ -86,3 +87,77 @@ def test_list_archive_recent_derives_date_from_key(fake_redis):
     fake_redis.set("platts:archive:2026-04-15:abc", json.dumps({"id": "abc", "archivedAt": "2026-04-15T10:00:00+00:00"}))
     result = list_archive_recent()
     assert result[0]["archived_date"] == "2026-04-15"
+
+
+def test_save_feedback_creates_hash_and_index(fake_redis):
+    from webhook.redis_queries import save_feedback
+    key = save_feedback("curate_reject", "abc123", 999, "", "Sample title")
+    assert key.endswith("-abc123")
+    data = fake_redis.hgetall(f"webhook:feedback:{key}")
+    assert data["action"] == "curate_reject"
+    assert data["item_id"] == "abc123"
+    assert data["chat_id"] == "999"
+    assert data["reason"] == ""
+    assert data["title"] == "Sample title"
+    assert float(data["timestamp"]) > 0
+    assert fake_redis.zscore("webhook:feedback:index", key) is not None
+
+
+def test_save_feedback_empty_reason_allowed(fake_redis):
+    from webhook.redis_queries import save_feedback
+    key = save_feedback("draft_reject", "draft42", 999, "", "Draft title")
+    data = fake_redis.hgetall(f"webhook:feedback:{key}")
+    assert data["reason"] == ""
+
+
+def test_save_feedback_applies_30d_ttl(fake_redis):
+    from webhook.redis_queries import save_feedback
+    key = save_feedback("curate_reject", "x", 1, "", "T")
+    ttl = fake_redis.ttl(f"webhook:feedback:{key}")
+    assert 30 * 24 * 3600 - 10 <= ttl <= 30 * 24 * 3600
+
+
+def test_update_feedback_reason_updates_hash(fake_redis):
+    from webhook.redis_queries import save_feedback, update_feedback_reason
+    key = save_feedback("curate_reject", "xyz", 1, "", "T")
+    updated = update_feedback_reason(key, "duplicate of item foo")
+    assert updated is True
+    data = fake_redis.hgetall(f"webhook:feedback:{key}")
+    assert data["reason"] == "duplicate of item foo"
+
+
+def test_update_feedback_reason_nonexistent_returns_false(fake_redis):
+    from webhook.redis_queries import update_feedback_reason
+    assert update_feedback_reason("1234567890-doesnotexist", "whatever") is False
+
+
+def test_list_feedback_most_recent_first(fake_redis):
+    from webhook.redis_queries import save_feedback, list_feedback
+    key_a = save_feedback("curate_reject", "a", 1, "reason a", "Title A")
+    time.sleep(0.01)
+    key_b = save_feedback("curate_reject", "b", 1, "reason b", "Title B")
+    time.sleep(0.01)
+    key_c = save_feedback("draft_reject", "c", 1, "reason c", "Title C")
+    results = list_feedback(limit=10)
+    assert [r["item_id"] for r in results] == ["c", "b", "a"]
+
+
+def test_list_feedback_filter_by_action(fake_redis):
+    from webhook.redis_queries import save_feedback, list_feedback
+    save_feedback("curate_reject", "a", 1, "", "A")
+    save_feedback("draft_reject", "b", 1, "", "B")
+    save_feedback("curate_reject", "c", 1, "", "C")
+    results = list_feedback(limit=10, action="curate_reject")
+    assert len(results) == 2
+    assert all(r["action"] == "curate_reject" for r in results)
+
+
+def test_list_feedback_filter_since_ts(fake_redis):
+    from webhook.redis_queries import save_feedback, list_feedback
+    save_feedback("curate_reject", "old", 1, "", "Old")
+    time.sleep(0.05)
+    cutoff = time.time()
+    time.sleep(0.05)
+    save_feedback("curate_reject", "new", 1, "", "New")
+    results = list_feedback(limit=10, since_ts=cutoff)
+    assert [r["item_id"] for r in results] == ["new"]

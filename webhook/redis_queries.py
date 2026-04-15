@@ -17,6 +17,7 @@ can swap in fakeredis. Same pattern as execution.curation.redis_client.
 """
 import json
 import os
+import time
 from typing import Optional
 
 _FEEDBACK_TTL_SECONDS = 30 * 24 * 60 * 60   # 30 days
@@ -98,3 +99,76 @@ def list_archive_recent(limit: int = 10) -> list[dict]:
         items.append(data)
     items.sort(key=lambda d: d.get("archivedAt") or "", reverse=True)
     return items[:limit]
+
+
+def _feedback_key(feedback_id: str) -> str:
+    return f"webhook:feedback:{feedback_id}"
+
+
+def save_feedback(action: str, item_id: str, chat_id: int,
+                  reason: str, title: str) -> str:
+    """Create feedback Hash + index entry. Returns feedback_id '<ts>-<item_id>'."""
+    client = _get_client()
+    ts = time.time()
+    feedback_id = f"{ts:.3f}-{item_id}"
+    full_key = _feedback_key(feedback_id)
+    pipe = client.pipeline(transaction=True)
+    pipe.hset(full_key, mapping={
+        "action": action,
+        "item_id": item_id,
+        "chat_id": str(chat_id),
+        "reason": reason or "",
+        "timestamp": f"{ts:.3f}",
+        "title": title or "",
+    })
+    pipe.expire(full_key, _FEEDBACK_TTL_SECONDS)
+    pipe.zadd("webhook:feedback:index", {feedback_id: ts})
+    pipe.execute()
+    return feedback_id
+
+
+def update_feedback_reason(feedback_id: str, reason: str) -> bool:
+    """Update reason field of an existing feedback Hash.
+
+    Returns True if updated, False if the key doesn't exist.
+    """
+    client = _get_client()
+    full_key = _feedback_key(feedback_id)
+    if not client.exists(full_key):
+        return False
+    client.hset(full_key, "reason", reason or "")
+    return True
+
+
+def list_feedback(limit: int = 10,
+                  action: Optional[str] = None,
+                  since_ts: Optional[float] = None) -> list[dict]:
+    """List feedback entries newest-first with optional filters.
+
+    action: exact match filter on the 'action' field.
+    since_ts: lower bound (inclusive) on the epoch timestamp.
+    """
+    client = _get_client()
+    members = client.zrevrange("webhook:feedback:index", 0, -1, withscores=True)
+    results: list[dict] = []
+    for feedback_id, score in members:
+        if since_ts is not None and score < since_ts:
+            continue
+        data = client.hgetall(_feedback_key(feedback_id))
+        if not data:
+            continue
+        if action is not None and data.get("action") != action:
+            continue
+        data["feedback_id"] = feedback_id
+        try:
+            data["timestamp"] = float(data.get("timestamp") or 0)
+        except ValueError:
+            data["timestamp"] = 0.0
+        try:
+            data["chat_id"] = int(data.get("chat_id") or 0)
+        except ValueError:
+            data["chat_id"] = 0
+        results.append(data)
+        if len(results) >= limit:
+            break
+    return results

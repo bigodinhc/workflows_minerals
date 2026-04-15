@@ -47,6 +47,49 @@ SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
 # In-memory state (ADJUST_STATE + SEEN_ARTICLES are ephemeral; DRAFTS now in Redis)
 ADJUST_STATE = {}   # chat_id → {draft_id, awaiting_feedback: True}
 SEEN_ARTICLES = {}  # date_str → set of article titles (for market_news dedup)
+REJECT_REASON_STATE: dict = {}   # chat_id → {feedback_key, expires_at}
+REJECT_REASON_TIMEOUT_SECONDS = 120
+
+
+def begin_reject_reason(chat_id: int, action: str, item_id: str, title: str) -> str:
+    """Save a placeholder feedback entry and set state to await a reason message.
+
+    Returns the feedback_key so callers can display it if useful.
+    """
+    import time
+    feedback_key = redis_queries.save_feedback(
+        action=action, item_id=item_id, chat_id=chat_id, reason="", title=title or "",
+    )
+    REJECT_REASON_STATE[chat_id] = {
+        "feedback_key": feedback_key,
+        "expires_at": time.time() + REJECT_REASON_TIMEOUT_SECONDS,
+    }
+    return feedback_key
+
+
+def consume_reject_reason(chat_id: int, text: str):
+    """Consume the next user message as the rejection reason.
+
+    Returns:
+        ('saved', reason_text)  if a reason was saved
+        ('skipped', '')         if the user typed 'pular' or 'skip'
+        None                    if there is no pending state or it expired
+    """
+    import time
+    state = REJECT_REASON_STATE.get(chat_id)
+    if state is None:
+        return None
+    if time.time() >= state.get("expires_at", 0):
+        REJECT_REASON_STATE.pop(chat_id, None)
+        return None
+    feedback_key = state["feedback_key"]
+    stripped = (text or "").strip()
+    if stripped.lower() in {"pular", "skip"}:
+        REJECT_REASON_STATE.pop(chat_id, None)
+        return ("skipped", "")
+    redis_queries.update_feedback_reason(feedback_key, stripped)
+    REJECT_REASON_STATE.pop(chat_id, None)
+    return ("saved", stripped)
 
 
 # ── Persistent drafts store (Redis, 7d TTL) ──
@@ -1317,7 +1360,17 @@ def telegram_webhook():
         thread.daemon = True
         thread.start()
         return jsonify({"ok": True})
-    
+
+    # ── Check if user is responding to a rejection-reason prompt ──
+    reject_result = consume_reject_reason(chat_id, text)
+    if reject_result is not None:
+        status, reason = reject_result
+        if status == "saved":
+            send_telegram_message(chat_id, "✅ Razão registrada.")
+        else:
+            send_telegram_message(chat_id, "✅ Ok, sem razão registrada.")
+        return jsonify({"ok": True})
+
     # ── New news text: process with 3 agents ──
     if not ANTHROPIC_API_KEY:
         send_telegram_message(chat_id, "❌ ANTHROPIC_API_KEY não configurada no servidor.")
@@ -1610,13 +1663,33 @@ def handle_callback(callback_query):
         return jsonify({"ok": True})
 
     elif action == "reject":
-        answer_callback(callback_id, "❌ Rejeitado")
+        # Snapshot title before update
+        snapshot_title = ""
+        draft = drafts_get(draft_id)
+        if draft:
+            msg = draft.get("message") or ""
+            for line in msg.splitlines():
+                stripped = line.strip().lstrip("📊").strip()
+                if stripped and stripped != "*MINERALS TRADING*":
+                    snapshot_title = stripped[:80]
+                    break
+            if not snapshot_title:
+                snapshot_title = f"Draft {draft_id[:8]}"
+        else:
+            snapshot_title = f"Draft {draft_id[:8]}"
+
         if drafts_contains(draft_id):
             drafts_update(draft_id, status="rejected")
+        try:
+            begin_reject_reason(chat_id, "draft_reject", draft_id, snapshot_title)
+        except Exception as exc:
+            logger.error(f"draft reject begin_reject_reason error: {exc}")
+        answer_callback(callback_id, "❌ Rejeitado")
         finalize_card(
             chat_id,
             callback_query,
-            f"❌ *Recusado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC",
+            f"❌ *Recusado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n\n"
+            f"Por quê? (opcional, responda ou `pular`)",
         )
         return jsonify({"ok": True})
 
@@ -1651,17 +1724,31 @@ def handle_callback(callback_query):
             return jsonify({"ok": True})
         item_id = parts[1] if len(parts) > 1 else ""
         from execution.curation import redis_client
+        # Snapshot title before discard so it survives in feedback
+        snapshot_title = ""
+        try:
+            item = redis_client.get_staging(item_id)
+            if item:
+                snapshot_title = item.get("title") or ""
+        except Exception:
+            pass
         try:
             redis_client.discard(item_id)
         except Exception as exc:
             logger.error(f"curate_reject redis error: {exc}")
             answer_callback(callback_id, "⚠️ Redis indisponível")
             return jsonify({"ok": True})
+        try:
+            begin_reject_reason(chat_id, "curate_reject", item_id, snapshot_title)
+        except Exception as exc:
+            logger.error(f"curate_reject begin_reject_reason error: {exc}")
         answer_callback(callback_id, "❌ Recusado")
         finalize_card(
             chat_id,
             callback_query,
-            f"❌ *Recusado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n🆔 `{item_id}`",
+            f"❌ *Recusado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n"
+            f"🆔 `{item_id}`\n\n"
+            f"Por quê? (opcional, responda ou `pular`)",
         )
         return jsonify({"ok": True})
 

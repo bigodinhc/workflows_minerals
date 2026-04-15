@@ -94,8 +94,8 @@
         "concurrency": {
             "title": "Artigos em paralelo",
             "type": "integer",
-            "description": "Quantas leituras de artigo rodam em paralelo (só afeta fontes de padrão A — allInsights, ironOreTopic). RMW é sempre sequencial.",
-            "default": 3,
+            "description": "Quantas leituras de artigo rodam em paralelo (só afeta fontes de padrão A — allInsights, ironOreTopic). RMW é sempre sequencial. Acima de 2 satura CPU e SPA não renderiza a tempo.",
+            "default": 2,
             "minimum": 1,
             "maximum": 6
         },
@@ -161,10 +161,10 @@
         "proxyConfiguration": {
             "title": "Proxy",
             "type": "object",
-            "description": "Configuração de proxy. Por padrão usa Apify Proxy. Ative residencial se Platts bloquear IPs de datacenter.",
+            "description": "Configuração de proxy. Default: SEM proxy (IP direto do Apify). Ative residencial se Platts bloquear (Akamai).",
             "editor": "proxy",
-            "prefill": { "useApifyProxy": true },
-            "default": { "useApifyProxy": true }
+            "prefill": { "useApifyProxy": false },
+            "default": { "useApifyProxy": false }
         }
     },
     "required": ["username", "password"]

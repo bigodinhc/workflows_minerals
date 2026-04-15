@@ -8,32 +8,44 @@
  */
 
 import { closePopups } from '../auth/login.js';
+import { saveDebugArtifacts } from '../util/debug.js';
 
+const CORE_ROOT = 'https://core.spglobal.com/';
 const ALL_INSIGHTS_URL = 'https://core.spglobal.com/#platts/allInsights?keySector=Ferrous%20Metals';
 
 export async function navigateToFerrousMetals(page, pageLog) {
     try {
-        pageLog.info('🧭 Navegando para Ferrous Metals (allInsights)...');
+        pageLog.info('🧭 Navegando para core.spglobal.com (root) para inicializar SPA...');
+        await page.goto(CORE_ROOT, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+        pageLog.info(`   Root carregado: ${page.url()}`);
 
-        await page.goto(ALL_INSIGHTS_URL, {
-            waitUntil: 'domcontentloaded', timeout: 30000,
-        });
+        pageLog.info('🧭 Navegando para allInsights Ferrous Metals...');
+        await page.goto(ALL_INSIGHTS_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await closePopups(page);
 
-        // Espera qualquer container principal aparecer (slider OU latest list)
+        // Espera qualquer container principal aparecer
         try {
             await page.waitForSelector(
-                '#platts-topNews-slider, #platts-latest-news-infinite-list',
-                { timeout: 25000 },
+                '#platts-topNews-slider, #platts-latest-news-infinite-list, #platts-newsHome-topNews-card, [id*="topNews"], [id*="latest-news"]',
+                { timeout: 30000 },
             );
             pageLog.info('   ✅ allInsights carregada');
+            return true;
         } catch (e) {
-            pageLog.warning('   ⚠️ Containers principais não apareceram em 25s, prosseguindo');
+            pageLog.warning('   ⚠️ Containers principais não apareceram em 30s');
+            // Salva sempre pra diagnosticar (não depende do flag debugArtifacts)
+            await saveDebugArtifacts(page, 'allinsights-timeout', {
+                attemptedUrl: ALL_INSIGHTS_URL,
+                finalUrl: page.url(),
+                reason: 'Container selectors did not appear',
+            });
+            pageLog.warning('   📸 Screenshot + HTML salvos em debug-allinsights-timeout-*');
+            return false;
         }
-
-        return true;
     } catch (error) {
         pageLog.error(`Erro Ferrous Metals: ${error.message}`);
+        await saveDebugArtifacts(page, 'allinsights-navigate-error', { error: error.message });
         return false;
     }
 }
@@ -165,27 +177,35 @@ export async function collectLatestList(page, pageLog, maxItems = 30, scrollToLo
             if (!list) return [];
 
             const links = [...list.querySelectorAll('a[href*="insightsArticle"]')];
-            return links.slice(0, max).map((link, index) => {
-                // Tenta pegar data do irmão/pai próximo
-                let date = '';
-                const container = link.closest('[class*="card"], [class*="item"], li, article, div');
-                if (container) {
-                    const text = container.innerText || '';
-                    const m = text.match(/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}\s+UTC/) ||
-                        text.match(/há\s+\d+\s+\w+/i) ||
-                        text.match(/\d+\s+\w+\s+ago/i);
-                    if (m) date = m[0];
-                }
+            // Filtra fora Rationales/Assessments — só renderizam no reading pane da RMW
+            const RATIONALE_RE = /rationale|assessment|daily rati|exclusions|summary$/i;
 
-                return {
-                    index,
-                    title: link.textContent.trim().substring(0, 200),
-                    href: link.href || '',
-                    date,
-                    source: 'Latest',
-                    clickMethod: 'href',
-                };
-            });
+            return links
+                .filter((link) => {
+                    const title = (link.textContent || '').trim();
+                    return !RATIONALE_RE.test(title);
+                })
+                .slice(0, max)
+                .map((link, index) => {
+                    let date = '';
+                    const container = link.closest('[class*="card"], [class*="item"], li, article, div');
+                    if (container) {
+                        const text = container.innerText || '';
+                        const m = text.match(/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}\s+UTC/) ||
+                            text.match(/há\s+\d+\s+\w+/i) ||
+                            text.match(/\d+\s+\w+\s+ago/i);
+                        if (m) date = m[0];
+                    }
+
+                    return {
+                        index,
+                        title: link.textContent.trim().substring(0, 200),
+                        href: link.href || '',
+                        date,
+                        source: 'Latest',
+                        clickMethod: 'href',
+                    };
+                });
         }, maxItems);
 
         pageLog.info(`   📋 ${latestList.length} itens Latest`);

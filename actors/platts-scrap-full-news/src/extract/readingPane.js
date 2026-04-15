@@ -9,9 +9,18 @@
  *   iodexPrice, iopexAssessments, lumpPremium
  */
 
-export async function extractReadingPaneContent(page) {
-    return page.evaluate(() => {
-        const pane = document.querySelector('.readingpane-details');
+export async function extractReadingPaneContent(page, paneIndex = -1) {
+    return page.evaluate((idx) => {
+        const allPanes = [...document.querySelectorAll('.readingpane-details')];
+        let pane = null;
+        if (idx >= 0 && idx < allPanes.length) {
+            pane = allPanes[idx];
+        } else {
+            // Fallback: primeiro pane visível não vazio
+            pane = allPanes.find((p) => p.offsetParent !== null && (p.innerText || '').length > 50) ||
+                allPanes.find((p) => p.offsetParent !== null) ||
+                allPanes[0];
+        }
         if (!pane) return null;
 
         const data = {
@@ -102,5 +111,5 @@ export async function extractReadingPaneContent(page) {
         if (lumpMatch) data.metadata.lumpPremium = lumpMatch[1];
 
         return data;
-    });
+    }, paneIndex);
 }

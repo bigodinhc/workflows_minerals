@@ -12,21 +12,28 @@
 import { closePopups } from '../auth/login.js';
 import { extractReadingPaneContent } from '../extract/readingPane.js';
 import { isDateWithinFilter } from '../util/dates.js';
+import { saveDebugArtifacts } from '../util/debug.js';
 
 const RMW_URL = 'https://core.spglobal.com/#platts/workspace?workspace=Raw%20Materials%20Workspace&type=public';
 
 export async function navigateToRMW(page, pageLog) {
     try {
+        if (!page.url().startsWith('https://core.spglobal.com/')) {
+            pageLog.info('🧭 Inicializando core.spglobal.com root...');
+            await page.goto('https://core.spglobal.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        }
+
         pageLog.info('🧭 Navegando para Raw Materials Workspace...');
         await page.goto(RMW_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await closePopups(page);
 
         // Espera Iron Ore tab ativa e news grid carregar
-        await page.waitForSelector('#page-widget-area-tab-Iron\\ Ore', { timeout: 30000 })
+        await page.waitForSelector('[id*="page-widget-area-tab-Iron"]', { timeout: 30000 })
             .catch(() => pageLog.warning('   ⚠️ Tab Iron Ore não apareceu em 30s'));
 
-        // Espera grid de news aparecer (10+ anchors)
-        await page.waitForFunction(
+        // Espera grid de news aparecer (anchors)
+        const gridReady = await page.waitForFunction(
             () => {
                 const grids = document.querySelectorAll('.ag-root-wrapper');
                 for (const g of grids) {
@@ -37,12 +44,20 @@ export async function navigateToRMW(page, pageLog) {
                 return false;
             },
             { timeout: 30000 },
-        ).catch(() => pageLog.warning('   ⚠️ News grid com anchors não apareceu em 30s'));
+        ).then(() => true).catch(() => false);
+
+        if (!gridReady) {
+            pageLog.warning('   ⚠️ News grid com anchors não apareceu em 30s');
+            await saveDebugArtifacts(page, 'rmw-timeout', { attemptedUrl: RMW_URL, finalUrl: page.url() });
+            pageLog.warning('   📸 Screenshot + HTML salvos em debug-rmw-timeout-*');
+            return false;
+        }
 
         pageLog.info('   ✅ RMW pronta');
         return true;
     } catch (error) {
         pageLog.error(`Erro RMW navigate: ${error.message}`);
+        await saveDebugArtifacts(page, 'rmw-navigate-error', { error: error.message });
         return false;
     }
 }
@@ -79,7 +94,19 @@ export async function discoverCommentaryTabs(page, pageLog, filterRegex = '') {
 async function activateTab(page, pageLog, tab) {
     pageLog.info(`\n🗂️ Ativando tab: "${tab.name}"`);
     try {
-        // Usa evaluate para escapar dos caracteres especiais no id
+        // Marca grids atuais antes do click pra detectar re-render
+        const preClickState = await page.evaluate(() => {
+            const grids = [...document.querySelectorAll('.ag-root-wrapper')]
+                .filter((g) => g.offsetParent !== null);
+            const target = grids.find((g) =>
+                g.querySelectorAll('button.ag-anchor, a.ag-anchor').length > 0,
+            );
+            return {
+                rowCount: target ? target.querySelectorAll('.ag-row').length : 0,
+                firstTitle: target?.querySelector('button.ag-anchor, a.ag-anchor')?.innerText?.trim() || '',
+            };
+        });
+
         const clicked = await page.evaluate((tabId) => {
             const el = document.getElementById(tabId);
             if (!el) return false;
@@ -92,8 +119,26 @@ async function activateTab(page, pageLog, tab) {
             return false;
         }
 
-        // Espera grid repopular (detectar por mudança no número de rows ou conteúdo)
-        await page.waitForTimeout(1500); // settle para re-render AG-Grid
+        // Espera grid repopular: ou firstTitle muda, ou rowCount muda, ou passa X ms
+        await page.waitForFunction(
+            (prev) => {
+                const grids = [...document.querySelectorAll('.ag-root-wrapper')]
+                    .filter((g) => g.offsetParent !== null);
+                const target = grids.find((g) =>
+                    g.querySelectorAll('button.ag-anchor, a.ag-anchor').length > 0,
+                );
+                if (!target) return false;
+                const rows = target.querySelectorAll('.ag-row').length;
+                const firstTitle = target.querySelector('button.ag-anchor, a.ag-anchor')?.innerText?.trim() || '';
+                // Mudou o conteúdo OU tem rows (primeira carga)
+                return firstTitle !== prev.firstTitle || (rows > 0 && prev.rowCount === 0);
+            },
+            preClickState,
+            { timeout: 8000 },
+        ).catch(() => pageLog.warning('   ⚠️ Grid não repopulou em 8s, prosseguindo assim mesmo'));
+
+        // Pequeno settle adicional pra AG-Grid estabilizar
+        await page.waitForTimeout(800);
         return true;
     } catch (e) {
         pageLog.error(`   ❌ Erro ativando tab: ${e.message}`);
@@ -153,44 +198,92 @@ async function collectGridArticles(page, pageLog, tabName) {
  */
 async function openArticleInPane(page, pageLog, item) {
     try {
-        const clicked = await page.evaluate((anchorIndex) => {
+        // Click + captura state de TODOS os panes antes (muitos podem existir)
+        const context = await page.evaluate((anchorIndex) => {
             const grids = [...document.querySelectorAll('.ag-root-wrapper')];
             for (const g of grids) {
                 if (g.offsetParent === null) continue;
                 const anchors = [...g.querySelectorAll('button.ag-anchor, a.ag-anchor')];
                 if (anchors.length > anchorIndex) {
-                    anchors[anchorIndex].click();
-                    return true;
+                    const anchor = anchors[anchorIndex];
+
+                    // Captura state de TODOS os panes existentes na DOM
+                    const allPanes = [...document.querySelectorAll('.readingpane-details')];
+                    const beforeStates = allPanes.map((p) => ({
+                        text: (p.innerText || '').slice(0, 600),
+                        visible: p.offsetParent !== null,
+                    }));
+
+                    anchor.click();
+                    return { ok: true, beforeStates, paneCount: allPanes.length };
                 }
             }
-            return false;
+            return { ok: false };
         }, item.anchorIndex);
 
-        if (!clicked) {
+        if (!context.ok) {
             pageLog.warning(`   ⚠️ Anchor ${item.anchorIndex} não encontrado`);
-            return false;
+            return null;
         }
 
-        // Espera reading pane existir e ter o título esperado (confirma que atualizou)
-        const titleKey = item.title.slice(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        await page.waitForFunction(
-            (expected) => {
-                const pane = document.querySelector('.readingpane-details');
-                if (!pane) return false;
-                const paneText = (pane.innerText || '').slice(0, 500);
-                return paneText.includes(expected);
-            },
-            titleKey.slice(0, 30),
-            { timeout: 15000 },
-        ).catch(() => {
-            // Fallback: só espera o pane existir
-            return page.waitForSelector('.readingpane-details', { timeout: 5000 }).catch(() => {});
-        });
+        const dateHint = (item.date || '').match(/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/)?.[0] || null;
 
-        return true;
+        // Espera QUALQUER pane atualizar: ou contém dateHint, ou mudou vs before
+        await page.waitForFunction(
+            ({ beforeStates, dateHint }) => {
+                const allPanes = [...document.querySelectorAll('.readingpane-details')];
+                for (let i = 0; i < allPanes.length; i++) {
+                    const p = allPanes[i];
+                    if (p.offsetParent === null) continue;
+                    const current = (p.innerText || '').slice(0, 600);
+                    if (!current || current.length < 50) continue;
+                    // Se dateHint presente no pane — match forte
+                    if (dateHint && current.includes(dateHint)) return true;
+                    // Senão: pane mudou vs snapshot anterior
+                    const before = beforeStates[i]?.text ?? null;
+                    if (before === null || current !== before) return true;
+                }
+                return false;
+            },
+            { beforeStates: context.beforeStates, dateHint },
+            { timeout: 15000 },
+        ).catch(() => pageLog.warning('   ⚠️ Pane não atualizou em 15s (conteúdo pode estar stale)'));
+
+        await page.waitForTimeout(600);
+
+        // Pós-wait: descobre qual pane TEM o conteúdo certo (pra extração escopada)
+        const paneIndex = await page.evaluate(
+            ({ beforeStates, dateHint }) => {
+                const allPanes = [...document.querySelectorAll('.readingpane-details')];
+                // Prioridade 1: pane que contém dateHint
+                if (dateHint) {
+                    for (let i = 0; i < allPanes.length; i++) {
+                        const p = allPanes[i];
+                        if (p.offsetParent === null) continue;
+                        if ((p.innerText || '').includes(dateHint)) return i;
+                    }
+                }
+                // Prioridade 2: pane que MUDOU
+                for (let i = 0; i < allPanes.length; i++) {
+                    const p = allPanes[i];
+                    if (p.offsetParent === null) continue;
+                    const current = (p.innerText || '').slice(0, 600);
+                    if (current.length < 50) continue;
+                    if ((beforeStates[i]?.text ?? null) !== current) return i;
+                }
+                // Fallback: primeiro pane visível
+                for (let i = 0; i < allPanes.length; i++) {
+                    if (allPanes[i].offsetParent !== null) return i;
+                }
+                return -1;
+            },
+            { beforeStates: context.beforeStates, dateHint },
+        );
+
+        return { paneIndex };
     } catch (e) {
         pageLog.error(`   ❌ Erro abrindo artigo: ${e.message}`);
-        return false;
+        return null;
     }
 }
 
@@ -238,7 +331,7 @@ export async function collectRMW(page, pageLog, options = {}) {
             const opened = await openArticleInPane(page, pageLog, item);
             if (!opened) continue;
 
-            const content = await extractReadingPaneContent(page);
+            const content = await extractReadingPaneContent(page, opened.paneIndex);
             if (!content || !content.fullText) {
                 pageLog.warning('      ⚠️ Pane vazio, pulando');
                 continue;

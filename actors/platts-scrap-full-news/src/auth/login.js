@@ -12,8 +12,8 @@ export async function closePopups(page) {
     } catch (e) { /* silencioso */ }
 }
 
-const LOGIN_URL = 'https://www.spglobal.com/bin/commodityinsights/login';
-const HOME_URL = 'https://www.spglobal.com/commodityinsights/en';
+const LOGIN_URL = 'https://core.spglobal.com/web/index1.html#login';
+const HOME_URL = 'https://core.spglobal.com/';
 
 /**
  * Retorna { ok: true } em sucesso,
@@ -94,10 +94,17 @@ export async function loginPlatts(page, username, password, pageLog) {
         else await page.keyboard.press('Enter');
 
         pageLog.info('Aguardando autenticação...');
-        // Espera: ou URL fora de /login (sucesso) ou erro visível (rejeição)
+        // Espera: ou URL fora de /login (qualquer subdomínio spglobal) ou erro visível
         try {
             await Promise.race([
-                page.waitForURL(/spglobal\.com\/(commodity-insights|commodityinsights)/, { timeout: 30000 }),
+                page.waitForFunction(
+                    () => {
+                        const u = location.href;
+                        const inLogin = u.includes('#login') || u.includes('/oauth2/') || u.endsWith('/login');
+                        return !inLogin && (u.includes('core.spglobal.com') || u.includes('spglobal.com'));
+                    },
+                    { timeout: 30000 },
+                ),
                 page.waitForSelector('.okta-form-infobox-error', { timeout: 30000 }),
             ]);
         } catch (e) {
@@ -110,9 +117,10 @@ export async function loginPlatts(page, username, password, pageLog) {
             return { ok: false, reason: 'auth-rejected', error: errText };
         }
 
-        // URL ainda em /login após janela de grace = falhou
-        if (page.url().includes('/login') || page.url().includes('/oauth2/')) {
-            return { ok: false, reason: 'auth-rejected', error: 'ainda em /login após Verify' };
+        // URL ainda em login after grace = falhou
+        const finalUrl = page.url();
+        if (finalUrl.includes('#login') || finalUrl.includes('/oauth2/') || finalUrl.endsWith('/login')) {
+            return { ok: false, reason: 'auth-rejected', error: `ainda em login: ${finalUrl}` };
         }
 
         await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => { /* ok, pode ser SPA */ });

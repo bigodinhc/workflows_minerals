@@ -150,3 +150,77 @@ def test_rejections_escapes_markdown_in_reason(fake_redis):
     assert "*foo*" not in text
     assert "[bar]" not in text
     assert _escape_md("duplicate of *foo* [bar]") in text
+
+
+def test_queue_empty(fake_redis):
+    from webhook.query_handlers import format_queue_page
+    text, markup = format_queue_page(page=1)
+    assert text == "*STAGING*\n\nNenhum item aguardando."
+    assert markup is None
+
+
+def test_queue_single_page(fake_redis):
+    from webhook.query_handlers import format_queue_page
+    for i, ts in enumerate(["10:00", "09:00", "08:00"]):
+        fake_redis.set(f"platts:staging:item{i}", json.dumps({
+            "id": f"item{i}", "title": f"Title {i}",
+            "stagedAt": f"2026-04-15T{ts}:00Z"
+        }))
+    text, markup = format_queue_page(page=1)
+    assert "*STAGING · 3 items*" in text
+    assert "1. Title 0" in text
+    assert "3. Title 2" in text
+    # Single page -> no pagination row, only 3 item buttons
+    buttons = markup["inline_keyboard"]
+    # 3 item rows, no pagination
+    assert len(buttons) == 3
+    assert buttons[0][0]["callback_data"] == "queue_open:item0"
+
+
+def test_queue_paginated(fake_redis):
+    from webhook.query_handlers import format_queue_page
+    # 12 items total -> 3 pages of 5
+    for i in range(12):
+        fake_redis.set(f"platts:staging:i{i:02d}", json.dumps({
+            "id": f"i{i:02d}", "title": f"Title {i:02d}",
+            "stagedAt": f"2026-04-15T{i:02d}:00:00Z"
+        }))
+    text_p1, markup_p1 = format_queue_page(page=1)
+    assert "*STAGING · 12 items*" in text_p1
+    assert "1. Title 11" in text_p1
+    assert "5. Title 07" in text_p1
+    assert "6. Title" not in text_p1
+    # markup: 5 item rows + 1 pagination row
+    assert len(markup_p1["inline_keyboard"]) == 6
+    pag = markup_p1["inline_keyboard"][-1]
+    pag_texts = [btn["text"] for btn in pag]
+    # Page 1: no "anterior" (no previous page); indicator + próximo
+    assert any("1/3" in t for t in pag_texts)
+    assert any("próximo" in t.lower() for t in pag_texts)
+    assert not any("anterior" in t.lower() for t in pag_texts)
+
+    text_p2, markup_p2 = format_queue_page(page=2)
+    assert "6. Title 06" in text_p2
+    assert "10. Title 02" in text_p2
+
+
+def test_queue_truncates_long_title(fake_redis):
+    from webhook.query_handlers import format_queue_page
+    long_title = "B" * 80
+    fake_redis.set("platts:staging:x", json.dumps({
+        "id": "x", "title": long_title, "stagedAt": "2026-04-15T10:00:00Z"
+    }))
+    text, _ = format_queue_page(page=1)
+    assert "B" * 60 + "…" in text
+
+
+def test_queue_escapes_markdown_in_title(fake_redis):
+    from webhook.query_handlers import format_queue_page, _escape_md
+    fake_redis.set("platts:staging:x", json.dumps({
+        "id": "x", "title": "Vale_Q2 *report* [draft]",
+        "stagedAt": "2026-04-15T10:00:00Z",
+    }))
+    text, _ = format_queue_page(page=1)
+    assert "*report*" not in text
+    assert "Vale_Q2" not in text
+    assert _escape_md("Vale_Q2 *report* [draft]") in text

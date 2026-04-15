@@ -9,6 +9,7 @@ consume webhook.redis_queries and produce text. app.py wires them to
 the chat.
 """
 from datetime import datetime, timezone
+from typing import Optional
 from execution.curation.telegram_poster import _escape_md
 from webhook import redis_queries
 
@@ -109,3 +110,51 @@ def format_rejections(limit: int = 10) -> str:
             reason_fmt = "_(sem razão)_"
         lines.append(f"{i}. {when} · {reason_fmt}")
     return "\n".join(lines)
+
+
+_QUEUE_PAGE_SIZE = 5
+
+
+def format_queue_page(page: int = 1) -> tuple[str, Optional[dict]]:
+    """Return (text, reply_markup) for /queue at given 1-indexed page.
+
+    reply_markup is None when there are no items. Each item row has a
+    single callback button 'queue_open:<id>' that the dispatch layer
+    maps to rendering the full curation card. Pagination row appended
+    if total pages > 1.
+    """
+    items = redis_queries.list_staging(limit=200)
+    total = len(items)
+    if total == 0:
+        return "*STAGING*\n\nNenhum item aguardando.", None
+
+    total_pages = (total + _QUEUE_PAGE_SIZE - 1) // _QUEUE_PAGE_SIZE
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * _QUEUE_PAGE_SIZE
+    end = start + _QUEUE_PAGE_SIZE
+    page_items = items[start:end]
+
+    lines = [f"*STAGING · {total} items*", ""]
+    for i, item in enumerate(page_items, start=start + 1):
+        title = _escape_md(_truncate(item.get("title") or ""))
+        lines.append(f"{i}. {title}")
+    text = "\n".join(lines)
+
+    keyboard: list[list[dict]] = []
+    for i, item in enumerate(page_items, start=start + 1):
+        item_id = item.get("id") or ""
+        keyboard.append([{
+            "text": f"{i}. Abrir",
+            "callback_data": f"queue_open:{item_id}",
+        }])
+
+    if total_pages > 1:
+        row: list[dict] = []
+        if page > 1:
+            row.append({"text": "⬅ anterior", "callback_data": f"queue_page:{page - 1}"})
+        row.append({"text": f"{page}/{total_pages}", "callback_data": "noop"})
+        if page < total_pages:
+            row.append({"text": "próximo ➡", "callback_data": f"queue_page:{page + 1}"})
+        keyboard.append(row)
+
+    return text, {"inline_keyboard": keyboard}

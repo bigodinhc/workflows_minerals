@@ -24,6 +24,8 @@ sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_HERE.parent))
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 import contact_admin
+import query_handlers
+import redis_queries
 from execution.integrations.sheets_client import SheetsClient
 
 # Setup logging
@@ -1228,6 +1230,53 @@ def telegram_webhook():
                 )
                 return jsonify({"ok": True})
             _reprocess_item(chat_id, parts[1].strip())
+            return jsonify({"ok": True})
+
+        if text == "/help":
+            if not contact_admin.is_authorized(chat_id):
+                logger.warning(f"/help rejected: chat_id={chat_id} not authorized")
+                return jsonify({"ok": True})
+            send_telegram_message(chat_id, query_handlers.format_help())
+            return jsonify({"ok": True})
+
+        if text == "/history":
+            if not contact_admin.is_authorized(chat_id):
+                logger.warning(f"/history rejected: chat_id={chat_id} not authorized")
+                return jsonify({"ok": True})
+            try:
+                body = query_handlers.format_history()
+            except Exception as exc:
+                logger.error(f"/history error: {exc}")
+                send_telegram_message(chat_id, "❌ Erro ao consultar arquivo.")
+                return jsonify({"ok": True})
+            send_telegram_message(chat_id, body)
+            return jsonify({"ok": True})
+
+        if text == "/stats":
+            if not contact_admin.is_authorized(chat_id):
+                logger.warning(f"/stats rejected: chat_id={chat_id} not authorized")
+                return jsonify({"ok": True})
+            today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            try:
+                body = query_handlers.format_stats(today_iso)
+            except Exception as exc:
+                logger.error(f"/stats error: {exc}")
+                send_telegram_message(chat_id, "❌ Erro ao calcular stats.")
+                return jsonify({"ok": True})
+            send_telegram_message(chat_id, body)
+            return jsonify({"ok": True})
+
+        if text == "/rejections":
+            if not contact_admin.is_authorized(chat_id):
+                logger.warning(f"/rejections rejected: chat_id={chat_id} not authorized")
+                return jsonify({"ok": True})
+            try:
+                body = query_handlers.format_rejections()
+            except Exception as exc:
+                logger.error(f"/rejections error: {exc}")
+                send_telegram_message(chat_id, "❌ Erro ao listar recusas.")
+                return jsonify({"ok": True})
+            send_telegram_message(chat_id, body)
             return jsonify({"ok": True})
 
         return jsonify({"ok": True})  # unknown command

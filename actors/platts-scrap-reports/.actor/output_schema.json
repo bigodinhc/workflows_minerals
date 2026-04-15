@@ -1,19 +1,13 @@
 {
-    "actorOutputSchemaVersion": 1,
-    "title": "Platts Iron Ore News",
-    "description": "Dataset of iron ore news, insights and market commentary from Platts, plus article images in the key-value store.",
-    "properties": {
-        "dataset": {
-            "type": "string",
-            "title": "News Articles",
-            "description": "Dataset containing one object per run with Top News, News & Insights, Market Commentary and summary metrics.",
-            "template": "{{links.apiDefaultDatasetUrl}}/items"
-        },
-        "files": {
-            "type": "string",
-            "title": "Images",
-            "description": "Key-value store containing article thumbnails and chart images.",
-            "template": "{{links.apiDefaultKeyValueStoreUrl}}/keys"
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "summary": {
+            "title": "Run summary",
+            "transformation": {
+                "fields": ["type", "downloaded", "skipped", "errors", "would_download"]
+            },
+            "display": { "component": "table" }
         }
     }
 }

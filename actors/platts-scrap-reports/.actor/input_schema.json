@@ -1,170 +1,70 @@
 {
-    "title": "Platts Iron Ore News Scraper",
+    "title": "Platts Reports PDF Downloader",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "username": {
-            "title": "Username",
+            "title": "Platts username",
             "type": "string",
-            "description": "Email de login do Platts / S&P Global.",
             "editor": "textfield",
             "isSecret": true
         },
         "password": {
-            "title": "Password",
+            "title": "Platts password",
             "type": "string",
-            "description": "Senha do Platts.",
             "editor": "textfield",
             "isSecret": true
         },
-        "sources": {
-            "title": "Sources",
+        "reportTypes": {
+            "title": "Report categories to scrape",
             "type": "array",
-            "description": "Quais fontes rodar nesta execução. Se omitido, roda todas.",
-            "editor": "select",
-            "items": {
-                "type": "string",
-                "enum": ["allInsights", "ironOreTopic", "rmw"],
-                "enumTitles": [
-                    "All Insights (Ferrous Metals) — Top News + Latest + FLASH",
-                    "Iron Ore topic — News & Insights",
-                    "Raw Materials Workspace — tabs (Rationale, BOFs, Lump, …)"
-                ]
-            },
-            "uniqueItems": true,
-            "default": ["allInsights", "ironOreTopic", "rmw"]
+            "editor": "stringList",
+            "default": ["Market Reports", "Research Reports"],
+            "description": "Each entry maps to a tab on core.spglobal.com/#platts/rptsSearch."
         },
-        "rmwTabFilter": {
-            "title": "RMW tab filter (regex)",
-            "type": "string",
-            "description": "Regex opcional para filtrar tabs na Raw Materials Workspace. Vazio = todas as tabs descobertas.",
-            "editor": "textfield",
-            "default": ""
+        "excludeReportNames": {
+            "title": "Substrings to exclude (case-insensitive)",
+            "type": "array",
+            "editor": "stringList",
+            "default": [
+                "- Portuguese",
+                "(Português)",
+                "(Portugues)",
+                "(Español)",
+                "Perspectiva Global",
+                "Panorama Semanal"
+            ],
+            "description": "Skip rows whose Report Name contains any of these substrings. Used to drop translated duplicates."
         },
-        "maxArticles": {
-            "title": "Máximo de artigos (global)",
+        "maxReportsPerType": {
+            "title": "Max reports per category",
             "type": "integer",
-            "description": "Teto total de artigos coletados na run, somando todas as fontes.",
-            "default": 10,
+            "default": 50,
             "minimum": 1,
             "maximum": 200
         },
-        "maxTopNewsToCheck": {
-            "title": "Máx Top News para verificar",
-            "type": "integer",
-            "description": "Quantos Top News verificar antes de aplicar filtro de data.",
-            "default": 5,
-            "minimum": 1,
-            "maximum": 20
-        },
-        "includeLatest": {
-            "title": "Incluir Latest list",
+        "dryRun": {
+            "title": "Dry run (no Drive upload, no Telegram)",
             "type": "boolean",
-            "description": "Coletar a lista 'Latest' do allInsights Ferrous Metals (lista longa, inclui todas as commodities ferrous).",
-            "default": true
-        },
-        "latestMaxItems": {
-            "title": "Máx itens Latest",
-            "type": "integer",
-            "description": "Quantos itens da lista Latest capturar.",
-            "default": 30,
-            "minimum": 1,
-            "maximum": 200
-        },
-        "scrollForMoreLatest": {
-            "title": "Scroll para mais Latest",
-            "type": "boolean",
-            "description": "Se true, scrollea a lista Latest pra carregar mais itens (infinite scroll). Mais lento.",
             "default": false
         },
-        "includeFlash": {
-            "title": "Incluir FLASH banner",
+        "forceRedownload": {
+            "title": "Ignore Redis dedup, re-download everything",
             "type": "boolean",
-            "description": "Captura o banner FLASH de breaking news no topo da página.",
-            "default": true
+            "default": false
         },
-        "maxArticlesPerRmwTab": {
-            "title": "Máx artigos por tab RMW",
-            "type": "integer",
-            "description": "Quantos artigos extrair por sub-tab do Raw Materials Workspace.",
-            "default": 10,
-            "minimum": 1,
-            "maximum": 30
-        },
-        "concurrency": {
-            "title": "Artigos em paralelo",
-            "type": "integer",
-            "description": "Quantas leituras de artigo rodam em paralelo (só afeta fontes de padrão A — allInsights, ironOreTopic). RMW é sempre sequencial. Acima de 2 satura CPU e SPA não renderiza a tempo.",
-            "default": 2,
-            "minimum": 1,
-            "maximum": 6
-        },
-        "dateFilter": {
-            "title": "Filtro de Data",
+        "gdriveFolderId": {
+            "title": "Google Drive root folder ID",
             "type": "string",
-            "description": "Como filtrar artigos por data.",
-            "editor": "select",
-            "default": "today",
-            "enum": ["today", "specificDate", "lastXDays", "all"],
-            "enumTitles": [
-                "Hoje (servidor)",
-                "Data Específica",
-                "Últimos X Dias",
-                "Todos"
-            ]
-        },
-        "targetDate": {
-            "title": "Data Alvo",
-            "type": "string",
-            "description": "Data alvo em DD/MM/YYYY. Usado com dateFilter = specificDate ou today.",
             "editor": "textfield",
-            "nullable": true
+            "default": "1KxixMP9rKF0vGzINGvmmyFvouaOvL02y",
+            "description": "ID of the 'Platts Reports' folder shared with the service account."
         },
-        "daysToCollect": {
-            "title": "Dias para Coletar",
-            "type": "integer",
-            "description": "Número de dias (apenas para dateFilter = lastXDays).",
-            "default": 1,
-            "minimum": 1,
-            "maximum": 30
-        },
-        "collectImages": {
-            "title": "Coletar imagens",
-            "type": "boolean",
-            "description": "Extrair thumbnails + gráficos de cada artigo e salvar no Key-Value Store.",
-            "default": false
-        },
-        "includeRawHtml": {
-            "title": "Incluir HTML bruto",
-            "type": "boolean",
-            "description": "Adiciona `rawHtml` em cada artigo com o innerHTML do corpo. Output fica maior.",
-            "default": false
-        },
-        "includeTables": {
-            "title": "Extrair tabelas",
-            "type": "boolean",
-            "description": "Parse de tabelas do corpo do artigo em {headers, rows, caption}.",
-            "default": true
-        },
-        "dedupArticles": {
-            "title": "Deduplicar artigos",
-            "type": "boolean",
-            "description": "Remove duplicatas por URL entre as fontes.",
-            "default": true
-        },
-        "debugArtifacts": {
-            "title": "Salvar artefatos de debug",
-            "type": "boolean",
-            "description": "Em caso de erro (ou falha de artigo), salva screenshot + HTML + meta.json no Key-Value Store.",
-            "default": false
-        },
-        "proxyConfiguration": {
-            "title": "Proxy",
-            "type": "object",
-            "description": "Configuração de proxy. Default: SEM proxy (IP direto do Apify). Ative residencial se Platts bloquear (Akamai).",
-            "editor": "proxy",
-            "prefill": { "useApifyProxy": false },
-            "default": { "useApifyProxy": false }
+        "telegramChatId": {
+            "title": "Telegram chat ID (overrides env)",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Optional. If empty, uses TELEGRAM_CHAT_ID env."
         }
     },
     "required": ["username", "password"]

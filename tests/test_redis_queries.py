@@ -55,3 +55,34 @@ def test_list_staging_fills_id_from_key(fake_redis):
     fake_redis.set("platts:staging:abc123", json.dumps({"title": "no id field"}))
     result = list_staging()
     assert result[0]["id"] == "abc123"
+
+
+def test_list_archive_recent_empty(fake_redis):
+    from webhook.redis_queries import list_archive_recent
+    assert list_archive_recent() == []
+
+
+def test_list_archive_recent_crossdate_sorted(fake_redis):
+    from webhook.redis_queries import list_archive_recent
+    fake_redis.set("platts:archive:2026-04-13:x", json.dumps({"id": "x", "title": "X", "archivedAt": "2026-04-13T09:00:00+00:00"}))
+    fake_redis.set("platts:archive:2026-04-15:y", json.dumps({"id": "y", "title": "Y", "archivedAt": "2026-04-15T14:00:00+00:00"}))
+    fake_redis.set("platts:archive:2026-04-14:z", json.dumps({"id": "z", "title": "Z", "archivedAt": "2026-04-14T11:00:00+00:00"}))
+    result = list_archive_recent(limit=10)
+    assert [d["id"] for d in result] == ["y", "z", "x"]
+
+
+def test_list_archive_recent_respects_limit(fake_redis):
+    from webhook.redis_queries import list_archive_recent
+    for i in range(15):
+        ts = f"2026-04-15T{i:02d}:00:00+00:00"
+        fake_redis.set(f"platts:archive:2026-04-15:i{i}", json.dumps({"id": f"i{i}", "archivedAt": ts}))
+    result = list_archive_recent(limit=10)
+    assert len(result) == 10
+
+
+def test_list_archive_recent_derives_date_from_key(fake_redis):
+    """Each dict should have archived_date extracted from key middle segment."""
+    from webhook.redis_queries import list_archive_recent
+    fake_redis.set("platts:archive:2026-04-15:abc", json.dumps({"id": "abc", "archivedAt": "2026-04-15T10:00:00+00:00"}))
+    result = list_archive_recent()
+    assert result[0]["archived_date"] == "2026-04-15"

@@ -67,3 +67,34 @@ def list_staging(limit: int = 50) -> list[dict]:
         items.append(data)
     items.sort(key=lambda d: d.get("stagedAt") or d.get("createdAt") or "", reverse=True)
     return items[:limit]
+
+
+def list_archive_recent(limit: int = 10) -> list[dict]:
+    """Return archived items newest-first across all dates, up to limit.
+
+    Each dict contains the parsed JSON plus 'id' and 'archived_date'
+    derived from the key structure platts:archive:<date>:<id>.
+    """
+    client = _get_client()
+    keys = list(client.scan_iter(match="platts:archive:*", count=500))
+    items: list[dict] = []
+    for key in keys:
+        raw = client.get(key)
+        if raw is None:
+            continue
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        parts = key.split(":")
+        if len(parts) < 4:
+            continue
+        archived_date = parts[2]
+        item_id = parts[3]
+        data.setdefault("id", item_id)
+        data["archived_date"] = archived_date
+        items.append(data)
+    items.sort(key=lambda d: d.get("archivedAt") or "", reverse=True)
+    return items[:limit]

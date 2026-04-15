@@ -1279,6 +1279,19 @@ def telegram_webhook():
             send_telegram_message(chat_id, body)
             return jsonify({"ok": True})
 
+        if text == "/queue":
+            if not contact_admin.is_authorized(chat_id):
+                logger.warning(f"/queue rejected: chat_id={chat_id} not authorized")
+                return jsonify({"ok": True})
+            try:
+                body, markup = query_handlers.format_queue_page(page=1)
+            except Exception as exc:
+                logger.error(f"/queue error: {exc}")
+                send_telegram_message(chat_id, "❌ Erro ao consultar staging.")
+                return jsonify({"ok": True})
+            send_telegram_message(chat_id, body, reply_markup=markup)
+            return jsonify({"ok": True})
+
         return jsonify({"ok": True})  # unknown command
     
     # ── Check if user is in admin add flow ──
@@ -1459,6 +1472,50 @@ def handle_callback(callback_query):
         answer_callback(callback_id, "")
         message_id = callback_query["message"]["message_id"]
         _render_list_view(chat_id, page=page, search=search, message_id=message_id)
+        return jsonify({"ok": True})
+
+    if callback_data.startswith("queue_page:"):
+        if not contact_admin.is_authorized(chat_id):
+            answer_callback(callback_id, "Não autorizado")
+            return jsonify({"ok": True})
+        try:
+            page = int(callback_data.split(":", 1)[1])
+        except ValueError:
+            answer_callback(callback_id, "Página inválida")
+            return jsonify({"ok": True})
+        answer_callback(callback_id, "")
+        message_id = callback_query["message"]["message_id"]
+        try:
+            body, markup = query_handlers.format_queue_page(page=page)
+        except Exception as exc:
+            logger.error(f"queue_page error: {exc}")
+            return jsonify({"ok": True})
+        edit_message(chat_id, message_id, body, reply_markup=markup)
+        return jsonify({"ok": True})
+
+    if callback_data.startswith("queue_open:"):
+        if not contact_admin.is_authorized(chat_id):
+            answer_callback(callback_id, "Não autorizado")
+            return jsonify({"ok": True})
+        item_id = callback_data.split(":", 1)[1]
+        from execution.curation import redis_client as curation_redis
+        from execution.curation import telegram_poster
+        try:
+            item = curation_redis.get_staging(item_id)
+        except Exception as exc:
+            logger.error(f"queue_open redis error: {exc}")
+            answer_callback(callback_id, "⚠️ Redis indisponível")
+            return jsonify({"ok": True})
+        if item is None:
+            answer_callback(callback_id, "⚠️ Item expirou")
+            return jsonify({"ok": True})
+        answer_callback(callback_id, "")
+        preview_base_url = os.getenv("TELEGRAM_WEBHOOK_URL", "").rstrip("/")
+        try:
+            telegram_poster.post_for_curation(chat_id, item, preview_base_url)
+        except Exception as exc:
+            logger.error(f"queue_open post error: {exc}")
+            send_telegram_message(chat_id, "❌ Erro ao abrir card.")
         return jsonify({"ok": True})
 
     parts = callback_data.split(":", 1)

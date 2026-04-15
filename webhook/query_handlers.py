@@ -11,7 +11,7 @@ the chat.
 from datetime import datetime, timezone
 from typing import Optional
 from execution.curation.telegram_poster import _escape_md
-from webhook import redis_queries
+import redis_queries
 
 
 _HELP_TEXT = """*COMANDOS*

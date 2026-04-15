@@ -7,10 +7,17 @@ import fakeredis
 
 @pytest.fixture
 def fake_redis(monkeypatch):
+    """Patch both module aliases since query_handlers uses bare `import
+    redis_queries` (matching production layout) while tests reference
+    `webhook.redis_queries`. Both aliases resolve to distinct sys.modules
+    entries even though they're the same file.
+    """
     fake = fakeredis.FakeRedis(decode_responses=True)
-    from webhook import redis_queries
-    monkeypatch.setattr(redis_queries, "_get_client", lambda: fake)
-    monkeypatch.setattr(redis_queries, "_client", None)
+    from webhook import redis_queries as rq_pkg
+    import redis_queries as rq_bare  # noqa: PLC0415
+    for rq in (rq_pkg, rq_bare):
+        monkeypatch.setattr(rq, "_get_client", lambda: fake)
+        monkeypatch.setattr(rq, "_client", None)
     return fake
 
 

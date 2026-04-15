@@ -24,7 +24,92 @@
 - `tests/test_reject_reason_flow.py` — ~7 testes
 
 ### Modificar
+- `execution/curation/redis_client.py` — `set_staging` injeta `stagedAt` (Task 0)
+- `tests/test_curation_redis_client.py` — assert `stagedAt` presente
 - `webhook/app.py` — 5 dispatches em `handle_message`, `REJECT_REASON_STATE` dict, cascade check antes do `ADJUST_STATE`, alteração em `reject` e `curate_reject` handlers, alteração em `curate_pipeline` (chama `mark_pipeline_processed`), rota `POST /admin/register-commands`
+
+---
+
+## Task 0: Inject stagedAt timestamp on set_staging
+
+**Contexto:** `_stage_and_post` em `execution/curation/router.py:39` chama `set_staging` com um dict que só tem `id` injetado — nenhum timestamp de "quando entrou em staging". Spec exige `/queue` ordenado por mais novo primeiro. Sem esse campo o sort cai em string vazia. Esta task fecha a base antes do `list_staging` ser implementado.
+
+**Files:**
+- Modify: `execution/curation/redis_client.py` (`set_staging`)
+- Modify: `tests/test_curation_redis_client.py` (assertion)
+
+- [ ] **Step 1: Update test to require stagedAt**
+
+In `tests/test_curation_redis_client.py`, locate the existing `test_set_staging_persists_json` (or equivalent) and append:
+
+```python
+def test_set_staging_injects_staged_at(fake_redis):
+    """set_staging stamps stagedAt UTC ISO8601 so /queue can sort newest-first."""
+    import json
+    from datetime import datetime, timezone
+    from execution.curation.redis_client import set_staging
+    set_staging("abc123", {"id": "abc123", "title": "T"})
+    raw = fake_redis.get("platts:staging:abc123")
+    data = json.loads(raw)
+    assert "stagedAt" in data
+    # Parse and confirm it's a valid recent UTC timestamp
+    parsed = datetime.fromisoformat(data["stagedAt"].replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    delta = abs((datetime.now(timezone.utc) - parsed).total_seconds())
+    assert delta < 5
+
+
+def test_set_staging_preserves_existing_staged_at(fake_redis):
+    """If caller already set stagedAt (e.g., reprocess flow), do not overwrite."""
+    import json
+    from execution.curation.redis_client import set_staging
+    fixed = "2026-01-01T00:00:00+00:00"
+    set_staging("abc123", {"id": "abc123", "stagedAt": fixed})
+    data = json.loads(fake_redis.get("platts:staging:abc123"))
+    assert data["stagedAt"] == fixed
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd "/Users/bigode/Dev/Antigravity WF " && pytest tests/test_curation_redis_client.py::test_set_staging_injects_staged_at -v`
+Expected: FAIL with `KeyError: 'stagedAt'` (or AssertionError).
+
+- [ ] **Step 3: Implement stagedAt injection**
+
+In `execution/curation/redis_client.py`, replace `set_staging`:
+
+```python
+def set_staging(item_id: str, item: dict) -> None:
+    """Persist item as JSON with 48h TTL.
+
+    Injects stagedAt (UTC ISO8601) if not already present. The caller
+    can pre-set it (e.g., reprocess flow that wants to preserve original
+    staging time) and we will not overwrite.
+    """
+    item = dict(item)
+    item.setdefault("stagedAt", datetime.now(timezone.utc).isoformat())
+    client = _get_client()
+    client.set(_staging_key(item_id), json.dumps(item, ensure_ascii=False), ex=_STAGING_TTL_SECONDS)
+```
+
+`datetime` and `timezone` are already imported at the top of the file (used by `archive`).
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd "/Users/bigode/Dev/Antigravity WF " && pytest tests/test_curation_redis_client.py -v`
+Expected: all existing tests pass + 2 new ones pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd "/Users/bigode/Dev/Antigravity WF "
+git add execution/curation/redis_client.py tests/test_curation_redis_client.py
+git commit -m "feat(curation): inject stagedAt timestamp in set_staging
+
+Required for Bot Navigation v1 /queue command which sorts staging
+items newest-first. Idempotent: respects pre-set stagedAt so reprocess
+flows can preserve original time."
+```
 
 ---
 
@@ -514,6 +599,22 @@ def test_stats_for_date_populated(fake_redis):
     assert stats == {"scraped": 3, "staging": 2, "archived": 4, "rejected": 2, "pipeline": 2}
 
 
+def test_stats_rejected_only_counts_reject_actions(fake_redis):
+    """Future feedback actions (e.g., 'adjust') must NOT inflate rejected count.
+
+    Spec: rejected = entries with action in {'curate_reject', 'draft_reject'}.
+    """
+    from webhook.redis_queries import stats_for_date, save_feedback
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    save_feedback("curate_reject", "a", 1, "", "T")
+    save_feedback("draft_reject", "b", 1, "", "T")
+    save_feedback("adjust", "c", 1, "", "T")          # not a rejection
+    save_feedback("approve", "d", 1, "", "T")         # not a rejection
+    stats = stats_for_date(today)
+    assert stats["rejected"] == 2
+
+
 def test_mark_pipeline_processed_idempotent(fake_redis):
     from webhook.redis_queries import mark_pipeline_processed
     mark_pipeline_processed("x", "2026-04-15")
@@ -554,10 +655,15 @@ def _date_bounds_epoch(date_iso: str) -> tuple[float, float]:
     return start_dt.timestamp(), end_dt.timestamp()
 
 
+_REJECT_ACTIONS = {"curate_reject", "draft_reject"}
+
+
 def stats_for_date(date_iso: str) -> dict:
     """Return today's counters.
 
     staging is cross-date (not dimensioned by date in Redis).
+    rejected counts only entries with action in _REJECT_ACTIONS so future
+    feedback actions (e.g., 'adjust', 'approve') do not inflate the metric.
     """
     client = _get_client()
     scraped = client.scard(f"platts:seen:{date_iso}")
@@ -565,7 +671,17 @@ def stats_for_date(date_iso: str) -> dict:
     archived = sum(1 for _ in client.scan_iter(match=f"platts:archive:{date_iso}:*", count=200))
     pipeline = client.scard(f"platts:pipeline:processed:{date_iso}")
     start_ts, end_ts = _date_bounds_epoch(date_iso)
-    rejected = client.zcount("webhook:feedback:index", start_ts, end_ts)
+    # Filter by action: zrangebyscore returns members in the date window; HGET
+    # each to check action. Volume is small (<100/day expected) so the extra
+    # roundtrip is acceptable. Pipeline used to cap latency.
+    members = client.zrangebyscore("webhook:feedback:index", start_ts, end_ts)
+    rejected = 0
+    if members:
+        pipe = client.pipeline()
+        for member in members:
+            pipe.hget(_feedback_key(member), "action")
+        actions = pipe.execute()
+        rejected = sum(1 for a in actions if a in _REJECT_ACTIONS)
     return {
         "scraped": int(scraped),
         "staging": int(staging),
@@ -578,13 +694,13 @@ def stats_for_date(date_iso: str) -> dict:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd "/Users/bigode/Dev/Antigravity WF " && pytest tests/test_redis_queries.py -v`
-Expected: 21 passing.
+Expected: 22 passing.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add webhook/redis_queries.py tests/test_redis_queries.py
-git commit -m "feat(queries): stats_for_date + mark_pipeline_processed"
+git commit -m "feat(queries): stats_for_date + mark_pipeline_processed (action-filtered)"
 ```
 
 ---
@@ -728,6 +844,30 @@ def test_history_truncates_long_title(fake_redis):
     text = format_history()
     assert "A" * 60 + "…" in text
     assert "A" * 61 not in text
+
+
+def test_history_escapes_markdown_specials_in_title(fake_redis):
+    """Titles with *, _, [, ` must be escaped to avoid Telegram 400 errors."""
+    from webhook.query_handlers import format_history, _escape_md
+    fake_redis.set("platts:archive:2026-04-15:x", json.dumps({
+        "id": "x", "title": "Vale_Q2 *bonds* [draft] `code`",
+        "archivedAt": "2026-04-15T10:00:00+00:00",
+    }))
+    text = format_history()
+    # Raw specials must NOT appear unescaped
+    assert "*bonds*" not in text
+    assert "Vale_Q2" not in text
+    assert "[draft]" not in text
+    assert "`code`" not in text
+    # Escaped form must appear
+    assert _escape_md("Vale_Q2 *bonds* [draft] `code`") in text
+
+
+def test_escape_md_helper():
+    from webhook.query_handlers import _escape_md
+    assert _escape_md("a*b_c[d]`e") == r"a\*b\_c\[d\]\`e"
+    assert _escape_md("") == ""
+    assert _escape_md(None) == ""
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -744,6 +884,23 @@ _MONTHS_PT = [
     "jan", "fev", "mar", "abr", "mai", "jun",
     "jul", "ago", "set", "out", "nov", "dez",
 ]
+
+_MD_SPECIALS = ("\\", "*", "_", "[", "]", "`")
+
+
+def _escape_md(text) -> str:
+    """Escape Telegram Markdown (legacy) specials so dynamic content does
+    not break parse_mode=Markdown sends.
+
+    Order matters: backslash must be first so subsequent replacements do
+    not double-escape inserted backslashes.
+    """
+    if text is None:
+        return ""
+    s = str(text)
+    for ch in _MD_SPECIALS:
+        s = s.replace(ch, "\\" + ch)
+    return s
 
 
 def _format_short_date(iso_date: str) -> str:
@@ -775,7 +932,7 @@ def format_history(limit: int = 10) -> str:
         return "*ARQUIVADOS*\n\nNenhum item arquivado."
     lines = [f"*ARQUIVADOS · {len(items)} mais recentes*", ""]
     for i, item in enumerate(items, start=1):
-        title = _truncate(item.get("title") or "")
+        title = _escape_md(_truncate(item.get("title") or ""))
         date = _format_short_date(item.get("archived_date") or "")
         lines.append(f"{i}. {title} — {date}")
     return "\n".join(lines)
@@ -784,13 +941,13 @@ def format_history(limit: int = 10) -> str:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd "/Users/bigode/Dev/Antigravity WF " && pytest tests/test_query_handlers.py -v`
-Expected: 4 passing.
+Expected: 6 passing.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add webhook/query_handlers.py tests/test_query_handlers.py
-git commit -m "feat(queries): /history formatter"
+git commit -m "feat(queries): /history formatter with markdown escape"
 ```
 
 ---
@@ -860,7 +1017,7 @@ def format_stats(date_iso: str) -> str:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd "/Users/bigode/Dev/Antigravity WF " && pytest tests/test_query_handlers.py -v`
-Expected: 6 passing.
+Expected: 8 passing.
 
 - [ ] **Step 5: Commit**
 
@@ -909,6 +1066,17 @@ def test_rejections_truncates_long_reason(fake_redis):
     text = format_rejections()
     assert "x" * 80 + "…" in text
     assert "x" * 81 not in text
+
+
+def test_rejections_escapes_markdown_in_reason(fake_redis):
+    """Reason can contain user free-text — escape * _ ` [ to avoid 400."""
+    from webhook.query_handlers import format_rejections, _escape_md
+    from webhook.redis_queries import save_feedback
+    save_feedback("curate_reject", "a", 1, "duplicate of *foo* [bar]", "T")
+    text = format_rejections()
+    assert "*foo*" not in text
+    assert "[bar]" not in text
+    assert _escape_md("duplicate of *foo* [bar]") in text
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -942,7 +1110,7 @@ def format_rejections(limit: int = 10) -> str:
         when = _format_hhmm(entry.get("timestamp") or 0)
         reason = entry.get("reason") or ""
         if reason:
-            reason_fmt = f'"{_truncate(reason, 80)}"'
+            reason_fmt = f'"{_escape_md(_truncate(reason, 80))}"'
         else:
             reason_fmt = "_(sem razão)_"
         lines.append(f"{i}. {when} · {reason_fmt}")
@@ -952,13 +1120,13 @@ def format_rejections(limit: int = 10) -> str:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd "/Users/bigode/Dev/Antigravity WF " && pytest tests/test_query_handlers.py -v`
-Expected: 9 passing.
+Expected: 12 passing.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add webhook/query_handlers.py tests/test_query_handlers.py
-git commit -m "feat(queries): /rejections formatter"
+git commit -m "feat(queries): /rejections formatter with markdown escape"
 ```
 
 ---
@@ -1034,6 +1202,18 @@ def test_queue_truncates_long_title(fake_redis):
     }))
     text, _ = format_queue_page(page=1)
     assert "B" * 60 + "…" in text
+
+
+def test_queue_escapes_markdown_in_title(fake_redis):
+    from webhook.query_handlers import format_queue_page, _escape_md
+    fake_redis.set("platts:staging:x", json.dumps({
+        "id": "x", "title": "Vale_Q2 *report* [draft]",
+        "stagedAt": "2026-04-15T10:00:00Z",
+    }))
+    text, _ = format_queue_page(page=1)
+    assert "*report*" not in text
+    assert "Vale_Q2" not in text
+    assert _escape_md("Vale_Q2 *report* [draft]") in text
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1070,7 +1250,7 @@ def format_queue_page(page: int = 1) -> tuple[str, Optional[dict]]:
 
     lines = [f"*STAGING · {total} items*", ""]
     for i, item in enumerate(page_items, start=start + 1):
-        title = _truncate(item.get("title") or "")
+        title = _escape_md(_truncate(item.get("title") or ""))
         lines.append(f"{i}. {title}")
     text = "\n".join(lines)
 
@@ -1103,13 +1283,13 @@ from typing import Optional
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd "/Users/bigode/Dev/Antigravity WF " && pytest tests/test_query_handlers.py -v`
-Expected: 13 passing.
+Expected: 17 passing.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add webhook/query_handlers.py tests/test_query_handlers.py
-git commit -m "feat(queries): /queue with pagination and callbacks"
+git commit -m "feat(queries): /queue with pagination, callbacks, markdown escape"
 ```
 
 ---
@@ -1430,17 +1610,53 @@ def test_consume_reject_reason_expired_state_returns_none(fake_redis, monkeypatc
     assert 999 not in webhook_app.REJECT_REASON_STATE
 
 
-def test_adjust_state_takes_precedence_in_handle_message(fake_redis):
-    """If both states are set, adjust wins — handle_message checks adjust first."""
+def test_adjust_state_takes_precedence_in_handle_message(fake_redis, monkeypatch):
+    """End-to-end: with BOTH states set, the adjust handler must consume the
+    message and the reject feedback reason must remain empty.
+
+    Drives the real Flask handler via test_client so the cascade order in
+    handle_message is exercised, not just asserted by inspection.
+    """
     from webhook import app as webhook_app
+    from webhook.redis_queries import list_feedback
+
+    sent: list[tuple] = []
+    monkeypatch.setattr(webhook_app, "send_telegram_message",
+                        lambda chat_id, text, **kw: sent.append((chat_id, text)))
+
+    # Track whether the adjust handler path executed
+    adjust_called = {"value": False}
+    def fake_adjust(chat_id, draft_id, feedback_text):
+        adjust_called["value"] = True
+        webhook_app.ADJUST_STATE.pop(chat_id, None)
+    # The real adjust handler name in app.py — adapt if it differs
+    monkeypatch.setattr(webhook_app, "process_adjust_feedback", fake_adjust, raising=False)
+
     webhook_app.ADJUST_STATE[999] = {"draft_id": "d1", "awaiting_feedback": True}
-    webhook_app.begin_reject_reason(chat_id=999, action="curate_reject", item_id="x", title="T")
-    # Both states exist; consume_reject_reason is only called after adjust check
-    # Here we verify that the state exists independently but handle_message's
-    # cascade order is documented via a comment in app.py.
-    assert 999 in webhook_app.ADJUST_STATE
+    webhook_app.begin_reject_reason(chat_id=999, action="curate_reject",
+                                    item_id="x", title="T")
+
+    client = webhook_app.app.test_client()
+    payload = {
+        "message": {
+            "chat": {"id": 999},
+            "text": "this should go to ADJUST not REJECT",
+        }
+    }
+    resp = client.post("/webhook", json=payload)
+    assert resp.status_code == 200
+
+    # Adjust must have run; reject reason state must still be present (not consumed)
+    assert adjust_called["value"] is True
     assert 999 in webhook_app.REJECT_REASON_STATE
+
+    # And the feedback reason must NOT have been overwritten with the adjust text
+    entries = list_feedback(limit=10)
+    assert entries, "begin_reject_reason should have left a placeholder entry"
+    assert entries[0]["reason"] == ""
 ```
+
+> **Note on Step 4 wiring:** when adding the cascade in `handle_message`, ensure the ADJUST check runs BEFORE `consume_reject_reason`. The test above will fail loudly if that ordering is reversed.
 
 - [ ] **Step 2: Run tests to verify they fail**
 

@@ -25,7 +25,11 @@ def test_set_and_get_staging_roundtrip(fake_redis):
     item = {"id": "abc123", "title": "Test", "fullText": "body"}
     set_staging("abc123", item)
     got = get_staging("abc123")
-    assert got == item
+    # set_staging injects stagedAt, so check all original fields are preserved
+    assert got["id"] == item["id"]
+    assert got["title"] == item["title"]
+    assert got["fullText"] == item["fullText"]
+    assert "stagedAt" in got
 
 
 def test_set_staging_applies_48h_ttl(fake_redis):
@@ -107,3 +111,28 @@ def test_rationale_flag_set_once_per_day(fake_redis):
     assert set_rationale_processed("2026-04-14") is True  # first time — NX wins
     assert is_rationale_processed("2026-04-14") is True
     assert set_rationale_processed("2026-04-14") is False  # second time — NX loses
+
+
+def test_set_staging_injects_staged_at(fake_redis):
+    """set_staging stamps stagedAt UTC ISO8601 so /queue can sort newest-first."""
+    import json
+    from datetime import datetime, timezone
+    from execution.curation.redis_client import set_staging
+    set_staging("abc123", {"id": "abc123", "title": "T"})
+    raw = fake_redis.get("platts:staging:abc123")
+    data = json.loads(raw)
+    assert "stagedAt" in data
+    parsed = datetime.fromisoformat(data["stagedAt"].replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    delta = abs((datetime.now(timezone.utc) - parsed).total_seconds())
+    assert delta < 5
+
+
+def test_set_staging_preserves_existing_staged_at(fake_redis):
+    """If caller already set stagedAt (e.g., reprocess flow), do not overwrite."""
+    import json
+    from execution.curation.redis_client import set_staging
+    fixed = "2026-01-01T00:00:00+00:00"
+    set_staging("abc123", {"id": "abc123", "stagedAt": fixed})
+    data = json.loads(fake_redis.get("platts:staging:abc123"))
+    assert data["stagedAt"] == fixed

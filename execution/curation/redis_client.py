@@ -66,7 +66,14 @@ def _rationale_flag_key(date: str) -> str:
 
 
 def set_staging(item_id: str, item: dict) -> None:
-    """Persist item as JSON with 48h TTL."""
+    """Persist item as JSON with 48h TTL.
+
+    Injects stagedAt (UTC ISO8601) if not already present. The caller
+    can pre-set it (e.g., reprocess flow that wants to preserve original
+    staging time) and we will not overwrite.
+    """
+    item = dict(item)
+    item.setdefault("stagedAt", datetime.now(timezone.utc).isoformat())
     client = _get_client()
     client.set(_staging_key(item_id), json.dumps(item, ensure_ascii=False), ex=_STAGING_TTL_SECONDS)
 

@@ -1681,6 +1681,10 @@ def handle_callback(callback_query):
             answer_callback(callback_id, "⚠️ Item expirou")
             finalize_card(chat_id, callback_query, "⚠️ Item expirou ou já processado")
             return jsonify({"ok": True})
+        try:
+            redis_queries.mark_pipeline_processed(item_id, datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        except Exception as exc:
+            logger.warning(f"mark_pipeline_processed failed for {item_id}: {exc}")
         raw_text = (
             f"Title: {item.get('title','')}\n"
             f"Date: {item.get('publishDate','')}\n"

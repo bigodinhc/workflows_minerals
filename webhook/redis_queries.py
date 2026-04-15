@@ -172,3 +172,55 @@ def list_feedback(limit: int = 10,
         if len(results) >= limit:
             break
     return results
+
+
+def mark_pipeline_processed(item_id: str, date_iso: str) -> None:
+    """Add item_id to the daily pipeline-processed set with 2d TTL."""
+    client = _get_client()
+    key = f"platts:pipeline:processed:{date_iso}"
+    client.sadd(key, item_id)
+    client.expire(key, _PIPELINE_TTL_SECONDS)
+
+
+def _date_bounds_epoch(date_iso: str) -> tuple[float, float]:
+    """Return (start, end) epoch seconds for the UTC day matching date_iso."""
+    from datetime import datetime, timezone, timedelta
+    start_dt = datetime.strptime(date_iso, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt = start_dt + timedelta(days=1)
+    return start_dt.timestamp(), end_dt.timestamp()
+
+
+_REJECT_ACTIONS = {"curate_reject", "draft_reject"}
+
+
+def stats_for_date(date_iso: str) -> dict:
+    """Return today's counters.
+
+    staging is cross-date (not dimensioned by date in Redis).
+    rejected counts only entries with action in _REJECT_ACTIONS so future
+    feedback actions (e.g., 'adjust', 'approve') do not inflate the metric.
+    """
+    client = _get_client()
+    scraped = client.scard(f"platts:seen:{date_iso}")
+    staging = sum(1 for _ in client.scan_iter(match="platts:staging:*", count=200))
+    archived = sum(1 for _ in client.scan_iter(match=f"platts:archive:{date_iso}:*", count=200))
+    pipeline = client.scard(f"platts:pipeline:processed:{date_iso}")
+    start_ts, end_ts = _date_bounds_epoch(date_iso)
+    # Filter by action: zrangebyscore returns members in the date window; HGET
+    # each to check action. Volume is small (<100/day expected) so the extra
+    # roundtrip is acceptable. Pipeline used to cap latency.
+    members = client.zrangebyscore("webhook:feedback:index", start_ts, end_ts)
+    rejected = 0
+    if members:
+        pipe = client.pipeline()
+        for member in members:
+            pipe.hget(_feedback_key(member), "action")
+        actions = pipe.execute()
+        rejected = sum(1 for a in actions if a in _REJECT_ACTIONS)
+    return {
+        "scraped": int(scraped),
+        "staging": int(staging),
+        "archived": int(archived),
+        "rejected": int(rejected),
+        "pipeline": int(pipeline),
+    }

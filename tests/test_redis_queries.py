@@ -161,3 +161,66 @@ def test_list_feedback_filter_since_ts(fake_redis):
     save_feedback("curate_reject", "new", 1, "", "New")
     results = list_feedback(limit=10, since_ts=cutoff)
     assert [r["item_id"] for r in results] == ["new"]
+
+
+def test_stats_for_date_all_zero(fake_redis):
+    from webhook.redis_queries import stats_for_date
+    stats = stats_for_date("2026-04-15")
+    assert stats == {"scraped": 0, "staging": 0, "archived": 0, "rejected": 0, "pipeline": 0}
+
+
+def test_stats_for_date_populated(fake_redis):
+    """Uses today's UTC date because save_feedback timestamps with time.time()."""
+    from webhook.redis_queries import stats_for_date, save_feedback, mark_pipeline_processed
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    other_day = "2020-01-01"
+    # scraped: 3 in seen set
+    fake_redis.sadd(f"platts:seen:{today}", "a", "b", "c")
+    # staging: 2
+    fake_redis.set("platts:staging:s1", json.dumps({"id": "s1"}))
+    fake_redis.set("platts:staging:s2", json.dumps({"id": "s2"}))
+    # archived: 4 today
+    for i in range(4):
+        fake_redis.set(f"platts:archive:{today}:x{i}", json.dumps({"id": f"x{i}"}))
+    # archived: 1 on a different date (should not count)
+    fake_redis.set(f"platts:archive:{other_day}:y", json.dumps({"id": "y"}))
+    # rejected: 2 today
+    save_feedback("curate_reject", "r1", 1, "", "T1")
+    save_feedback("draft_reject", "r2", 1, "", "T2")
+    # pipeline: 2
+    mark_pipeline_processed("p1", today)
+    mark_pipeline_processed("p2", today)
+
+    stats = stats_for_date(today)
+    assert stats == {"scraped": 3, "staging": 2, "archived": 4, "rejected": 2, "pipeline": 2}
+
+
+def test_stats_rejected_only_counts_reject_actions(fake_redis):
+    """Future feedback actions (e.g., 'adjust') must NOT inflate rejected count.
+
+    Spec: rejected = entries with action in {'curate_reject', 'draft_reject'}.
+    """
+    from webhook.redis_queries import stats_for_date, save_feedback
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    save_feedback("curate_reject", "a", 1, "", "T")
+    save_feedback("draft_reject", "b", 1, "", "T")
+    save_feedback("adjust", "c", 1, "", "T")          # not a rejection
+    save_feedback("approve", "d", 1, "", "T")         # not a rejection
+    stats = stats_for_date(today)
+    assert stats["rejected"] == 2
+
+
+def test_mark_pipeline_processed_idempotent(fake_redis):
+    from webhook.redis_queries import mark_pipeline_processed
+    mark_pipeline_processed("x", "2026-04-15")
+    mark_pipeline_processed("x", "2026-04-15")
+    assert fake_redis.scard("platts:pipeline:processed:2026-04-15") == 1
+
+
+def test_mark_pipeline_processed_applies_ttl(fake_redis):
+    from webhook.redis_queries import mark_pipeline_processed
+    mark_pipeline_processed("x", "2026-04-15")
+    ttl = fake_redis.ttl("platts:pipeline:processed:2026-04-15")
+    assert 2 * 24 * 3600 - 10 <= ttl <= 2 * 24 * 3600

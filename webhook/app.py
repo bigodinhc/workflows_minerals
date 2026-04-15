@@ -1796,6 +1796,56 @@ def handle_callback(callback_query):
 
     return jsonify({"ok": True})
 
+
+@app.route("/admin/register-commands", methods=["POST"])
+def register_commands():
+    """Register bot commands with Telegram's setMyCommands so they appear
+    in the / autocomplete menu. Call manually (e.g. via curl) once after
+    deploy or whenever the command list changes.
+
+    Auth: chat_id query param must belong to an authorized admin.
+    """
+    raw_chat_id = request.args.get("chat_id", "")
+    try:
+        chat_id = int(raw_chat_id)
+    except ValueError:
+        return jsonify({"ok": False, "error": "chat_id query param required"}), 400
+    if not contact_admin.is_authorized(chat_id):
+        return jsonify({"ok": False, "error": "unauthorized"}), 403
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        return jsonify({"ok": False, "error": "TELEGRAM_BOT_TOKEN missing"}), 500
+
+    commands = [
+        {"command": "help", "description": "Lista todos os comandos"},
+        {"command": "queue", "description": "Items aguardando curadoria"},
+        {"command": "history", "description": "Ultimos 10 arquivados"},
+        {"command": "rejections", "description": "Ultimas 10 recusas"},
+        {"command": "stats", "description": "Contadores de hoje"},
+        {"command": "status", "description": "Saude dos workflows"},
+        {"command": "reprocess", "description": "Re-dispara pipeline num item"},
+        {"command": "add", "description": "Adicionar contato"},
+        {"command": "list", "description": "Listar contatos"},
+        {"command": "cancel", "description": "Abortar fluxo atual"},
+    ]
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/setMyCommands",
+            json={"commands": commands},
+            timeout=10,
+        )
+        data = resp.json()
+    except Exception as exc:
+        logger.error(f"setMyCommands request failed: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 502
+    if not data.get("ok"):
+        logger.error(f"setMyCommands returned not-ok: {data}")
+        return jsonify({"ok": False, "telegram": data}), 502
+    logger.info(f"setMyCommands registered {len(commands)} commands")
+    return jsonify({"ok": True, "registered": len(commands)})
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=True)

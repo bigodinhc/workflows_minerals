@@ -3,10 +3,10 @@
 .vscode
 .zed
 
-# crawlee and apify storage folders
-apify_storage
-crawlee_storage
-storage
+# crawlee and apify storage folders (root-anchored so src/storage isn't excluded)
+/apify_storage
+/crawlee_storage
+/storage
 
 # installed files
 node_modules

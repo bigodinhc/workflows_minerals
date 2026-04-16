@@ -1,5 +1,5 @@
-import fetch from 'node-fetch';
 import { log } from 'crawlee';
+import fetch from 'node-fetch';
 
 const TG_API = 'https://api.telegram.org/bot';
 

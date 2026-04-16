@@ -1,5 +1,5 @@
-import Redis from 'ioredis';
 import { log } from 'crawlee';
+import Redis from 'ioredis';
 
 const SEEN_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
 

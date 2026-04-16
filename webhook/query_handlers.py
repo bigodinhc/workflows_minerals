@@ -59,15 +59,19 @@ def _truncate(text: str, limit: int = 60) -> str:
 
 
 def format_history(limit: int = 10) -> str:
-    """Return /history text — last N archived items cross-date."""
+    """Return /history text — last N archived items cross-date, with icons."""
     items = redis_queries.list_archive_recent(limit=limit)
     if not items:
-        return "*ARQUIVADOS*\n\nNenhum item arquivado."
-    lines = [f"*ARQUIVADOS · {len(items)} mais recentes*", ""]
+        return "*📚 ARQUIVADOS*\n\nNenhum item arquivado."
+    lines = [
+        f"*📚 ARQUIVADOS · {len(items)} mais recentes*",
+        "────────────────────",
+    ]
     for i, item in enumerate(items, start=1):
+        icon = _type_icon(item)
         title = _escape_md(_truncate(item.get("title") or ""))
         date = _format_short_date(item.get("archived_date") or "")
-        lines.append(f"{i}. {title} — {date}")
+        lines.append(f"{i}. {icon} {title} — {date}")
     return "\n".join(lines)
 
 

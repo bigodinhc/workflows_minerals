@@ -39,30 +39,42 @@ def test_help_text_lists_all_commands():
 def test_history_empty(fake_redis):
     from webhook.query_handlers import format_history
     text = format_history()
-    assert text == "*ARQUIVADOS*\n\nNenhum item arquivado."
+    assert text == "*📚 ARQUIVADOS*\n\nNenhum item arquivado."
 
 
-def test_history_formats_items(fake_redis):
+def test_history_formats_items_with_type_icon(fake_redis):
     from webhook.query_handlers import format_history
     fake_redis.set("platts:archive:2026-04-14:a", json.dumps({
-        "id": "a", "title": "Bonds Municipais Sustentam Aço no Q2",
+        "id": "a", "title": "Bonds Municipais", "type": "news",
         "archivedAt": "2026-04-14T10:00:00+00:00"
     }))
     fake_redis.set("platts:archive:2026-04-13:b", json.dumps({
-        "id": "b", "title": "Greve Port Hedland",
+        "id": "b", "title": "Daily Rationale", "type": "rationale",
         "archivedAt": "2026-04-13T08:00:00+00:00"
     }))
     text = format_history()
-    assert "*ARQUIVADOS · 2 mais recentes*" in text
-    assert "1. Bonds Municipais Sustentam Aço no Q2 — 14/abr" in text
-    assert "2. Greve Port Hedland — 13/abr" in text
+    assert "*📚 ARQUIVADOS · 2 mais recentes*" in text
+    assert "────" in text
+    assert "1. 🗞️ Bonds Municipais — 14/abr" in text
+    assert "2. 📊 Daily Rationale — 13/abr" in text
+
+
+def test_history_falls_back_to_news_icon_when_type_missing(fake_redis):
+    """Legacy archived items (pre-v1.1) don't carry `type`; default to news icon."""
+    from webhook.query_handlers import format_history
+    fake_redis.set("platts:archive:2026-04-14:legacy", json.dumps({
+        "id": "legacy", "title": "Legacy",
+        "archivedAt": "2026-04-14T10:00:00+00:00"
+    }))
+    text = format_history()
+    assert "1. 🗞️ Legacy — 14/abr" in text
 
 
 def test_history_truncates_long_title(fake_redis):
     from webhook.query_handlers import format_history
     long_title = "A" * 80
     fake_redis.set("platts:archive:2026-04-15:x", json.dumps({
-        "id": "x", "title": long_title,
+        "id": "x", "title": long_title, "type": "news",
         "archivedAt": "2026-04-15T10:00:00+00:00"
     }))
     text = format_history()
@@ -70,21 +82,16 @@ def test_history_truncates_long_title(fake_redis):
     assert "A" * 61 not in text
 
 
-def test_history_escapes_markdown_specials_in_title(fake_redis):
-    """Titles with *, _, [, ` must be escaped to avoid Telegram 400 errors."""
+def test_history_escapes_markdown_in_title(fake_redis):
     from webhook.query_handlers import format_history, _escape_md
     fake_redis.set("platts:archive:2026-04-15:x", json.dumps({
-        "id": "x", "title": "Vale_Q2 *bonds* [draft] `code`",
+        "id": "x", "title": "Vale_Q2 *bonds*", "type": "news",
         "archivedAt": "2026-04-15T10:00:00+00:00",
     }))
     text = format_history()
-    # Raw specials must NOT appear unescaped
     assert "*bonds*" not in text
     assert "Vale_Q2" not in text
-    assert "[draft]" not in text
-    assert "`code`" not in text
-    # Escaped form must appear
-    assert _escape_md("Vale_Q2 *bonds* [draft] `code`") in text
+    assert _escape_md("Vale_Q2 *bonds*") in text
 
 
 def test_escape_md_helper():

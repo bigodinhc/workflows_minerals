@@ -37,3 +37,6 @@ actors/.investigation/
 # Superpowers skill artifacts
 .superpowers/
 actors/*/.local-input.json
+
+# Git worktrees
+.worktrees/

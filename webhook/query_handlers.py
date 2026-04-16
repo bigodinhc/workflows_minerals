@@ -100,11 +100,14 @@ def _format_hhmm(epoch_seconds: float) -> str:
 
 
 def format_rejections(limit: int = 10) -> str:
-    """Return /rejections text — last N feedback entries."""
+    """Return /rejections text — last N feedback entries with time + reason."""
     entries = redis_queries.list_feedback(limit=limit)
     if not entries:
-        return "*RECUSAS*\n\nNenhuma recusa registrada."
-    lines = [f"*RECUSAS · últimas {len(entries)}*", ""]
+        return "*💭 RECUSAS*\n\nNenhuma recusa registrada."
+    lines = [
+        f"*💭 RECUSAS · últimas {len(entries)}*",
+        "────────────────────",
+    ]
     for i, entry in enumerate(entries, start=1):
         when = _format_hhmm(entry.get("timestamp") or 0)
         reason = entry.get("reason") or ""
@@ -112,7 +115,7 @@ def format_rejections(limit: int = 10) -> str:
             reason_fmt = f'"{_escape_md(_truncate(reason, 80))}"'
         else:
             reason_fmt = "_(sem razão)_"
-        lines.append(f"{i}. {when} · {reason_fmt}")
+        lines.append(f"{i}. 🕒 {when} · {reason_fmt}")
     return "\n".join(lines)
 
 

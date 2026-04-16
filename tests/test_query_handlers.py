@@ -132,7 +132,7 @@ def test_stats_populated(fake_redis):
 def test_rejections_empty(fake_redis):
     from webhook.query_handlers import format_rejections
     text = format_rejections()
-    assert text == "*RECUSAS*\n\nNenhuma recusa registrada."
+    assert text == "*💭 RECUSAS*\n\nNenhuma recusa registrada."
 
 
 def test_rejections_with_and_without_reason(fake_redis):
@@ -142,8 +142,9 @@ def test_rejections_with_and_without_reason(fake_redis):
     time.sleep(0.01)
     save_feedback("curate_reject", "b", 1, "duplicata", "Second")
     text = format_rejections()
-    assert "*RECUSAS · últimas 2*" in text
-    # newest first: b, then a
+    assert "*💭 RECUSAS · últimas 2*" in text
+    assert "────" in text
+    assert "🕒" in text
     assert '"duplicata"' in text
     assert "_(sem razão)_" in text
 
@@ -162,11 +163,11 @@ def test_rejections_escapes_markdown_in_reason(fake_redis):
     """Reason can contain user free-text — escape * _ ` [ to avoid 400."""
     from webhook.query_handlers import format_rejections, _escape_md
     from webhook.redis_queries import save_feedback
-    save_feedback("curate_reject", "a", 1, "duplicate of *foo* [bar]", "T")
+    save_feedback("curate_reject", "a", 1, "dup of *foo* [bar]", "T")
     text = format_rejections()
     assert "*foo*" not in text
     assert "[bar]" not in text
-    assert _escape_md("duplicate of *foo* [bar]") in text
+    assert _escape_md("dup of *foo* [bar]") in text
 
 
 def test_queue_empty(fake_redis):

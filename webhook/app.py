@@ -850,8 +850,17 @@ def call_claude(system_prompt, user_prompt):
         logger.error(f"Anthropic error ({type(e).__name__}): {e}")
         raise
 
-def run_3_agents(raw_text):
-    """Run Writer → Critique → Curator chain. Returns final formatted message."""
+def run_3_agents(raw_text, on_phase_start=None):
+    """Run Writer → Critique → Curator chain. Returns final formatted message.
+
+    on_phase_start: optional callable(phase_name) invoked imediatamente
+    antes de cada fase. Usado para atualizar a mensagem de progresso no
+    Telegram (edit_message). Nomes passados: "Writer", "Reviewer",
+    "Finalizer" — nomes user-facing (não coincidem com os prompts
+    internos WRITER_SYSTEM/CRITIQUE_SYSTEM/CURATOR_SYSTEM, intencional).
+    """
+    if on_phase_start:
+        on_phase_start("Writer")
     logger.info("Agent 1/3: Writer starting...")
     writer_output = call_claude(
         WRITER_SYSTEM,
@@ -859,6 +868,8 @@ def run_3_agents(raw_text):
     )
     logger.info(f"Writer done ({len(writer_output)} chars)")
 
+    if on_phase_start:
+        on_phase_start("Reviewer")
     logger.info("Agent 2/3: Critique starting...")
     critique_output = call_claude(
         CRITIQUE_SYSTEM,
@@ -866,6 +877,8 @@ def run_3_agents(raw_text):
     )
     logger.info(f"Critique done ({len(critique_output)} chars)")
 
+    if on_phase_start:
+        on_phase_start("Finalizer")
     logger.info("Agent 3/3: Curator starting...")
     curator_output = call_claude(
         CURATOR_SYSTEM,
@@ -890,10 +903,33 @@ def run_adjuster(current_draft, feedback, original_text):
 # ============================================================
 
 def process_news_async(chat_id, raw_text, progress_msg_id):
-    """Process news text through 3 agents in background thread."""
+    """Process news text through 3 agents in background thread.
+
+    Edits `progress_msg_id` in-place via agents_progress.format_pipeline_progress
+    to show current phase (Writer → Reviewer → Finalizer → Draft pronto).
+    """
+    from execution.core.agents_progress import format_pipeline_progress
+    phase_order = ["Writer", "Reviewer", "Finalizer"]
+    done: list = []
+
+    def hook(phase_name):
+        # Mark all earlier phases as done before rendering
+        idx = phase_order.index(phase_name)
+        done.clear()
+        done.extend(phase_order[:idx])
+        if progress_msg_id:
+            edit_message(chat_id, progress_msg_id, format_pipeline_progress(
+                current=phase_name, done=list(done),
+            ))
+
     try:
-        edit_message(chat_id, progress_msg_id, "⏳ Processando com IA (1/3 Writer)...")
-        final_message = run_3_agents(raw_text)
+        # Initial state shown BEFORE the Writer actually starts
+        if progress_msg_id:
+            edit_message(chat_id, progress_msg_id, format_pipeline_progress(
+                current="Writer", done=[],
+            ))
+
+        final_message = run_3_agents(raw_text, on_phase_start=hook)
 
         # Store draft
         import time
@@ -903,17 +939,25 @@ def process_news_async(chat_id, raw_text, progress_msg_id):
             "status": "pending",
             "original_text": raw_text,
             "uazapi_token": None,
-            "uazapi_url": None
+            "uazapi_url": None,
         })
 
-        # Remove progress message and send approval
-        edit_message(chat_id, progress_msg_id, "✅ Processamento concluído!")
+        # Final state: all phases done
+        if progress_msg_id:
+            edit_message(chat_id, progress_msg_id, format_pipeline_progress(
+                current=None, done=list(phase_order),
+            ))
         send_approval_message(chat_id, draft_id, final_message)
-        
-        logger.info(f"News draft stored: {draft_id}")
+
     except Exception as e:
-        logger.error(f"News processing error: {e}")
-        edit_message(chat_id, progress_msg_id, f"❌ Erro no processamento:\n{str(e)[:500]}")
+        logger.error(f"process_news_async failed: {e}")
+        if progress_msg_id:
+            # Show error on the first phase NOT in done (i.e. the one that failed)
+            remaining = [p for p in phase_order if p not in done]
+            current = remaining[0] if remaining else None
+            edit_message(chat_id, progress_msg_id, format_pipeline_progress(
+                current=current, done=list(done), error=str(e)[:120],
+            ))
 
 def process_adjustment_async(chat_id, draft_id, feedback):
     """Adjust draft with user feedback in background thread."""

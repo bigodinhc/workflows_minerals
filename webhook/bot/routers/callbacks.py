@@ -10,7 +10,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
@@ -63,7 +63,7 @@ async def _finalize_card(query: CallbackQuery, status_text: str):
 
 # ── Draft actions (adjust) — must be registered BEFORE generic DraftAction ──
 
-@callback_router.callback_query(DraftAction.filter(action="adjust"))
+@callback_router.callback_query(DraftAction.filter(F.action == "adjust"))
 async def on_draft_adjust(query: CallbackQuery, callback_data: DraftAction, state: FSMContext):
     draft = drafts_get(callback_data.draft_id)
     if not draft:
@@ -87,7 +87,7 @@ async def on_draft_adjust(query: CallbackQuery, callback_data: DraftAction, stat
 
 # ── Draft actions (reject) — must be registered BEFORE generic DraftAction ──
 
-@callback_router.callback_query(DraftAction.filter(action="reject"))
+@callback_router.callback_query(DraftAction.filter(F.action == "reject"))
 async def on_draft_reject(query: CallbackQuery, callback_data: DraftAction, state: FSMContext):
     chat_id = query.message.chat.id
     draft_id = callback_data.draft_id

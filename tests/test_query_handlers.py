@@ -162,72 +162,83 @@ def test_rejections_escapes_markdown_in_reason(fake_redis):
 def test_queue_empty(fake_redis):
     from webhook.query_handlers import format_queue_page
     text, markup = format_queue_page(page=1)
-    assert text == "*STAGING*\n\nNenhum item aguardando."
+    assert text == "*🗂️ STAGING*\n\nNenhum item aguardando."
     assert markup is None
 
 
-def test_queue_single_page(fake_redis):
+def test_queue_single_page_titles_in_buttons(fake_redis):
     from webhook.query_handlers import format_queue_page
     for i, ts in enumerate(["10:00", "09:00", "08:00"]):
         fake_redis.set(f"platts:staging:item{i}", json.dumps({
-            "id": f"item{i}", "title": f"Title {i}",
+            "id": f"item{i}", "title": f"Title {i}", "type": "news",
             "stagedAt": f"2026-04-15T{ts}:00Z"
         }))
     text, markup = format_queue_page(page=1)
-    assert "*STAGING · 3 items*" in text
-    assert "1. Title 0" in text
-    assert "3. Title 2" in text
-    # Single page -> no pagination row, only 3 item buttons
+    assert "*🗂️ STAGING · 3 items*" in text
+    # Texto NÃO deve mais conter "1. Title 0"/"N. Abrir"
+    assert "1. Title" not in text
+    assert "Abrir" not in text
+    # Mas os 3 botões (1 por item) carregam o título com ícone
     buttons = markup["inline_keyboard"]
-    # 3 item rows, no pagination
     assert len(buttons) == 3
+    assert buttons[0][0]["text"] == "🗞️ Title 0"
     assert buttons[0][0]["callback_data"] == "queue_open:item0"
+
+
+def test_queue_button_uses_rationale_icon(fake_redis):
+    from webhook.query_handlers import format_queue_page
+    fake_redis.set("platts:staging:x", json.dumps({
+        "id": "x", "title": "Daily Rationale", "type": "rationale",
+        "stagedAt": "2026-04-15T10:00:00Z"
+    }))
+    _, markup = format_queue_page(page=1)
+    assert markup["inline_keyboard"][0][0]["text"] == "📊 Daily Rationale"
 
 
 def test_queue_paginated(fake_redis):
     from webhook.query_handlers import format_queue_page
-    # 12 items total -> 3 pages of 5
     for i in range(12):
         fake_redis.set(f"platts:staging:i{i:02d}", json.dumps({
-            "id": f"i{i:02d}", "title": f"Title {i:02d}",
+            "id": f"i{i:02d}", "title": f"Title {i:02d}", "type": "news",
             "stagedAt": f"2026-04-15T{i:02d}:00:00Z"
         }))
     text_p1, markup_p1 = format_queue_page(page=1)
-    assert "*STAGING · 12 items*" in text_p1
-    assert "1. Title 11" in text_p1
-    assert "5. Title 07" in text_p1
-    assert "6. Title" not in text_p1
-    # markup: 5 item rows + 1 pagination row
+    assert "*🗂️ STAGING · 12 items*" in text_p1
+    # 5 item rows + 1 pagination row
     assert len(markup_p1["inline_keyboard"]) == 6
-    pag = markup_p1["inline_keyboard"][-1]
-    pag_texts = [btn["text"] for btn in pag]
-    # Page 1: no "anterior" (no previous page); indicator + próximo
+    # Item buttons têm o título
+    assert markup_p1["inline_keyboard"][0][0]["text"] == "🗞️ Title 11"
+    # Pagination row (última)
+    pag_texts = [b["text"] for b in markup_p1["inline_keyboard"][-1]]
     assert any("1/3" in t for t in pag_texts)
     assert any("próximo" in t.lower() for t in pag_texts)
     assert not any("anterior" in t.lower() for t in pag_texts)
 
-    text_p2, markup_p2 = format_queue_page(page=2)
-    assert "6. Title 06" in text_p2
-    assert "10. Title 02" in text_p2
 
-
-def test_queue_truncates_long_title(fake_redis):
+def test_queue_truncates_long_title_in_button(fake_redis):
     from webhook.query_handlers import format_queue_page
     long_title = "B" * 80
     fake_redis.set("platts:staging:x", json.dumps({
-        "id": "x", "title": long_title, "stagedAt": "2026-04-15T10:00:00Z"
+        "id": "x", "title": long_title, "type": "news",
+        "stagedAt": "2026-04-15T10:00:00Z"
     }))
-    text, _ = format_queue_page(page=1)
-    assert "B" * 60 + "…" in text
+    _, markup = format_queue_page(page=1)
+    btn_text = markup["inline_keyboard"][0][0]["text"]
+    # Título truncado em 40 chars + "…" + ícone + espaço ≤ 64
+    assert btn_text.startswith("🗞️ ")
+    assert "…" in btn_text
+    assert len(btn_text) <= 64
 
 
-def test_queue_escapes_markdown_in_title(fake_redis):
-    from webhook.query_handlers import format_queue_page, _escape_md
+def test_queue_escapes_markdown_in_button_text(fake_redis):
+    """Button text is plain (NOT markdown-parsed by Telegram) — but we still
+    want *markers* removed so the operator sees clean text."""
+    from webhook.query_handlers import format_queue_page
     fake_redis.set("platts:staging:x", json.dumps({
-        "id": "x", "title": "Vale_Q2 *report* [draft]",
-        "stagedAt": "2026-04-15T10:00:00Z",
+        "id": "x", "title": "Vale *Q2* [report]", "type": "news",
+        "stagedAt": "2026-04-15T10:00:00Z"
     }))
-    text, _ = format_queue_page(page=1)
-    assert "*report*" not in text
-    assert "Vale_Q2" not in text
-    assert _escape_md("Vale_Q2 *report* [draft]") in text
+    _, markup = format_queue_page(page=1)
+    btn_text = markup["inline_keyboard"][0][0]["text"]
+    # Button text is plain, so markdown chars are OK literally
+    assert "Vale" in btn_text

@@ -113,20 +113,36 @@ def format_rejections(limit: int = 10) -> str:
 
 
 _QUEUE_PAGE_SIZE = 5
+_QUEUE_BTN_TITLE_MAX = 40
+_ICON_BY_TYPE = {"news": "🗞️", "rationale": "📊"}
+
+
+def _type_icon(item: dict) -> str:
+    """Return the type icon for the item (news 🗞️ or rationale 📊, default news)."""
+    return _ICON_BY_TYPE.get(item.get("type", "news"), "🗞️")
+
+
+def _queue_button_text(item: dict) -> str:
+    """Return the button text with type icon + truncated title."""
+    icon = _type_icon(item)
+    title = (item.get("title") or "").strip()
+    if len(title) > _QUEUE_BTN_TITLE_MAX:
+        title = title[:_QUEUE_BTN_TITLE_MAX] + "…"
+    return f"{icon} {title}"
 
 
 def format_queue_page(page: int = 1) -> tuple[str, Optional[dict]]:
     """Return (text, reply_markup) for /queue at given 1-indexed page.
 
     reply_markup is None when there are no items. Each item row has a
-    single callback button 'queue_open:<id>' that the dispatch layer
-    maps to rendering the full curation card. Pagination row appended
-    if total pages > 1.
+    single callback button `queue_open:<id>` whose *text* is the item
+    title prefixed by a type icon (🗞️ / 📊). Pagination row appended
+    if total_pages > 1.
     """
     items = redis_queries.list_staging(limit=200)
     total = len(items)
     if total == 0:
-        return "*STAGING*\n\nNenhum item aguardando.", None
+        return "*🗂️ STAGING*\n\nNenhum item aguardando.", None
 
     total_pages = (total + _QUEUE_PAGE_SIZE - 1) // _QUEUE_PAGE_SIZE
     page = max(1, min(page, total_pages))
@@ -134,17 +150,13 @@ def format_queue_page(page: int = 1) -> tuple[str, Optional[dict]]:
     end = start + _QUEUE_PAGE_SIZE
     page_items = items[start:end]
 
-    lines = [f"*STAGING · {total} items*", ""]
-    for i, item in enumerate(page_items, start=start + 1):
-        title = _escape_md(_truncate(item.get("title") or ""))
-        lines.append(f"{i}. {title}")
-    text = "\n".join(lines)
+    text = f"*🗂️ STAGING · {total} items*"
 
     keyboard: list[list[dict]] = []
-    for i, item in enumerate(page_items, start=start + 1):
+    for item in page_items:
         item_id = item.get("id") or ""
         keyboard.append([{
-            "text": f"{i}. Abrir",
+            "text": _queue_button_text(item),
             "callback_data": f"queue_open:{item_id}",
         }])
 

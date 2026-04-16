@@ -1229,6 +1229,103 @@ def _reports_show_latest(chat_id, message_id, report_type):
     edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
 
 
+def _reports_show_years(chat_id, message_id, report_type):
+    """Show available years for a report type."""
+    sb = get_supabase()
+    if not sb:
+        edit_message(chat_id, message_id, "⚠️ Supabase não configurado")
+        return
+    try:
+        result = sb.table("platts_reports") \
+            .select("date_key") \
+            .eq("report_type", report_type) \
+            .execute()
+        years = sorted({int(r["date_key"][:4]) for r in (result.data or [])}, reverse=True)
+    except Exception as exc:
+        logger.error(f"reports years query error: {exc}")
+        edit_message(chat_id, message_id, "⚠️ Erro ao consultar anos")
+        return
+
+    esc = lambda s: str(s).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
+    text = f"📊 *{esc(report_type)}*\n\nEscolha o ano:"
+    keyboard = [[{"text": str(y), "callback_data": f"rpt_year:{report_type}:{y}"}] for y in years]
+    keyboard.append([{"text": "⬅ Voltar", "callback_data": f"rpt_type:{report_type}"}])
+    edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
+
+
+def _reports_show_months(chat_id, message_id, report_type, year):
+    """Show available months for a report type + year, with counts."""
+    sb = get_supabase()
+    if not sb:
+        edit_message(chat_id, message_id, "⚠️ Supabase não configurado")
+        return
+    try:
+        result = sb.table("platts_reports") \
+            .select("date_key") \
+            .eq("report_type", report_type) \
+            .gte("date_key", f"{year}-01-01") \
+            .lte("date_key", f"{year}-12-31") \
+            .execute()
+        month_counts = {}
+        for r in (result.data or []):
+            m = int(r["date_key"][5:7])
+            month_counts[m] = month_counts.get(m, 0) + 1
+        months_sorted = sorted(month_counts.items(), reverse=True)
+    except Exception as exc:
+        logger.error(f"reports months query error: {exc}")
+        edit_message(chat_id, message_id, "⚠️ Erro ao consultar meses")
+        return
+
+    esc = lambda s: str(s).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
+    text = f"📊 *{esc(report_type)} — {year}*\n\nEscolha o mês:"
+    keyboard = []
+    for m, cnt in months_sorted:
+        label = f"{PT_MONTHS.get(m, str(m))} ({cnt})"
+        keyboard.append([{"text": label, "callback_data": f"rpt_month:{report_type}:{year}:{m}"}])
+    keyboard.append([{"text": "⬅ Voltar", "callback_data": f"rpt_years:{report_type}"}])
+    edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
+
+
+def _reports_show_month_list(chat_id, message_id, report_type, year, month):
+    """Show all reports for a given type + year + month."""
+    sb = get_supabase()
+    if not sb:
+        edit_message(chat_id, message_id, "⚠️ Supabase não configurado")
+        return
+    try:
+        start = f"{year}-{month:02d}-01"
+        if month == 12:
+            end = f"{year + 1}-01-01"
+        else:
+            end = f"{year}-{month + 1:02d}-01"
+        result = sb.table("platts_reports") \
+            .select("id, report_name, date_key") \
+            .eq("report_type", report_type) \
+            .gte("date_key", start) \
+            .lt("date_key", end) \
+            .order("date_key", desc=True) \
+            .order("report_name") \
+            .execute()
+        rows = result.data or []
+    except Exception as exc:
+        logger.error(f"reports month list query error: {exc}")
+        edit_message(chat_id, message_id, "⚠️ Erro ao consultar relatórios do mês")
+        return
+
+    esc = lambda s: str(s).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
+    month_name = PT_MONTHS.get(month, str(month))
+    text = f"📊 *{esc(report_type)} — {month_name} {year}*"
+    if not rows:
+        text += "\n\nNenhum relatório nesse período."
+    keyboard = []
+    for r in rows:
+        day = r["date_key"][8:10]
+        label = f"{esc(r['report_name'])} — {day}/{month:02d}"
+        keyboard.append([{"text": label, "callback_data": f"report_dl:{r['id']}"}])
+    keyboard.append([{"text": "⬅ Voltar", "callback_data": f"rpt_year:{report_type}:{year}"}])
+    edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
+
+
 def handle_callback(callback_query):
     """Handle button press callbacks."""
     callback_id = callback_query["id"]
@@ -1372,6 +1469,27 @@ def handle_callback(callback_query):
         report_type = callback_data.split(":", 1)[1]
         message_id = callback_query["message"]["message_id"]
         _reports_show_latest(chat_id, message_id, report_type)
+        answer_callback(callback_id, "")
+        return jsonify({"ok": True})
+
+    if callback_data.startswith("rpt_years:"):
+        report_type = callback_data.split(":", 1)[1]
+        message_id = callback_query["message"]["message_id"]
+        _reports_show_years(chat_id, message_id, report_type)
+        answer_callback(callback_id, "")
+        return jsonify({"ok": True})
+
+    if callback_data.startswith("rpt_year:"):
+        _, report_type, year = callback_data.split(":", 2)
+        message_id = callback_query["message"]["message_id"]
+        _reports_show_months(chat_id, message_id, report_type, int(year))
+        answer_callback(callback_id, "")
+        return jsonify({"ok": True})
+
+    if callback_data.startswith("rpt_month:"):
+        _, report_type, year, month = callback_data.split(":", 3)
+        message_id = callback_query["message"]["message_id"]
+        _reports_show_month_list(chat_id, message_id, report_type, int(year), int(month))
         answer_callback(callback_id, "")
         return jsonify({"ok": True})
 

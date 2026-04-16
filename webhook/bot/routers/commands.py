@@ -164,7 +164,8 @@ async def cmd_settings(message: Message):
 @shared_router.message(Command("menu"))
 async def cmd_menu_reply(message: Message):
     from bot.keyboards import build_reply_keyboard
-    await message.answer("🥸 *SuperMustache BOT*", reply_markup=build_reply_keyboard())
+    from bot.users import is_admin
+    await message.answer("🥸 *SuperMustache BOT*", reply_markup=build_reply_keyboard(is_admin=is_admin(message.chat.id)))
 
 
 # ── Helpers ──

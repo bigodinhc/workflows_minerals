@@ -37,7 +37,7 @@ async def cmd_start(message: Message):
     if role == "admin":
         await message.answer(
             "🥸 *SuperMustache BOT*\n\nBem vindo, admin.",
-            reply_markup=build_reply_keyboard(),
+            reply_markup=build_reply_keyboard(is_admin=True),
         )
         return
 

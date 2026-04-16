@@ -84,13 +84,19 @@ def build_report_types_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def build_reply_keyboard() -> ReplyKeyboardMarkup:
-    """Build the persistent 2x2 reply keyboard for bottom navigation."""
+def build_reply_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    """Build the persistent reply keyboard for bottom navigation.
+
+    Admin gets a 5th button (3rd row) to open the admin menu.
+    """
+    rows = [
+        [KeyboardButton(text="📊 Reports"), KeyboardButton(text="📰 Fila")],
+        [KeyboardButton(text="⚡ Workflows"), KeyboardButton(text="⚙️ Settings")],
+    ]
+    if is_admin:
+        rows.append([KeyboardButton(text="🥸 Admin")])
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📊 Reports"), KeyboardButton(text="📰 Fila")],
-            [KeyboardButton(text="⚡ Workflows"), KeyboardButton(text="⚙️ Settings")],
-        ],
+        keyboard=rows,
         resize_keyboard=True,
         is_persistent=True,
     )

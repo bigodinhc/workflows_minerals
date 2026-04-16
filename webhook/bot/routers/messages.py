@@ -59,6 +59,15 @@ async def on_reply_settings(message: Message):
     await show_subscription_panel(message.chat.id)
 
 
+@reply_kb_router.message(F.text == "🥸 Admin")
+async def on_reply_admin(message: Message):
+    from bot.keyboards import build_main_menu_keyboard
+    from bot.users import is_admin
+    if not is_admin(message.chat.id):
+        return
+    await message.answer("🥸 *SuperMustache BOT*", reply_markup=build_main_menu_keyboard())
+
+
 message_router = Router(name="messages")
 message_router.message.middleware(RoleMiddleware(allowed_roles={"admin"}))
 

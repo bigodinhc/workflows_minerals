@@ -75,17 +75,15 @@ def test_discard_deletes_staging(fake_redis):
 
 def test_seen_set_membership(fake_redis):
     from execution.curation.redis_client import is_seen, mark_seen
-    assert is_seen("2026-04-14", "abc123") is False
-    mark_seen("2026-04-14", "abc123")
-    assert is_seen("2026-04-14", "abc123") is True
+    assert is_seen("abc123") is False
+    mark_seen("abc123")
+    assert is_seen("abc123") is True
 
 
-def test_mark_seen_applies_30d_ttl(fake_redis):
+def test_mark_seen_uses_sorted_set(fake_redis):
     from execution.curation.redis_client import mark_seen
-    mark_seen("2026-04-14", "abc123")
-    ttl = fake_redis.ttl("platts:seen:2026-04-14")
-    # 30d = 2592000s
-    assert 2591000 <= ttl <= 2592000
+    mark_seen("abc123")
+    assert fake_redis.zscore("platts:seen", "abc123") is not None
 
 
 def test_get_archive_roundtrip(fake_redis):
@@ -136,3 +134,64 @@ def test_set_staging_preserves_existing_staged_at(fake_redis):
     set_staging("abc123", {"id": "abc123", "stagedAt": fixed})
     data = json.loads(fake_redis.get("platts:staging:abc123"))
     assert data["stagedAt"] == fixed
+
+
+def test_seen_global_set_membership(fake_redis):
+    """v2: is_seen/mark_seen use global sorted set (no date param)."""
+    from execution.curation.redis_client import is_seen, mark_seen
+    assert is_seen("abc123") is False
+    mark_seen("abc123")
+    assert is_seen("abc123") is True
+
+
+def test_mark_seen_global_idempotent(fake_redis):
+    """Calling mark_seen twice keeps ZCARD at 1."""
+    from execution.curation.redis_client import mark_seen
+    mark_seen("abc123")
+    mark_seen("abc123")
+    assert fake_redis.zcard("platts:seen") == 1
+
+
+def test_mark_seen_global_prunes_old_entries(fake_redis):
+    """Entries older than 30d are pruned on next mark_seen call."""
+    import time
+    from execution.curation.redis_client import mark_seen, is_seen
+    old_ts = time.time() - (31 * 24 * 60 * 60)
+    fake_redis.zadd("platts:seen", {"old_item": old_ts})
+    mark_seen("new_item")
+    assert is_seen("old_item") is False
+    assert is_seen("new_item") is True
+
+
+def test_staging_exists_true_after_set(fake_redis):
+    from execution.curation.redis_client import set_staging, staging_exists
+    assert staging_exists("abc123") is False
+    set_staging("abc123", {"id": "abc123", "title": "Test"})
+    assert staging_exists("abc123") is True
+
+
+def test_staging_exists_false_after_discard(fake_redis):
+    from execution.curation.redis_client import set_staging, discard, staging_exists
+    set_staging("abc123", {"id": "abc123", "title": "Test"})
+    discard("abc123")
+    assert staging_exists("abc123") is False
+
+
+def test_mark_scraped_populates_dated_set(fake_redis):
+    from execution.curation.redis_client import mark_scraped
+    mark_scraped("2026-04-16", "abc123")
+    assert fake_redis.sismember("platts:scraped:2026-04-16", "abc123")
+
+
+def test_mark_scraped_applies_30d_ttl(fake_redis):
+    from execution.curation.redis_client import mark_scraped
+    mark_scraped("2026-04-16", "abc123")
+    ttl = fake_redis.ttl("platts:scraped:2026-04-16")
+    assert 2591000 <= ttl <= 2592000
+
+
+def test_mark_scraped_idempotent(fake_redis):
+    from execution.curation.redis_client import mark_scraped
+    mark_scraped("2026-04-16", "abc123")
+    mark_scraped("2026-04-16", "abc123")
+    assert fake_redis.scard("platts:scraped:2026-04-16") == 1

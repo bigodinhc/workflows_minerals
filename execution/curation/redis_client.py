@@ -3,7 +3,8 @@
 Keyspaces:
 - platts:staging:<id>               JSON string, TTL 48h
 - platts:archive:<date>:<id>        JSON string, no TTL (consumed by other project)
-- platts:seen:<date>                Set of ids, TTL 30d (dedup)
+- platts:seen                       Sorted Set, score=epoch, rolling 30d dedup
+- platts:scraped:<date>             Set of ids, TTL 30d (daily telemetry)
 - platts:rationale:processed:<date> String flag, TTL 30h (1x/day gate)
 
 All functions use REDIS_URL env var via _get_client(). Tests monkeypatch _get_client.
@@ -57,8 +58,7 @@ def _archive_key(date: str, item_id: str) -> str:
     return f"platts:archive:{date}:{item_id}"
 
 
-def _seen_key(date: str) -> str:
-    return f"platts:seen:{date}"
+_SEEN_KEY = "platts:seen"
 
 
 def _rationale_flag_key(date: str) -> str:
@@ -124,17 +124,36 @@ def get_archive(date: str, item_id: str) -> Optional[dict]:
     return json.loads(raw)
 
 
-def is_seen(date: str, item_id: str) -> bool:
-    """Check if item id is in dedup set for date."""
+def is_seen(item_id: str) -> bool:
+    """Check if item id exists in global dedup sorted set."""
     client = _get_client()
-    return bool(client.sismember(_seen_key(date), item_id))
+    return client.zscore(_SEEN_KEY, item_id) is not None
 
 
-def mark_seen(date: str, item_id: str) -> None:
-    """Add id to dedup set with 30d TTL refresh."""
+def mark_seen(item_id: str) -> None:
+    """Add id to global dedup sorted set. Prunes entries older than 30d."""
+    import time
     client = _get_client()
-    client.sadd(_seen_key(date), item_id)
-    client.expire(_seen_key(date), _SEEN_TTL_SECONDS)
+    now = time.time()
+    try:
+        client.zremrangebyscore(_SEEN_KEY, "-inf", now - _SEEN_TTL_SECONDS)
+    except Exception:
+        pass
+    client.zadd(_SEEN_KEY, {item_id: now})
+
+
+def staging_exists(item_id: str) -> bool:
+    """Check if a staging key exists for item_id."""
+    client = _get_client()
+    return bool(client.exists(_staging_key(item_id)))
+
+
+def mark_scraped(date: str, item_id: str) -> None:
+    """Add id to daily scraped set with 30d TTL. For /stats telemetry."""
+    client = _get_client()
+    key = f"platts:scraped:{date}"
+    client.sadd(key, item_id)
+    client.expire(key, _SEEN_TTL_SECONDS)
 
 
 def is_rationale_processed(date: str) -> bool:

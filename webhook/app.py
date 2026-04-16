@@ -1032,6 +1032,12 @@ def telegram_webhook():
             _reports_show_types(chat_id)
             return jsonify({"ok": True})
 
+        if text == "/s":
+            if not contact_admin.is_authorized(chat_id):
+                return jsonify({"ok": True})
+            _show_main_menu(chat_id)
+            return jsonify({"ok": True})
+
         return jsonify({"ok": True})  # unknown command
     
     # ── Check if user is in admin add flow ──
@@ -1166,6 +1172,49 @@ def _reprocess_item(chat_id, item_id):
         args=(chat_id, raw_text, progress_msg_id, item_id),
         daemon=True,
     ).start()
+
+
+# ── Menu helpers ──
+
+def _safe_text(fn, label):
+    """Call fn(), return its result or an error string."""
+    try:
+        return fn()
+    except Exception as exc:
+        logger.error(f"menu {label} error: {exc}")
+        return f"⚠️ Erro ao consultar {label}."
+
+def _safe_call(fn, label):
+    """Call fn() expecting (text, markup) tuple. Return (error_text, None) on failure."""
+    try:
+        return fn()
+    except Exception as exc:
+        logger.error(f"menu {label} error: {exc}")
+        return (f"⚠️ Erro ao consultar {label}.", None)
+
+
+# ── Main menu ──
+
+def _show_main_menu(chat_id):
+    """Send a main menu with inline buttons for all bot features."""
+    text = "📋 *Menu Principal*\n\nEscolha uma opção:"
+    markup = {
+        "inline_keyboard": [
+            [
+                {"text": "📊 Relatórios", "callback_data": "menu:reports"},
+                {"text": "📰 Fila Curadoria", "callback_data": "menu:queue"},
+            ],
+            [
+                {"text": "📜 Histórico", "callback_data": "menu:history"},
+                {"text": "❌ Recusas", "callback_data": "menu:rejections"},
+            ],
+            [
+                {"text": "📈 Estatísticas", "callback_data": "menu:stats"},
+                {"text": "🔄 Status", "callback_data": "menu:status"},
+            ],
+        ]
+    }
+    send_telegram_message(chat_id, text, reply_markup=markup)
 
 
 # ── Reports navigation helpers ──
@@ -1424,6 +1473,23 @@ def handle_callback(callback_query):
         except Exception as exc:
             logger.error(f"queue_open post error: {exc}")
             send_telegram_message(chat_id, "❌ Erro ao abrir card.")
+        return jsonify({"ok": True})
+
+    # ---------- Main menu shortcuts ----------
+    if callback_data.startswith("menu:"):
+        action_menu = callback_data.split(":", 1)[1]
+        answer_callback(callback_id, "")
+        handlers = {
+            "reports": lambda: _reports_show_types(chat_id),
+            "queue": lambda: send_telegram_message(chat_id, *_safe_call(lambda: query_handlers.format_queue_page(page=1), "fila")),
+            "history": lambda: send_telegram_message(chat_id, _safe_text(lambda: query_handlers.format_history(), "histórico")),
+            "rejections": lambda: send_telegram_message(chat_id, _safe_text(lambda: query_handlers.format_rejections(), "recusas")),
+            "stats": lambda: send_telegram_message(chat_id, _safe_text(lambda: query_handlers.format_stats(datetime.now(timezone.utc).strftime("%Y-%m-%d")), "stats")),
+            "status": lambda: send_telegram_message(chat_id, _safe_text(lambda: _build_status_message(), "status")),
+        }
+        handler = handlers.get(action_menu)
+        if handler:
+            handler()
         return jsonify({"ok": True})
 
     # ---------- Report PDF download ----------
@@ -1757,6 +1823,7 @@ def register_commands():
         return jsonify({"ok": False, "error": "TELEGRAM_BOT_TOKEN missing"}), 500
 
     commands = [
+        {"command": "s", "description": "Menu principal com todos os atalhos"},
         {"command": "reports", "description": "Consultar e baixar relatórios Platts (PDF)"},
         {"command": "help", "description": "Lista todos os comandos"},
         {"command": "queue", "description": "Items aguardando curadoria"},

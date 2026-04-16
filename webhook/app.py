@@ -1197,7 +1197,7 @@ def _safe_call(fn, label):
 
 def _show_main_menu(chat_id):
     """Send a main menu with inline buttons for all bot features."""
-    text = "⚡ *Antigravity WF*"
+    text = "🥸 *SuperMustache\\_BOT*"
     markup = {
         "inline_keyboard": [
             [
@@ -1206,7 +1206,7 @@ def _show_main_menu(chat_id):
             ],
             [
                 {"text": "📜 Histórico", "callback_data": "menu:history"},
-                {"text": "❌ Recusas", "callback_data": "menu:rejections"},
+                {"text": "❌ Recusados", "callback_data": "menu:rejections"},
             ],
             [
                 {"text": "📈 Stats", "callback_data": "menu:stats"},

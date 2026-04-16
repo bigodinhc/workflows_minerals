@@ -35,26 +35,23 @@ Títulos de seção: `*TÍTULO EM CAPS*`, separados por uma linha em branco.
 ## REGRA DE DADOS TABULARES (CRÍTICA)
 
 Se o Writer entregou dados numéricos (trades, preços, volumes):
-- Use formato `label: valor` ou `label · valor` — UMA entrada por linha, dentro de bloco mono ```
-- Máximo 2 colunas visuais por linha (produto + preço). Tela de celular é estreita
-- NUNCA converta tabela em prosa
-- Agrupe trades duplicados em faixa (ex: ¥766-768)
-- Use inline mono `` `valor` `` para valores isolados no meio de prosa (ganha fundo cinza no WhatsApp)
+- NÃO use bloco mono ``` para tabelas — fica sem destaque visual no WhatsApp
+- Use texto normal para labels e inline mono `` `valor` `` para cada número (ganha fundo cinza)
+- Uma entrada por linha, formato: Label produto — `preço` porto
+- Agrupe trades duplicados em faixa (ex: `¥765-768`)
+- NUNCA converta dados em prosa corrida
 
 Errado: "As Jimblebar Fines foram negociadas a ¥690/wmt FOT Tianjin e ¥680/wmt FOT Shandong"
 
-Errado (colunas demais, desalinha no celular):
+Errado (bloco mono sem destaque):
 ```
-Produto              Porto         ¥/wmt
-Jimblebar 60,3%      Tianjin         690
+Jimblebar 60,3%: ¥690 Tianjin
 ```
 
 Certo:
-```
-Jimblebar 60,3%: ¥690 Tianjin · ¥680 Shandong
-MAC Fines 61,0%: ¥760 Caofeidian
-PBF 60,8%: ¥765-768 Jingtang/Caofeidian
-```
+Jimblebar 60,3% — `¥690` Tianjin · `¥680` Shandong
+MAC Fines 61,0% — `¥760` Caofeidian
+PBF 60,8% — `¥765-768` Jingtang/Caofeidian
 
 ## TOM
 
@@ -109,23 +106,19 @@ Produção subiu vs. março, mas segue abaixo do ano passado. Preços laterais d
 
 *PRODUÇÃO CISA — 1-10/ABR*
 
-```
-Ferro-gusa: 1,892 Mt/dia (+4,4% m/m · -3,1% a/a)
-Aço bruto:  2,104 Mt/dia (+5,6% m/m · -4,2% a/a)
-```
+Ferro-gusa — `1,892 Mt/dia` (+4,4% m/m · -3,1% a/a)
+Aço bruto — `2,104 Mt/dia` (+5,6% m/m · -4,2% a/a)
 
 *PREÇOS (Platts)*
 
-```
-HRC:   ¥3.310 jan → ¥3.230 fev → ¥3.300/mt abr
-Rebar: ¥3.150 jan → ¥3.070 fev → ¥3.100/mt abr
-```
+HRC — `¥3.310` jan → `¥3.230` fev → `¥3.300/mt` abr
+Rebar — `¥3.150` jan → `¥3.070` fev → `¥3.100/mt` abr
 
 Range de ~¥80/mt no HRC desde janeiro. Mercado não consegue romper pra nenhum lado.
 
 *ESTOQUES*
 
-Aço acabado (usinas + spot): `28,33 Mt` em 10/abr (+1,3% m/m · +9,5% a/a). Acúmulo moderado.
+Aço acabado (usinas + spot) — `28,33 Mt` em 10/abr (+1,3% m/m · +9,5% a/a). Acúmulo moderado.
 
 *EXPORTAÇÃO*
 
@@ -174,24 +167,18 @@ Sessão ativa. Destaque pro trade de `FMG Blend` 58,2% Fe a IODEX -6,66% CFR Chi
 
 *TRADES FOT — FINES*
 
-```
-Jimblebar 60,3%: ¥690 Tianjin · ¥680 Shandong
-MAC Fines 61,0%: ¥760 Caofeidian
-PBF 60,8%: ¥765-768 Jingtang/Caofeidian
-```
+Jimblebar 60,3% — `¥690` Tianjin · `¥680` Shandong
+MAC Fines 61,0% — `¥760` Caofeidian
+PBF 60,8% — `¥765-768` Jingtang/Caofeidian
 
 *TRADES FOT — LUMP*
 
-```
-Newman Unscr: ¥900-903 Caofeidian · ¥913 Jingtang
-```
+Newman Unscr — `¥900-903` Caofeidian · `¥913` Jingtang
 
 *SPREADS*
 
-```
-PBF vs MAC: $2,00/dmt CFR
-Mai/Jun: $1 backwardation
-```
+PBF vs MAC — `$2,00/dmt` CFR
+Mai/Jun — `$1` backwardation
 
 PBF com prêmio vs MAC em `$2`. Curva em leve backwardation — mercado não vê aperto no curto prazo. MOC IODEX em `$104,75/dmt`.
 ---"""

@@ -59,8 +59,8 @@ def test_route_items_respects_is_seen_dedup(_redis):
     from execution.curation import redis_client
     from execution.curation.id_gen import generate_id
     item = {"source": "platts", "title": "Duplicated", "tabName": "News"}
-    item_id = generate_id("platts", "Duplicated")
-    redis_client.mark_seen("2026-04-15", item_id)
+    item_id = generate_id("Duplicated")
+    redis_client.mark_seen(item_id)
     counters, staged = route_items(
         items=[item], today_date="2026-04-15", today_br="15/04/2026",
         logger=None,
@@ -81,3 +81,83 @@ def test_route_items_does_not_call_telegram(_redis, monkeypatch):
         items=[{"source": "platts", "title": "X", "tabName": "News"}],
         today_date="2026-04-15", today_br="15/04/2026", logger=None,
     )
+
+
+def test_route_items_dedup_same_title_different_source(_redis):
+    """H2 regression: same title in 'Latest' and 'Top News' must stage once."""
+    from execution.curation.router import route_items
+    items = [
+        {"source": "Latest", "title": "EU reaches deal on steel", "tabName": ""},
+        {"source": "Top News - Ferrous Metals", "title": "EU reaches deal on steel", "tabName": ""},
+    ]
+    counters, staged = route_items(
+        items=items, today_date="2026-04-16", today_br="16/04/2026", logger=None,
+    )
+    assert counters["staged"] == 1
+    # Second item with same title is skipped because the first was just staged
+    assert counters["skipped_staged"] == 1
+    assert len(staged) == 1
+
+
+def test_route_items_dedup_across_days(_redis):
+    """H1 regression: item seen yesterday must not re-stage today."""
+    from execution.curation.router import route_items
+    items = [{"source": "platts", "title": "Steel demand forecast", "tabName": "News"}]
+    counters1, staged1 = route_items(
+        items=items, today_date="2026-04-15", today_br="15/04/2026", logger=None,
+    )
+    assert counters1["staged"] == 1
+    counters2, staged2 = route_items(
+        items=items, today_date="2026-04-16", today_br="16/04/2026", logger=None,
+    )
+    assert counters2["staged"] == 0
+    # Item is still in staging (not yet archived), so skipped_staged fires
+    assert counters2["skipped_staged"] == 1
+
+
+def test_route_items_staging_short_circuit(_redis):
+    """Item already in staging (not yet archived) should be skipped."""
+    from execution.curation.router import route_items
+    from execution.curation import redis_client
+    from execution.curation.id_gen import generate_id
+    title = "Test"
+    item_id = generate_id(title)
+    redis_client.set_staging(item_id, {"id": item_id, "title": title})
+    items = [{"source": "platts", "title": title, "tabName": "News"}]
+    counters, staged = route_items(
+        items=items, today_date="2026-04-16", today_br="16/04/2026", logger=None,
+    )
+    assert counters["staged"] == 0
+    assert counters["skipped_staged"] == 1
+
+
+def test_route_items_counters_balance(_redis):
+    """total == staged + skipped_seen + skipped_staged + skipped_invalid."""
+    from execution.curation.router import route_items
+    from execution.curation import redis_client
+    from execution.curation.id_gen import generate_id
+    items = [
+        {"source": "platts", "title": "New article", "tabName": "News"},
+        {"source": "platts", "title": "New article", "tabName": "News"},
+        {"source": "platts", "title": "Staged one", "tabName": "News"},
+    ]
+    staged_id = generate_id("Staged one")
+    redis_client.set_staging(staged_id, {"id": staged_id, "title": "Staged one"})
+    counters, _ = route_items(
+        items=items, today_date="2026-04-16", today_br="16/04/2026", logger=None,
+    )
+    assert counters["total"] == counters["staged"] + counters["skipped_seen"] + counters["skipped_staged"] + counters["skipped_invalid"]
+
+
+def test_route_items_skips_empty_title(_redis):
+    """Item with empty title should be skipped (generate_id raises ValueError)."""
+    from execution.curation.router import route_items
+    items = [
+        {"source": "platts", "title": "", "tabName": "News"},
+        {"source": "platts", "title": "Valid article", "tabName": "News"},
+    ]
+    counters, staged = route_items(
+        items=items, today_date="2026-04-16", today_br="16/04/2026", logger=None,
+    )
+    assert counters["staged"] == 1
+    assert len(staged) == 1

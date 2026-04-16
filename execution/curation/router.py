@@ -31,10 +31,11 @@ def _type_tag(item: dict) -> str:
 
 
 def _stage_only(item: dict, item_id: str, item_type: str, today_date: str) -> dict:
-    """Stage one item in Redis and mark seen. Returns the dict that was staged."""
+    """Stage one item in Redis and mark seen + scraped. Returns the dict that was staged."""
     to_stage = {**item, "id": item_id, "type": item_type}
     redis_client.set_staging(item_id, to_stage)
-    redis_client.mark_seen(today_date, item_id)
+    redis_client.mark_seen(item_id)
+    redis_client.mark_scraped(today_date, item_id)
     return to_stage
 
 
@@ -46,9 +47,9 @@ def route_items(
 ) -> Tuple[dict, List[dict]]:
     """Classify + stage every dataset item. Returns (counters, staged_items).
 
-    counters keys: total, staged, news_staged, rationale_staged, skipped_seen.
-    staged_items: list of dicts actually written to Redis (newest-first NOT
-    guaranteed here — sort in the caller if needed).
+    counters keys: total, staged, news_staged, rationale_staged, skipped_seen,
+    skipped_staged, skipped_invalid.
+    staged_items: list of dicts actually written to Redis.
     """
     log = logger or WorkflowLogger("CurationRouter")
     counters = {
@@ -57,13 +58,23 @@ def route_items(
         "news_staged": 0,
         "rationale_staged": 0,
         "skipped_seen": 0,
+        "skipped_staged": 0,
+        "skipped_invalid": 0,
     }
     staged: List[dict] = []
 
     for item in items:
         item_type = _type_tag(item)
-        item_id = generate_id(item.get("source", ""), item.get("title", ""))
-        if redis_client.is_seen(today_date, item_id):
+        try:
+            item_id = generate_id(item.get("title", ""))
+        except ValueError:
+            counters["skipped_invalid"] += 1
+            log.warning(f"Skipped item with empty/invalid title: {item.get('source', '?')}")
+            continue
+        if redis_client.staging_exists(item_id):
+            counters["skipped_staged"] += 1
+            continue
+        if redis_client.is_seen(item_id):
             counters["skipped_seen"] += 1
             continue
         staged_item = _stage_only(item, item_id, item_type, today_date)
@@ -76,5 +87,7 @@ def route_items(
 
     log.info(f"Staged {counters['staged']} items "
              f"({counters['news_staged']} news, {counters['rationale_staged']} rationale); "
-             f"{counters['skipped_seen']} skipped as seen")
+             f"{counters['skipped_seen']} skipped as seen, "
+             f"{counters['skipped_staged']} skipped in staging, "
+             f"{counters['skipped_invalid']} skipped invalid")
     return counters, staged

@@ -1,0 +1,51 @@
+name: "Platts Reports (PDF Downloader)"
+
+on:
+  schedule:
+    # 13:00 UTC = 10:00 BRT, daily including weekends
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run (sem upload/notificação)'
+        required: false
+        type: boolean
+        default: false
+      force_redownload:
+        description: 'Re-baixar tudo ignorando dedup'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  download-and-distribute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Platts Reports
+        env:
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          APIFY_PLATTS_REPORTS_ACTOR_ID: bigodeio05/platts-scrap-reports
+          PLATTS_USERNAME: ${{ secrets.PLATTS_USERNAME }}
+          PLATTS_PASSWORD: ${{ secrets.PLATTS_PASSWORD }}
+          GDRIVE_PLATTS_REPORTS_FOLDER_ID: ${{ secrets.GDRIVE_PLATTS_REPORTS_FOLDER_ID }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+        run: |
+          DRY=""
+          FORCE=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          if [ "${{ github.event.inputs.force_redownload }}" = "true" ]; then FORCE="--force-redownload"; fi
+          python -m execution.scripts.platts_reports $DRY $FORCE

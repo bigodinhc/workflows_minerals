@@ -4,13 +4,14 @@ Centralizes keyboard construction so routers stay lean.
 Uses InlineKeyboardBuilder from aiogram.utils.keyboard.
 """
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callback_data import (
     DraftAction, MenuAction,
     ReportType as ReportTypeCB, ReportYears, ReportBack,
     WorkflowList,
+    UserApproval, SubscriptionToggle, SubscriptionDone, OnboardingStart,
 )
 
 
@@ -80,4 +81,69 @@ def build_report_types_keyboard() -> InlineKeyboardMarkup:
         text="📊 Research Reports",
         callback_data=ReportTypeCB(report_type="Research Reports").pack(),
     ))
+    return builder.as_markup()
+
+
+def build_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Build the persistent 2x2 reply keyboard for bottom navigation."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📊 Reports"), KeyboardButton(text="📰 Fila")],
+            [KeyboardButton(text="⚡ Workflows"), KeyboardButton(text="⚙️ Settings")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def build_onboarding_keyboard() -> InlineKeyboardMarkup:
+    """Build the onboarding welcome keyboard."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="⚡ Configurar notificacoes",
+        callback_data=OnboardingStart().pack(),
+    ))
+    return builder.as_markup()
+
+
+def build_subscription_keyboard(subscriptions: dict) -> InlineKeyboardMarkup:
+    """Build the subscription toggle panel.
+
+    subscriptions: dict like {"morning_check": True, "baltic_ingestion": False, ...}
+    """
+    labels = {
+        "morning_check": "Morning Check — Precos Platts",
+        "baltic_ingestion": "Baltic Exchange — BDI + Rotas",
+        "daily_report": "Daily SGX — Futuros 62% Fe",
+        "market_news": "Platts News — Noticias curadas",
+        "platts_reports": "Platts Reports — PDFs",
+    }
+    builder = InlineKeyboardBuilder()
+    for wf, label in labels.items():
+        active = subscriptions.get(wf, True)
+        icon = "✅" if active else "❌"
+        builder.row(InlineKeyboardButton(
+            text=f"{icon} {label}",
+            callback_data=SubscriptionToggle(workflow=wf).pack(),
+        ))
+    builder.row(InlineKeyboardButton(
+        text="💾 Pronto",
+        callback_data=SubscriptionDone().pack(),
+    ))
+    return builder.as_markup()
+
+
+def build_approval_request_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    """Build the admin approval request keyboard."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Aprovar",
+            callback_data=UserApproval(action="approve", chat_id=chat_id).pack(),
+        ),
+        InlineKeyboardButton(
+            text="❌ Recusar",
+            callback_data=UserApproval(action="reject", chat_id=chat_id).pack(),
+        ),
+    )
     return builder.as_markup()

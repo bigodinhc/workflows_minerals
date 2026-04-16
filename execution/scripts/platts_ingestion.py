@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from execution.core import state_store
 from execution.core.logger import WorkflowLogger
-from execution.curation import rationale_dispatcher, router
+from execution.curation import router
 from execution.integrations.apify_client import ApifyClient
 
 ACTOR_ID = os.getenv("APIFY_PLATTS_ACTOR_ID", "bigodeio05/platts-scrap-full-news")
@@ -148,19 +148,29 @@ def main():
             state_store.record_empty(WORKFLOW_NAME, "scrape vazio")
             return
 
-        def rationale_processor(rationale_items, today_br_inner):
-            return rationale_dispatcher.process(rationale_items, today_br_inner, logger=logger)
-
-        counters = router.route_items(
+        counters, staged = router.route_items(
             items=articles,
             today_date=date_iso,
             today_br=today_br,
-            chat_id=chat_id,
-            preview_base_url=preview_base_url,
-            rationale_processor=rationale_processor,
             logger=logger,
         )
         logger.info(f"Route summary: {counters}")
+
+        # v1.1: send single ingestion digest if any new items were staged
+        if counters.get("staged", 0) > 0:
+            try:
+                from webhook.digest import format_ingestion_digest
+                from execution.integrations.telegram_client import TelegramClient
+                digest_out = format_ingestion_digest(counters, staged)
+                if digest_out is not None:
+                    text, markup = digest_out
+                    TelegramClient().send_message(
+                        text=text, chat_id=chat_id, reply_markup=markup,
+                    )
+                    logger.info(f"Digest sent to chat {chat_id}")
+            except Exception as exc:
+                logger.warning(f"Digest send failed: {exc}")
+
         state_store.record_success(WORKFLOW_NAME, counters, 0)
 
     except Exception as e:

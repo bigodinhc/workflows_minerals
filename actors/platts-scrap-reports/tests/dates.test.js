@@ -19,6 +19,21 @@ describe('parsePublishedDate', () => {
         expect(parsePublishedDate('15 Apr 2026')).toBe('2026-04-15');
     });
 
+    it('disambiguates MM/DD/YYYY when first group ≤ 12 and second > 12', () => {
+        // Apify en-US locale: "04/15/2026" = April 15
+        expect(parsePublishedDate('04/15/2026 21:29:02 UTC')).toBe('2026-04-15');
+    });
+
+    it('disambiguates DD/MM/YYYY when first group > 12', () => {
+        // PT locale: "15/04/2026" = April 15
+        expect(parsePublishedDate('15/04/2026 21:29:02 UTC')).toBe('2026-04-15');
+    });
+
+    it('defaults to DD/MM when both ≤ 12 (European convention)', () => {
+        // "05/04/2026" → ambiguous → default DD=05, MM=04 → April 5
+        expect(parsePublishedDate('05/04/2026')).toBe('2026-04-05');
+    });
+
     it('returns null for unparseable input', () => {
         expect(parsePublishedDate('not a date')).toBeNull();
         expect(parsePublishedDate('')).toBeNull();

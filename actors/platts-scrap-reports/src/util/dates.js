@@ -11,9 +11,27 @@ export function parsePublishedDate(raw) {
     if (!raw || typeof raw !== 'string') return null;
     const s = raw.trim();
 
-    // "DD/MM/YYYY" with optional time/UTC suffix
-    const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s|$)/);
-    if (slash) return `${slash[3]}-${slash[2]}-${slash[1]}`;
+    // "DD/MM/YYYY" or "MM/DD/YYYY" with optional time/UTC suffix
+    // Disambiguate: if first group > 12 → it's the day (DD/MM). If second > 12 → MM/DD.
+    // If both ≤ 12 → default to DD/MM (European convention, Platts default).
+    const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s|$)/);
+    if (slash) {
+        let [, a, b, year] = slash;
+        const n1 = parseInt(a, 10);
+        const n2 = parseInt(b, 10);
+        let day, month;
+        if (n1 > 12) {
+            // n1 must be day (DD/MM/YYYY)
+            day = a; month = b;
+        } else if (n2 > 12) {
+            // n2 must be day (MM/DD/YYYY)
+            day = b; month = a;
+        } else {
+            // Ambiguous — default DD/MM (European)
+            day = a; month = b;
+        }
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
 
     // "DD <month-abbrev>. YYYY" or "DD <month-abbrev> YYYY"
     const word = s.match(/^(\d{1,2})\s+([a-z]{3})\.?\s+(\d{4})/i);

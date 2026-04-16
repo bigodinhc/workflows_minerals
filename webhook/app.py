@@ -28,6 +28,21 @@ import query_handlers
 import redis_queries
 from execution.integrations.sheets_client import SheetsClient
 
+# Supabase client for report downloads
+_supabase_client = None
+
+def get_supabase():
+    global _supabase_client
+    if _supabase_client is None:
+        sb_url = os.environ.get("SUPABASE_URL")
+        sb_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if not sb_url or not sb_key:
+            logger.warning("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — report downloads disabled")
+            return None
+        from supabase import create_client
+        _supabase_client = create_client(sb_url, sb_key)
+    return _supabase_client
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1613,6 +1628,44 @@ def handle_callback(callback_query):
         except Exception as exc:
             logger.error(f"queue_open post error: {exc}")
             send_telegram_message(chat_id, "❌ Erro ao abrir card.")
+        return jsonify({"ok": True})
+
+    # ---------- Report PDF download ----------
+    if callback_data.startswith("report_dl:"):
+        parts_dl = callback_data.split(":", 1)
+        report_id = parts_dl[1] if len(parts_dl) > 1 else ""
+        sb = get_supabase()
+        if not sb:
+            answer_callback(callback_id, "Supabase não configurado")
+            return jsonify({"ok": True})
+        try:
+            row = sb.table("platts_reports").select("storage_path, report_name").eq("id", report_id).single().execute()
+            if not row.data:
+                answer_callback(callback_id, "Relatório não encontrado")
+                return jsonify({"ok": True})
+            storage_path = row.data["storage_path"]
+            report_name = row.data["report_name"]
+            signed = sb.storage.from_("platts-reports").create_signed_url(storage_path, 3600)
+            if not signed or not signed.get("signedURL"):
+                answer_callback(callback_id, "Erro ao gerar link")
+                return jsonify({"ok": True})
+            pdf_url = signed["signedURL"]
+            pdf_resp = requests.get(pdf_url, timeout=30)
+            pdf_resp.raise_for_status()
+            filename = storage_path.split("/")[-1]
+            # Direct multipart upload (telegram_api sends JSON, can't do files)
+            resp = requests.post(
+                f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendDocument",
+                data={"chat_id": chat_id, "caption": f"📄 {report_name}", "parse_mode": "Markdown"},
+                files={"document": (filename, pdf_resp.content, "application/pdf")},
+                timeout=30,
+            )
+            if not resp.json().get("ok"):
+                logger.warning(f"sendDocument failed: {resp.text[:200]}")
+            answer_callback(callback_id, f"📤 {report_name}")
+        except Exception as exc:
+            logger.error(f"report_dl error: {exc}")
+            answer_callback(callback_id, "Erro ao baixar relatório")
         return jsonify({"ok": True})
 
     parts = callback_data.split(":", 1)

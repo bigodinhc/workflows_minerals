@@ -47,23 +47,16 @@
             "maximum": 200
         },
         "dryRun": {
-            "title": "Dry run (no Drive upload, no Telegram)",
+            "title": "Dry run (no upload, no Telegram)",
             "type": "boolean",
-            "description": "If true, extracts and downloads PDFs but skips Drive upload and Telegram distribution.",
+            "description": "If true, extracts and captures PDFs but skips Supabase upload and Telegram notification.",
             "default": false
         },
         "forceRedownload": {
-            "title": "Ignore Redis dedup, re-download everything",
+            "title": "Ignore dedup, re-download everything",
             "type": "boolean",
-            "description": "If true, ignores the platts:report:seen dedup keys and processes every row.",
+            "description": "If true, ignores existing records in Supabase and re-processes every row.",
             "default": false
-        },
-        "gdriveFolderId": {
-            "title": "Google Drive root folder ID",
-            "type": "string",
-            "editor": "textfield",
-            "default": "1KxixMP9rKF0vGzINGvmmyFvouaOvL02y",
-            "description": "ID of the 'Platts Reports' folder shared with the service account."
         },
         "telegramChatId": {
             "title": "Telegram chat ID (overrides env)",

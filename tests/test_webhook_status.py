@@ -1,36 +1,17 @@
-"""Tests for the /status command in webhook/app.py."""
-import os
+"""Tests for the /status command message builder (status_builder.py)."""
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone, timedelta
 
-# Add webhook dir to sys.path so we can import app
+# Add webhook dir to sys.path so we can import status_builder
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "webhook"))
 
 import pytest
+from status_builder import _format_status_lines
 
 
-@pytest.fixture
-def app_module(monkeypatch):
-    """Import the webhook app module with minimal env setup."""
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake_token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "111")
-
-    # Stub heavy optional deps not installed in test environment
-    for mod in ("anthropic", "flask"):
-        if mod not in sys.modules:
-            monkeypatch.setitem(sys.modules, mod, MagicMock())
-
-    # Ensure clean import
-    if "app" in sys.modules:
-        del sys.modules["app"]
-    import app as app_module
-    return app_module
-
-
-def test_format_status_lines_handles_all_states(app_module):
+def test_format_status_lines_handles_all_states():
     """Unit test the formatter without invoking the full webhook."""
     brt = timezone(timedelta(hours=-3))
     states = {
@@ -70,7 +51,7 @@ def test_format_status_lines_handles_all_states(app_module):
         "rationale_news": None,
     }
 
-    lines = app_module._format_status_lines(states, next_runs)
+    lines = _format_status_lines(states, next_runs)
     joined = "\n".join(lines)
 
     # Workflow names are rendered with escaped underscores for Telegram Markdown
@@ -81,10 +62,10 @@ def test_format_status_lines_handles_all_states(app_module):
     assert "🚨" in joined and "3 falhas seguidas" in joined
 
 
-def test_format_status_handles_all_none(app_module):
+def test_format_status_handles_all_none():
     """When Redis is offline all states are None."""
     states = {wf: None for wf in ["a", "b"]}
     next_runs = {wf: None for wf in ["a", "b"]}
-    lines = app_module._format_status_lines(states, next_runs)
+    lines = _format_status_lines(states, next_runs)
     joined = "\n".join(lines)
     assert "⏳" in joined

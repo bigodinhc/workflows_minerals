@@ -23,6 +23,42 @@ from execution.integrations.sheets_client import SheetsClient
 
 logger = logging.getLogger(__name__)
 
+# ── Reply keyboard text handler (admin + subscriber) ──
+
+reply_kb_router = Router(name="reply_keyboard")
+reply_kb_router.message.middleware(RoleMiddleware(allowed_roles={"admin", "subscriber"}))
+
+
+@reply_kb_router.message(F.text == "📊 Reports")
+async def on_reply_reports(message: Message):
+    from reports_nav import reports_show_types
+    await reports_show_types(message.chat.id)
+
+
+@reply_kb_router.message(F.text == "📰 Fila")
+async def on_reply_queue(message: Message):
+    import query_handlers
+    try:
+        body, markup = query_handlers.format_queue_page(page=1)
+    except Exception:
+        await message.answer("❌ Erro ao consultar staging.")
+        return
+    await message.answer(body, reply_markup=markup)
+
+
+@reply_kb_router.message(F.text == "⚡ Workflows")
+async def on_reply_workflows(message: Message):
+    from workflow_trigger import render_workflow_list
+    wf_text, wf_markup = await render_workflow_list()
+    await message.answer(wf_text, reply_markup=wf_markup)
+
+
+@reply_kb_router.message(F.text.contains("Settings"))
+async def on_reply_settings(message: Message):
+    from bot.routers.settings import show_subscription_panel
+    await show_subscription_panel(message.chat.id)
+
+
 message_router = Router(name="messages")
 message_router.message.middleware(RoleMiddleware(allowed_roles={"admin"}))
 

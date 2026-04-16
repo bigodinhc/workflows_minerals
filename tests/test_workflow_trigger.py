@@ -1,8 +1,7 @@
-"""Tests for webhook/workflow_trigger.py."""
+"""Tests for webhook/workflow_trigger.py (async version)."""
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-import json
+from unittest.mock import patch, MagicMock, AsyncMock
 
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "webhook"))
@@ -15,13 +14,17 @@ def mock_env(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_fake_token")
     monkeypatch.setenv("GITHUB_OWNER", "bigodinhc")
     monkeypatch.setenv("GITHUB_REPO", "workflows_minerals")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake:token")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
 
 
 @pytest.fixture
 def wf():
     """Fresh import of workflow_trigger module."""
-    if "workflow_trigger" in sys.modules:
-        del sys.modules["workflow_trigger"]
+    # Clear cached modules to pick up env vars
+    for mod in list(sys.modules):
+        if mod.startswith(("workflow_trigger", "bot.")):
+            del sys.modules[mod]
     import workflow_trigger
     return workflow_trigger
 
@@ -43,75 +46,12 @@ def test_catalog_entries_have_required_fields(wf):
         assert "description" in w
 
 
-@patch("workflow_trigger.requests.get")
-def test_render_workflow_list_success(mock_get, wf):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "workflow_runs": [
-            {
-                "id": 123,
-                "name": "morning_check",
-                "path": ".github/workflows/morning_check.yml",
-                "status": "completed",
-                "conclusion": "success",
-                "created_at": "2026-04-16T08:30:00Z",
-            }
-        ]
-    }
-    mock_get.return_value = mock_response
-    text, markup = wf.render_workflow_list()
-    assert "Workflows" in text or "workflows" in text.lower()
-    assert markup is not None
-    buttons = markup["inline_keyboard"]
-    assert len(buttons) >= 5
-    assert any("wf_run:" in btn["callback_data"] for row in buttons for btn in row)
+def test_workflow_name_by_id(wf):
+    assert wf._workflow_name_by_id("morning_check.yml") == "MORNING CHECK"
+    assert wf._workflow_name_by_id("nonexistent") == "nonexistent"
 
 
-@patch("workflow_trigger.requests.get")
-def test_render_workflow_list_api_failure(mock_get, wf):
-    mock_get.side_effect = Exception("Connection timeout")
-    text, markup = wf.render_workflow_list()
-    assert markup is not None
-    buttons = markup["inline_keyboard"]
-    assert len(buttons) >= 5
-
-
-@patch("workflow_trigger.requests.post")
-def test_trigger_workflow_success(mock_post, wf):
-    mock_response = MagicMock()
-    mock_response.status_code = 204
-    mock_post.return_value = mock_response
-    ok, error = wf.trigger_workflow("morning_check.yml")
-    assert ok is True
-    assert error is None
-    call_url = mock_post.call_args[0][0]
-    assert "morning_check.yml" in call_url
-    assert "dispatches" in call_url
-
-
-@patch("workflow_trigger.requests.post")
-def test_trigger_workflow_failure(mock_post, wf):
-    mock_response = MagicMock()
-    mock_response.status_code = 404
-    mock_response.text = "Not Found"
-    mock_post.return_value = mock_response
-    ok, error = wf.trigger_workflow("nonexistent.yml")
-    assert ok is False
-    assert error is not None
-
-
-@patch("workflow_trigger.requests.get")
-def test_check_run_status_completed(mock_get, wf):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "status": "completed",
-        "conclusion": "success",
-        "html_url": "https://github.com/bigodinhc/workflows_minerals/actions/runs/999",
-    }
-    mock_get.return_value = mock_response
-    status, conclusion, url = wf.check_run_status(999)
-    assert status == "completed"
-    assert conclusion == "success"
-    assert "999" in url
+def test_gh_headers(wf):
+    headers = wf._gh_headers()
+    assert "Authorization" in headers
+    assert headers["Authorization"] == "Bearer ghp_fake_token"

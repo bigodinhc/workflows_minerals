@@ -38,6 +38,14 @@ from telegram import (
     TELEGRAM_BOT_TOKEN,
 )
 from status_builder import build_status_message, ALL_WORKFLOWS, _format_status_lines
+from reports_nav import (
+    _reports_show_types,
+    _reports_show_latest,
+    _reports_show_years,
+    _reports_show_months,
+    _reports_show_month_list,
+    handle_report_download,
+)
 
 # Supabase client for report downloads
 _supabase_client = None
@@ -1070,164 +1078,6 @@ def _show_main_menu(chat_id):
     send_telegram_message(chat_id, text, reply_markup=markup)
 
 
-# ── Reports navigation helpers ──
-
-PT_MONTHS = {
-    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
-    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
-    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
-}
-
-def _reports_show_types(chat_id, message_id=None):
-    """Show report type selection (Market Reports / Research Reports)."""
-    text = "📊 *Platts Reports*\n\nEscolha a categoria:"
-    markup = {
-        "inline_keyboard": [
-            [{"text": "📊 Market Reports", "callback_data": "rpt_type:Market Reports"}],
-            [{"text": "📊 Research Reports", "callback_data": "rpt_type:Research Reports"}],
-        ]
-    }
-    if message_id:
-        edit_message(chat_id, message_id, text, reply_markup=markup)
-    else:
-        send_telegram_message(chat_id, text, reply_markup=markup)
-
-
-def _reports_show_latest(chat_id, message_id, report_type):
-    """Show the 10 most recent reports of a given type."""
-    sb = get_supabase()
-    if not sb:
-        edit_message(chat_id, message_id, "⚠️ Supabase não configurado")
-        return
-    try:
-        result = sb.table("platts_reports") \
-            .select("id, report_name, date_key, frequency") \
-            .eq("report_type", report_type) \
-            .order("date_key", desc=True) \
-            .limit(10) \
-            .execute()
-        rows = result.data or []
-    except Exception as exc:
-        logger.error(f"reports latest query error: {exc}")
-        edit_message(chat_id, message_id, "⚠️ Erro ao consultar relatórios")
-        return
-
-    if not rows:
-        keyboard = [[{"text": "⬅ Voltar", "callback_data": "rpt_back:types"}]]
-        edit_message(chat_id, message_id, "Nenhum relatório encontrado.", reply_markup={"inline_keyboard": keyboard})
-        return
-
-    esc = lambda s: str(s).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
-    text = f"📊 *{esc(report_type)}*\n\nÚltimos relatórios:"
-    keyboard = []
-    for r in rows:
-        dk = r["date_key"]
-        label = f"{esc(r['report_name'])} — {dk}"
-        keyboard.append([{"text": label, "callback_data": f"report_dl:{r['id']}"}])
-    keyboard.append([
-        {"text": "📅 Ver por data", "callback_data": f"rpt_years:{report_type}"},
-        {"text": "⬅ Voltar", "callback_data": "rpt_back:types"},
-    ])
-    edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
-
-
-def _reports_show_years(chat_id, message_id, report_type):
-    """Show available years for a report type."""
-    sb = get_supabase()
-    if not sb:
-        edit_message(chat_id, message_id, "⚠️ Supabase não configurado")
-        return
-    try:
-        result = sb.table("platts_reports") \
-            .select("date_key") \
-            .eq("report_type", report_type) \
-            .execute()
-        years = sorted({int(r["date_key"][:4]) for r in (result.data or [])}, reverse=True)
-    except Exception as exc:
-        logger.error(f"reports years query error: {exc}")
-        edit_message(chat_id, message_id, "⚠️ Erro ao consultar anos")
-        return
-
-    esc = lambda s: str(s).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
-    text = f"📊 *{esc(report_type)}*\n\nEscolha o ano:"
-    keyboard = [[{"text": str(y), "callback_data": f"rpt_year:{report_type}:{y}"}] for y in years]
-    keyboard.append([{"text": "⬅ Voltar", "callback_data": f"rpt_type:{report_type}"}])
-    edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
-
-
-def _reports_show_months(chat_id, message_id, report_type, year):
-    """Show available months for a report type + year, with counts."""
-    sb = get_supabase()
-    if not sb:
-        edit_message(chat_id, message_id, "⚠️ Supabase não configurado")
-        return
-    try:
-        result = sb.table("platts_reports") \
-            .select("date_key") \
-            .eq("report_type", report_type) \
-            .gte("date_key", f"{year}-01-01") \
-            .lte("date_key", f"{year}-12-31") \
-            .execute()
-        month_counts = {}
-        for r in (result.data or []):
-            m = int(r["date_key"][5:7])
-            month_counts[m] = month_counts.get(m, 0) + 1
-        months_sorted = sorted(month_counts.items(), reverse=True)
-    except Exception as exc:
-        logger.error(f"reports months query error: {exc}")
-        edit_message(chat_id, message_id, "⚠️ Erro ao consultar meses")
-        return
-
-    esc = lambda s: str(s).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
-    text = f"📊 *{esc(report_type)} — {year}*\n\nEscolha o mês:"
-    keyboard = []
-    for m, cnt in months_sorted:
-        label = f"{PT_MONTHS.get(m, str(m))} ({cnt})"
-        keyboard.append([{"text": label, "callback_data": f"rpt_month:{report_type}:{year}:{m}"}])
-    keyboard.append([{"text": "⬅ Voltar", "callback_data": f"rpt_years:{report_type}"}])
-    edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
-
-
-def _reports_show_month_list(chat_id, message_id, report_type, year, month):
-    """Show all reports for a given type + year + month."""
-    sb = get_supabase()
-    if not sb:
-        edit_message(chat_id, message_id, "⚠️ Supabase não configurado")
-        return
-    try:
-        start = f"{year}-{month:02d}-01"
-        if month == 12:
-            end = f"{year + 1}-01-01"
-        else:
-            end = f"{year}-{month + 1:02d}-01"
-        result = sb.table("platts_reports") \
-            .select("id, report_name, date_key") \
-            .eq("report_type", report_type) \
-            .gte("date_key", start) \
-            .lt("date_key", end) \
-            .order("date_key", desc=True) \
-            .order("report_name") \
-            .execute()
-        rows = result.data or []
-    except Exception as exc:
-        logger.error(f"reports month list query error: {exc}")
-        edit_message(chat_id, message_id, "⚠️ Erro ao consultar relatórios do mês")
-        return
-
-    esc = lambda s: str(s).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
-    month_name = PT_MONTHS.get(month, str(month))
-    text = f"📊 *{esc(report_type)} — {month_name} {year}*"
-    if not rows:
-        text += "\n\nNenhum relatório nesse período."
-    keyboard = []
-    for r in rows:
-        day = r["date_key"][8:10]
-        label = f"{esc(r['report_name'])} — {day}/{month:02d}"
-        keyboard.append([{"text": label, "callback_data": f"report_dl:{r['id']}"}])
-    keyboard.append([{"text": "⬅ Voltar", "callback_data": f"rpt_year:{report_type}:{year}"}])
-    edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
-
-
 def handle_callback(callback_query):
     """Handle button press callbacks."""
     callback_id = callback_query["id"]
@@ -1353,38 +1203,8 @@ def handle_callback(callback_query):
     if callback_data.startswith("report_dl:"):
         parts_dl = callback_data.split(":", 1)
         report_id = parts_dl[1] if len(parts_dl) > 1 else ""
-        sb = get_supabase()
-        if not sb:
-            answer_callback(callback_id, "Supabase não configurado")
-            return jsonify({"ok": True})
-        try:
-            row = sb.table("platts_reports").select("storage_path, report_name").eq("id", report_id).single().execute()
-            if not row.data:
-                answer_callback(callback_id, "Relatório não encontrado")
-                return jsonify({"ok": True})
-            storage_path = row.data["storage_path"]
-            report_name = row.data["report_name"]
-            signed = sb.storage.from_("platts-reports").create_signed_url(storage_path, 3600)
-            if not signed or not signed.get("signedURL"):
-                answer_callback(callback_id, "Erro ao gerar link")
-                return jsonify({"ok": True})
-            pdf_url = signed["signedURL"]
-            pdf_resp = requests.get(pdf_url, timeout=30)
-            pdf_resp.raise_for_status()
-            filename = storage_path.split("/")[-1]
-            # Direct multipart upload (telegram_api sends JSON, can't do files)
-            resp = requests.post(
-                f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendDocument",
-                data={"chat_id": chat_id, "caption": f"📄 {report_name}", "parse_mode": "Markdown"},
-                files={"document": (filename, pdf_resp.content, "application/pdf")},
-                timeout=30,
-            )
-            if not resp.json().get("ok"):
-                logger.warning(f"sendDocument failed: {resp.text[:200]}")
-            answer_callback(callback_id, f"📤 {report_name}")
-        except Exception as exc:
-            logger.error(f"report_dl error: {exc}")
-            answer_callback(callback_id, "Erro ao baixar relatório")
+        ok, msg = handle_report_download(chat_id, callback_id, report_id)
+        answer_callback(callback_id, f"📤 {msg}" if ok else msg)
         return jsonify({"ok": True})
 
     # ---------- Reports navigation ----------

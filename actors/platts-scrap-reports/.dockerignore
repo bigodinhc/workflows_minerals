@@ -3,10 +3,7 @@
 .vscode
 .zed
 
-# crawlee and apify storage folders (root-anchored so src/storage isn't excluded)
-/apify_storage
-/crawlee_storage
-/storage
+# (storage dirs removed — were matching src/storage and breaking the build)
 
 # installed files
 node_modules

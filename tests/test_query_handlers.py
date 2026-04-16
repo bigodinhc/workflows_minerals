@@ -97,12 +97,15 @@ def test_escape_md_helper():
 def test_stats_empty_day(fake_redis):
     from webhook.query_handlers import format_stats
     text = format_stats("2026-04-15")
-    assert "*HOJE · 15/abr*" in text
-    assert "Scraped     0" in text
-    assert "Staging     0" in text
-    assert "Arquivados  0" in text
-    assert "Recusados   0" in text
-    assert "Pipeline    0" in text
+    assert "*📊 HOJE · 15/abr*" in text
+    assert "────" in text
+    assert "🔎 Scraped" in text
+    assert "🗂️ Staging" in text
+    assert "📦 Arquivados" in text
+    assert "❌ Recusados" in text
+    assert "🖋️ No Writer" in text
+    # Legacy label must be gone
+    assert "Pipeline" not in text
 
 
 def test_stats_populated(fake_redis):
@@ -113,10 +116,10 @@ def test_stats_populated(fake_redis):
     fake_redis.set("platts:archive:2026-04-15:x2", json.dumps({"id": "x2"}))
     fake_redis.sadd("platts:pipeline:processed:2026-04-15", "p1")
     text = format_stats("2026-04-15")
-    assert "Scraped     4" in text
-    assert "Staging     1" in text
-    assert "Arquivados  2" in text
-    assert "Pipeline    1" in text
+    assert "🔎 Scraped" in text and "4" in text
+    assert "🗂️ Staging" in text and "1" in text
+    assert "📦 Arquivados" in text and "2" in text
+    assert "🖋️ No Writer" in text and "1" in text
 
 
 def test_rejections_empty(fake_redis):

@@ -10,8 +10,13 @@ const folderCache = new Map(); // path → folderId
 
 function getDrive() {
     if (driveClient) return driveClient;
-    const raw = process.env.GOOGLE_CREDENTIALS_JSON;
+    let raw = process.env.GOOGLE_CREDENTIALS_JSON;
     if (!raw) throw new Error('GOOGLE_CREDENTIALS_JSON env var is required');
+    // Strip wrapping quotes if pasted from a .env file that kept them
+    raw = raw.trim();
+    if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
+        raw = raw.slice(1, -1);
+    }
     const creds = JSON.parse(raw);
     const auth = new google.auth.GoogleAuth({
         credentials: creds,

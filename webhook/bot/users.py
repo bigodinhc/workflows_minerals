@@ -42,13 +42,28 @@ def _user_key(chat_id: int) -> str:
 
 
 def get_user(chat_id: int) -> Optional[dict]:
-    """Return user dict or None."""
+    """Return user dict or None. Auto-creates admin record if missing."""
     try:
         raw = _get_client().get(_user_key(chat_id))
         if raw:
             return json.loads(raw)
     except Exception as exc:
         logger.warning(f"get_user({chat_id}) failed: {exc}")
+        return None
+    # Auto-seed admin record so Settings/subscriptions work
+    if is_admin(chat_id):
+        user = {
+            "chat_id": chat_id,
+            "name": "Admin",
+            "username": "",
+            "role": "admin",
+            "status": "approved",
+            "subscriptions": dict(DEFAULT_SUBSCRIPTIONS),
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_user(user)
+        return user
     return None
 
 

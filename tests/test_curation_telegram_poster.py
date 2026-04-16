@@ -152,3 +152,79 @@ def test_post_for_curation_raises_on_invalid_preview_url(monkeypatch):
             item={"id": "x"},
             preview_base_url="example.com/no-protocol",
         )
+
+
+def test_format_message_uses_rationale_icon_when_type_rationale():
+    from execution.curation.telegram_poster import format_message
+    item = {
+        "id": "r1", "type": "rationale",
+        "title": "Daily Rationale",
+        "fullText": "preview text",
+        "publishDate": "04/15/2026",
+        "source": "rmw_market",
+        "tabName": "Rationale",
+        "author": "",
+    }
+    msg = format_message(item)
+    # Rationale icon on title, not news
+    assert msg.startswith("*📊 Daily Rationale*")
+
+
+def test_format_message_uses_news_icon_for_default_type():
+    from execution.curation.telegram_poster import format_message
+    item = {
+        "id": "n1",
+        "title": "Iron Ore Drops",
+        "fullText": "preview",
+        "publishDate": "04/15/2026",
+        "source": "platts",
+        "tabName": "News",
+        "author": "",
+    }
+    msg = format_message(item)
+    # No `type` field → defaults to news icon
+    assert msg.startswith("*🗞️ Iron Ore Drops*")
+
+
+def test_format_message_single_line_meta_for_non_flash():
+    from execution.curation.telegram_poster import format_message
+    item = {
+        "id": "abc",
+        "title": "X",
+        "fullText": "preview",
+        "publishDate": "14/04 13:46 UTC",
+        "source": "Platts",
+        "tabName": "Iron Ore News",
+        "author": "",
+    }
+    msg = format_message(item)
+    # meta in a single "·"-separated line
+    assert " · " in msg
+    assert "📅" in msg and "📰" in msg and "🔖" in msg
+
+
+def test_build_keyboard_uses_writer_label():
+    from execution.curation.telegram_poster import build_keyboard
+    kb = build_keyboard("abc123", preview_url="https://example.com/preview/abc123")
+    all_buttons = [b for row in kb["inline_keyboard"] for b in row]
+    texts = [b["text"] for b in all_buttons]
+    assert "🖋️ Writer" in texts
+    assert "🤖 3 Agents" not in texts
+
+
+def test_build_keyboard_has_2x2_layout_plus_url_row():
+    from execution.curation.telegram_poster import build_keyboard
+    kb = build_keyboard("abc123", preview_url="https://example.com/preview/abc123")
+    rows = kb["inline_keyboard"]
+    # Layout: row 1 = [Ler completo + Arquivar], row 2 = [Recusar + Writer]
+    # OR: row 1 = [Ler completo alone], row 2 = [Arquivar, Recusar], row 3 = [Writer]
+    # Per spec: 2x2 → [[Ler completo, Arquivar], [Recusar, Writer]]
+    assert len(rows) == 2
+    assert len(rows[0]) == 2
+    assert len(rows[1]) == 2
+    row0_texts = [b["text"] for b in rows[0]]
+    row1_texts = [b["text"] for b in rows[1]]
+    assert "📖 Ler completo" in row0_texts
+    assert "✅ Arquivar" in row0_texts
+    assert "❌ Recusar" in row1_texts
+    assert "🖋️ Writer" in row1_texts

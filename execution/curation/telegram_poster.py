@@ -2,7 +2,7 @@
 
 Each Platts item becomes one Telegram message with:
 - Preview (markdown, ~400 chars)
-- Inline keyboard: [📖 Ler completo] [✅ Arquivar] [❌ Recusar] [🤖 3 Agents]
+- Inline keyboard (2×2): [📖 Ler completo] [✅ Arquivar] / [❌ Recusar] [🖋️ Writer]
 """
 from execution.integrations.telegram_client import TelegramClient
 
@@ -36,8 +36,34 @@ def _is_flash(item: dict) -> bool:
     return (item.get("source") or "").startswith("allInsights.flash")
 
 
+_ICON_BY_TYPE = {"news": "🗞️", "rationale": "📊"}
+
+
+def _type_icon(item: dict) -> str:
+    """Return type icon: 🗞️ for news (default), 📊 for rationale."""
+    return _ICON_BY_TYPE.get(item.get("type", "news"), "🗞️")
+
+
 def format_message(item: dict) -> str:
-    """Render a Telegram Markdown message for an item."""
+    """Render a Telegram Markdown message for an item.
+
+    Non-flash layout (v1.1 polished):
+        *<icon> Title*
+
+        <preview>
+
+        📅 <date> · 📰 <source> · 🔖 <tab>
+        🆔 `<id>`
+
+    Flash layout (preserved):
+        *🔴 FLASH* <date>
+        ━━━━━━━━━━━━━━━━━━━━
+        *Title*
+
+        <preview>
+
+        ━━━━━━━━━━━━━━━━━━━━
+    """
     title = item.get("title", "")
     full_text = item.get("fullText", "")
     publish_date = item.get("publishDate") or item.get("date") or ""
@@ -52,31 +78,42 @@ def format_message(item: dict) -> str:
         header = f"*🔴 FLASH* {_escape_md(publish_date)}\n━━━━━━━━━━━━━━━━━━━━\n"
         title_line = f"*{_escape_md(title)}*\n\n" if title and title != full_text else ""
         footer_meta = "━━━━━━━━━━━━━━━━━━━━"
-    else:
-        header = ""
-        title_line = f"*{_escape_md(title)}*\n\n"
-        meta_lines = [f"📰 {_escape_md(source)}"]
-        if tab_name:
-            meta_lines.append(f"🔖 {_escape_md(tab_name)}")
-        if author:
-            meta_lines.append(f"✍️ {_escape_md(author)}")
-        if publish_date:
-            meta_lines.append(f"📅 {_escape_md(publish_date)}")
-        meta_lines.append(f"🆔 `{_escape_md(item_id)}`")
-        footer_meta = "━━━━━━━━━━━━━━━━━━━━\n" + "\n".join(meta_lines)
+        return f"{header}{title_line}{preview}\n\n{footer_meta}"
 
-    return f"{header}{title_line}{preview}\n\n{footer_meta}"
+    # Non-flash: compact layout with type icon
+    icon = _type_icon(item)
+    title_line = f"*{icon} {_escape_md(title)}*" if title else f"*{icon} (sem título)*"
+
+    meta_parts = []
+    if publish_date:
+        meta_parts.append(f"📅 {_escape_md(publish_date)}")
+    if source:
+        meta_parts.append(f"📰 {_escape_md(source)}")
+    if tab_name:
+        meta_parts.append(f"🔖 {_escape_md(tab_name)}")
+    if author:
+        meta_parts.append(f"✍️ {_escape_md(author)}")
+    meta_line = " · ".join(meta_parts) if meta_parts else ""
+
+    body_lines = [title_line, "", preview]
+    if meta_line:
+        body_lines.append("")
+        body_lines.append(meta_line)
+    body_lines.append(f"🆔 `{_escape_md(item_id)}`")
+    return "\n".join(body_lines)
 
 
 def build_keyboard(item_id: str, preview_url: str) -> dict:
-    """Build Telegram inline keyboard: URL button + 3 callback buttons."""
+    """Build Telegram inline keyboard: 2×2 layout with URL + 3 callback buttons."""
     return {
         "inline_keyboard": [
-            [{"text": "📖 Ler completo", "url": preview_url}],
             [
+                {"text": "📖 Ler completo", "url": preview_url},
                 {"text": "✅ Arquivar", "callback_data": f"curate_archive:{item_id}"},
+            ],
+            [
                 {"text": "❌ Recusar", "callback_data": f"curate_reject:{item_id}"},
-                {"text": "🤖 3 Agents", "callback_data": f"curate_pipeline:{item_id}"},
+                {"text": "🖋️ Writer", "callback_data": f"curate_pipeline:{item_id}"},
             ],
         ]
     }

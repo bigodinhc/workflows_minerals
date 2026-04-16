@@ -33,3 +33,34 @@ def test_writer_has_tabular_data_rule():
     from execution.core.prompts.writer import WRITER_SYSTEM
     lower = WRITER_SYSTEM.lower()
     assert "tabela" in lower or "tabular" in lower
+
+
+def test_critique_importable():
+    from execution.core.prompts.critique import CRITIQUE_SYSTEM
+    assert isinstance(CRITIQUE_SYSTEM, str)
+    assert len(CRITIQUE_SYSTEM) > 100
+
+
+def test_critique_is_concise():
+    """v2: Critique should be under 2000 chars (was ~5000 in v1)."""
+    from execution.core.prompts.critique import CRITIQUE_SYSTEM
+    assert len(CRITIQUE_SYSTEM) < 2000
+
+
+def test_critique_has_no_praise_section():
+    """v2: No PONTOS DE EXCELÊNCIA — critique only corrects."""
+    from execution.core.prompts.critique import CRITIQUE_SYSTEM
+    assert "EXCELÊNCIA" not in CRITIQUE_SYSTEM
+    assert "OTIMIZAÇÕES OPCIONAIS" not in CRITIQUE_SYSTEM
+
+
+def test_critique_checks_tabular_data():
+    from execution.core.prompts.critique import CRITIQUE_SYSTEM
+    lower = CRITIQUE_SYSTEM.lower()
+    assert "tabela" in lower or "tabular" in lower
+
+
+def test_critique_checks_trader_voice():
+    from execution.core.prompts.critique import CRITIQUE_SYSTEM
+    lower = CRITIQUE_SYSTEM.lower()
+    assert "trader" in lower or "robótic" in lower

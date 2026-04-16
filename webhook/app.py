@@ -1493,6 +1493,24 @@ def handle_callback(callback_query):
         answer_callback(callback_id, "")
         return jsonify({"ok": True})
 
+    if callback_data.startswith("rpt_back:"):
+        rest = callback_data[len("rpt_back:"):]
+        message_id = callback_query["message"]["message_id"]
+        if rest == "types":
+            _reports_show_types(chat_id, message_id=message_id)
+        elif rest.startswith("type:"):
+            report_type = rest[len("type:"):]
+            _reports_show_latest(chat_id, message_id, report_type)
+        elif rest.startswith("years:"):
+            report_type = rest[len("years:"):]
+            _reports_show_years(chat_id, message_id, report_type)
+        elif rest.startswith("year:"):
+            parts_back = rest[len("year:"):].rsplit(":", 1)
+            if len(parts_back) == 2:
+                _reports_show_months(chat_id, message_id, parts_back[0], int(parts_back[1]))
+        answer_callback(callback_id, "")
+        return jsonify({"ok": True})
+
     parts = callback_data.split(":", 1)
     if len(parts) != 2:
         answer_callback(callback_id, "Erro: dados inválidos")

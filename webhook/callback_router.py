@@ -72,6 +72,12 @@ def handle_callback(callback_query):
 
     logger.info(f"Callback: {callback_data} from chat {chat_id}")
 
+    # Workflow trigger callbacks
+    if callback_data.startswith("wf_") or callback_data == "wf_list":
+        from workflow_trigger import handle_wf_callback
+        message_id = callback_query["message"]["message_id"]
+        return handle_wf_callback(callback_data, chat_id, message_id, callback_id)
+
     # Contact admin callbacks
     if callback_data == "nop":
         answer_callback(callback_id, "")

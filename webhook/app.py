@@ -640,6 +640,14 @@ def telegram_webhook():
             _reports_show_types(chat_id)
             return jsonify({"ok": True})
 
+        if text == "/workflows":
+            if not contact_admin.is_authorized(chat_id):
+                return jsonify({"ok": True})
+            from workflow_trigger import render_workflow_list
+            wf_text, wf_markup = render_workflow_list()
+            send_telegram_message(chat_id, wf_text, reply_markup=wf_markup)
+            return jsonify({"ok": True})
+
         if text == "/s":
             if not contact_admin.is_authorized(chat_id):
                 return jsonify({"ok": True})
@@ -826,6 +834,9 @@ def _show_main_menu(chat_id):
             ],
             [
                 {"text": "➕ Add Contato", "callback_data": "menu:add"},
+            ],
+            [
+                {"text": "⚡ Workflows", "callback_data": "wf_list"},
                 {"text": "❓ Help", "callback_data": "menu:help"},
             ],
         ]
@@ -857,6 +868,7 @@ def register_commands():
 
     commands = [
         {"command": "s", "description": "Menu principal com todos os atalhos"},
+        {"command": "workflows", "description": "Disparar workflows (GitHub Actions)"},
         {"command": "reports", "description": "Consultar e baixar relatórios Platts (PDF)"},
         {"command": "help", "description": "Lista todos os comandos"},
         {"command": "queue", "description": "Items aguardando curadoria"},

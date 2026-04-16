@@ -103,6 +103,8 @@ def process(rationale_items: List[dict], today_br: str, logger: WorkflowLogger =
                     "message": draft_text,
                     "uazapi_token": os.getenv("UAZAPI_TOKEN", ""),
                     "uazapi_url": os.getenv("UAZAPI_URL", "https://mineralstrading.uazapi.com"),
+                    "workflow_type": "rationale_news",
+                    "direct_delivery": False,
                 },
                 timeout=10,
             )

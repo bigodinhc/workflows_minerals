@@ -33,7 +33,7 @@ export async function uploadPdf(pdfBuffer, { storagePath, metadata }) {
         .from(BUCKET)
         .upload(storagePath, pdfBuffer, {
             contentType: 'application/pdf',
-            upsert: false,
+            upsert: true,
         });
     if (storageError) {
         throw new Error(`Storage upload failed: ${storageError.message}`);

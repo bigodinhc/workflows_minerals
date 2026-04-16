@@ -1,7 +1,11 @@
-"""Dispatches rationale items through RationaleAgent + existing approval flow.
+"""Dispatches rationale items to the rationale AI pipeline.
 
-Replicates the post-scrape logic from the deprecated rationale_ingestion.py,
-stripped of its Apify invocation (caller already has the items).
+TODO (v1.1+): Este módulo ficou ÓRFÃO após Bot Navigation v1.1 —
+o router não o chama mais automaticamente (rationale agora passa
+pela curadoria manual como qualquer notícia). Mantemos o código aqui
+porque pode ser útil como utilitário chamado manualmente via script
+ou como base pra uma fase futura de prompts dedicados de rationale.
+Revisitar pra possível remoção quando essa decisão for tomada.
 """
 import json
 import os

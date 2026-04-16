@@ -1026,6 +1026,12 @@ def telegram_webhook():
             send_telegram_message(chat_id, body, reply_markup=markup)
             return jsonify({"ok": True})
 
+        if text == "/reports":
+            if not contact_admin.is_authorized(chat_id):
+                return jsonify({"ok": True})
+            _reports_show_types(chat_id)
+            return jsonify({"ok": True})
+
         return jsonify({"ok": True})  # unknown command
     
     # ── Check if user is in admin add flow ──
@@ -1160,6 +1166,29 @@ def _reprocess_item(chat_id, item_id):
         args=(chat_id, raw_text, progress_msg_id, item_id),
         daemon=True,
     ).start()
+
+
+# ── Reports navigation helpers ──
+
+PT_MONTHS = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
+    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
+    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
+}
+
+def _reports_show_types(chat_id, message_id=None):
+    """Show report type selection (Market Reports / Research Reports)."""
+    text = "📊 *Platts Reports*\n\nEscolha a categoria:"
+    markup = {
+        "inline_keyboard": [
+            [{"text": "📊 Market Reports", "callback_data": "rpt_type:Market Reports"}],
+            [{"text": "📊 Research Reports", "callback_data": "rpt_type:Research Reports"}],
+        ]
+    }
+    if message_id:
+        edit_message(chat_id, message_id, text, reply_markup=markup)
+    else:
+        send_telegram_message(chat_id, text, reply_markup=markup)
 
 
 def handle_callback(callback_query):

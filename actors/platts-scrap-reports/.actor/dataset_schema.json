@@ -1,12 +1,102 @@
 {
     "actorSpecification": 1,
     "fields": {
-        "type": { "type": "string", "description": "success | partial | error" },
-        "reportTypes": { "type": "array" },
-        "downloaded": { "type": "array", "description": "[{slug, dateKey, drivePath, driveFileId}]" },
-        "skipped": { "type": "array", "description": "[{slug, dateKey, reason}]" },
-        "errors": { "type": "array", "description": "[{stage, reportName, message}]" },
-        "would_download": { "type": "array", "description": "Populated only when dryRun=true" }
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "description": "Run outcome.",
+                "enum": ["success", "partial", "error"],
+                "nullable": true,
+                "example": "success"
+            },
+            "reportTypes": {
+                "type": "array",
+                "description": "Report categories scraped this run.",
+                "items": { "type": "string" },
+                "nullable": true,
+                "example": ["Market Reports", "Research Reports"]
+            },
+            "downloaded": {
+                "type": "array",
+                "description": "PDFs downloaded + uploaded to Drive this run.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "slug": { "type": "string", "nullable": true, "example": "sbb-steel-markets-daily" },
+                        "dateKey": { "type": "string", "nullable": true, "example": "2026-04-15" },
+                        "drivePath": { "type": "string", "nullable": true, "example": "Market Reports/2026/04/2026-04-15_sbb-steel-markets-daily.pdf" },
+                        "driveFileId": { "type": "string", "nullable": true, "example": "1abc...XYZ" }
+                    },
+                    "required": [],
+                    "additionalProperties": true
+                },
+                "nullable": true,
+                "example": []
+            },
+            "skipped": {
+                "type": "array",
+                "description": "Rows skipped due to dedup or filter.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "slug": { "type": "string", "nullable": true, "example": "sbb-steel-markets-daily" },
+                        "dateKey": { "type": "string", "nullable": true, "example": "2026-04-15" },
+                        "reason": { "type": "string", "nullable": true, "example": "already-seen" }
+                    },
+                    "required": [],
+                    "additionalProperties": true
+                },
+                "nullable": true,
+                "example": []
+            },
+            "errors": {
+                "type": "array",
+                "description": "Per-stage errors that didn't abort the whole run.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "stage": { "type": "string", "nullable": true, "example": "download" },
+                        "reportName": { "type": "string", "nullable": true, "example": "World Steel Review" },
+                        "message": { "type": "string", "nullable": true, "example": "timeout after 60s" },
+                        "detail": { "type": "string", "nullable": true, "example": "" }
+                    },
+                    "required": [],
+                    "additionalProperties": true
+                },
+                "nullable": true,
+                "example": []
+            },
+            "would_download": {
+                "type": "array",
+                "description": "Populated only when dryRun=true — rows that would have been downloaded.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "slug": { "type": "string", "nullable": true, "example": "sbb-steel-markets-daily" },
+                        "dateKey": { "type": "string", "nullable": true, "example": "2026-04-15" },
+                        "drivePath": { "type": "string", "nullable": true, "example": "Market Reports/2026/04/2026-04-15_sbb-steel-markets-daily.pdf" },
+                        "sizeBytes": { "type": "number", "nullable": true, "example": 1234567 }
+                    },
+                    "required": [],
+                    "additionalProperties": true
+                },
+                "nullable": true,
+                "example": []
+            }
+        },
+        "required": [],
+        "additionalProperties": true
     },
-    "views": {}
+    "views": {
+        "summary": {
+            "title": "Run summary",
+            "description": "Counts of downloaded, skipped, and errored PDFs.",
+            "transformation": {
+                "fields": ["type", "downloaded", "skipped", "errors", "would_download"]
+            },
+            "display": { "component": "table" }
+        }
+    }
 }

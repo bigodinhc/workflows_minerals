@@ -1757,6 +1757,7 @@ def register_commands():
         return jsonify({"ok": False, "error": "TELEGRAM_BOT_TOKEN missing"}), 500
 
     commands = [
+        {"command": "reports", "description": "Consultar e baixar relatórios Platts (PDF)"},
         {"command": "help", "description": "Lista todos os comandos"},
         {"command": "queue", "description": "Items aguardando curadoria"},
         {"command": "history", "description": "Ultimos 10 arquivados"},

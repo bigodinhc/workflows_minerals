@@ -1461,7 +1461,7 @@ def _reprocess_item(chat_id, item_id):
     )
     progress = send_telegram_message(
         chat_id,
-        f"🤖 Reprocessando item `{item_id}` nos 3 agents...",
+        f"🖋️ *Reprocessando via Writer*\n🆔 `{item_id}`",
     )
     progress_msg_id = progress.get("result", {}).get("message_id") if progress else None
     threading.Thread(
@@ -1688,8 +1688,8 @@ def handle_callback(callback_query):
         finalize_card(
             chat_id,
             callback_query,
-            f"❌ *Recusado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n\n"
-            f"Por quê? (opcional, responda ou `pular`)",
+            f"❌ *Recusado*\n🕒 {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n\n"
+            f"💭 Por quê? (opcional — responda ou `pular`)",
         )
         return jsonify({"ok": True})
 
@@ -1714,7 +1714,7 @@ def handle_callback(callback_query):
         finalize_card(
             chat_id,
             callback_query,
-            f"✅ *Arquivado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n🆔 `{item_id}`",
+            f"✅ *Arquivado*\n🕒 {datetime.now(timezone.utc).strftime('%H:%M')} UTC · 🆔 `{item_id}`",
         )
         return jsonify({"ok": True})
 
@@ -1746,9 +1746,8 @@ def handle_callback(callback_query):
         finalize_card(
             chat_id,
             callback_query,
-            f"❌ *Recusado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n"
-            f"🆔 `{item_id}`\n\n"
-            f"Por quê? (opcional, responda ou `pular`)",
+            f"❌ *Recusado*\n🕒 {datetime.now(timezone.utc).strftime('%H:%M')} UTC · 🆔 `{item_id}`\n\n"
+            f"💭 Por quê? (opcional — responda ou `pular`)",
         )
         return jsonify({"ok": True})
 
@@ -1778,14 +1777,14 @@ def handle_callback(callback_query):
             f"Source: {item.get('source','')}\n\n"
             f"{item.get('fullText','')}"
         )
-        answer_callback(callback_id, "🤖 Processando nos 3 agents...")
-        progress = send_telegram_message(chat_id, f"🤖 Processando item `{item_id}` nos 3 agents...")
+        answer_callback(callback_id, "🖋️ Enviando para o Writer...")
+        progress = send_telegram_message(chat_id, f"🖋️ *Enviando para o Writer*\n🆔 `{item_id}`")
         progress_msg_id = progress.get("result", {}).get("message_id") if progress else None
         # Finalize the original card BEFORE starting the thread so user sees confirmation immediately
         finalize_card(
             chat_id,
             callback_query,
-            f"🤖 *Enviado aos 3 agents* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n🆔 `{item_id}`",
+            f"🖋️ *Enviado para o Writer*\n🕒 {datetime.now(timezone.utc).strftime('%H:%M')} UTC · 🆔 `{item_id}`",
         )
         threading.Thread(
             target=_run_pipeline_and_archive,

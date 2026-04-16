@@ -7,10 +7,9 @@ import { capturePdf } from './download/capturePdf.js';
 import { applyExcludeFilter } from './filters/applyFilters.js';
 import { extractRows } from './grid/extractRows.js';
 import { navigateGrid } from './grid/navigateGrid.js';
-import { buildCaption,sendPdfDocument } from './notify/telegramSend.js';
-import { uploadPdf } from './persist/gdriveUpload.js';
-import { closeRedis,isSeen, markSeen } from './persist/redisDedup.js';
-import { datePartsFromIso,parsePublishedDate } from './util/dates.js';
+import { sendReportsSummary } from './notify/telegramSummary.js';
+import { isAlreadyStored, setTelegramMessageId, uploadPdf } from './persist/supabaseUpload.js';
+import { datePartsFromIso, parsePublishedDate } from './util/dates.js';
 import { slugify } from './util/slug.js';
 
 await Actor.init();
@@ -24,18 +23,19 @@ const {
     maxReportsPerType = 50,
     dryRun = false,
     forceRedownload = false,
-    gdriveFolderId,
     telegramChatId,
 } = input;
 
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = telegramChatId || process.env.TELEGRAM_CHAT_ID;
+const SB_URL = process.env.SUPABASE_URL;
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!username || !password) {
     await Actor.fail('username and password are required');
 }
-if (!gdriveFolderId && !dryRun) {
-    await Actor.fail('gdriveFolderId is required (set in input or .env)');
+if (!dryRun && !SB_URL) {
+    await Actor.fail('SUPABASE_URL is required when dryRun=false');
 }
 if (!dryRun && (!TG_TOKEN || !TG_CHAT)) {
     await Actor.fail('TELEGRAM_BOT_TOKEN and chat id required when dryRun=false');
@@ -73,6 +73,9 @@ async function run() {
         return;
     }
 
+    // Accumulate downloaded reports across all reportTypes for the summary message
+    const allDownloaded = [];
+
     for (const reportType of reportTypes) {
         try {
             await navigateGrid(page, reportType);
@@ -85,12 +88,10 @@ async function run() {
 
         const rows = await extractRows(page);
         const filtered = applyExcludeFilter(rows, excludeReportNames).slice(0, maxReportsPerType);
-        log.info(`📊 ${reportType}: ${rows.length} total, ${filtered.length} after filter (cap ${maxReportsPerType})`);
+        log.info(`${reportType}: ${rows.length} total, ${filtered.length} after filter (cap ${maxReportsPerType})`);
 
         for (const row of filtered) {
             const slug = slugify(row.reportName);
-            // Use coverDate (named months like "09 Apr 2026") instead of publishedDate
-            // (numeric "04/09/2026" whose DD/MM vs MM/DD is locale-dependent and ambiguous)
             const dateKey = parsePublishedDate(row.coverDate);
             if (!slug || !dateKey) {
                 summary.errors.push({ stage: 'parse-row', reportName: row.reportName, message: 'missing slug or dateKey' });
@@ -98,8 +99,9 @@ async function run() {
                 continue;
             }
 
-            if (!forceRedownload && (await isSeen(slug, dateKey))) {
-                summary.skipped.push({ slug, dateKey, reason: 'already-seen' });
+            // Dedup via Supabase (or skip in dryRun since we don't connect)
+            if (!dryRun && !forceRedownload && (await isAlreadyStored(slug, dateKey))) {
+                summary.skipped.push({ slug, dateKey, reason: 'already-exists' });
                 continue;
             }
 
@@ -114,32 +116,60 @@ async function run() {
 
             const parts = datePartsFromIso(dateKey);
             const filename = `${dateKey}_${slug}.pdf`;
-            const drivePath = [reportType, parts.year, parts.month];
+            const reportTypeSlug = slugify(reportType);
+            const storagePath = `${reportTypeSlug}/${parts.year}/${parts.month}/${filename}`;
 
             if (dryRun) {
-                summary.would_download.push({ slug, dateKey, drivePath: `${drivePath.join('/')}/${filename}`, sizeBytes: pdfBuffer.length });
+                summary.would_download.push({ slug, dateKey, storagePath, sizeBytes: pdfBuffer.length });
                 continue;
             }
 
-            let driveFileId;
+            let uploadResult;
             try {
-                const upload = await uploadPdf(pdfBuffer, { rootFolderId: gdriveFolderId, pathParts: drivePath, filename });
-                driveFileId = upload.fileId;
+                uploadResult = await uploadPdf(pdfBuffer, {
+                    storagePath,
+                    metadata: {
+                        slug,
+                        dateKey,
+                        reportName: row.reportName,
+                        reportType,
+                        frequency: row.frequency,
+                        coverDate: row.coverDate,
+                        publishedDate: row.publishedDate,
+                    },
+                });
             } catch (e) {
-                log.warning(`Drive upload failed for ${filename}: ${e.message}`);
-                summary.errors.push({ stage: 'drive-upload', reportName: row.reportName, message: e.message });
+                log.warning(`Supabase upload failed for ${filename}: ${e.message}`);
+                summary.errors.push({ stage: 'supabase-upload', reportName: row.reportName, message: e.message });
                 summary.type = 'partial';
                 continue;
             }
 
-            try {
-                await sendPdfDocument(TG_TOKEN, TG_CHAT, pdfBuffer, filename, buildCaption(row));
-            } catch (e) {
-                log.warning(`Telegram send failed for ${filename}: ${e.message}`);
-                summary.errors.push({ stage: 'telegram', reportName: row.reportName, message: e.message });
+            allDownloaded.push({
+                id: uploadResult.id,
+                slug,
+                dateKey,
+                storagePath,
+                reportName: row.reportName,
+                frequency: row.frequency,
+            });
+            summary.downloaded.push({ slug, dateKey, storagePath, supabaseId: uploadResult.id });
+        }
+    }
+
+    // Send 1 Telegram summary with download buttons (after all report types processed)
+    if (!dryRun && allDownloaded.length > 0) {
+        const todayLabel = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        try {
+            const messageId = await sendReportsSummary(TG_TOKEN, TG_CHAT, todayLabel, allDownloaded);
+            // Update telegram_message_id on all downloaded reports
+            for (const report of allDownloaded) {
+                await setTelegramMessageId(report.id, messageId);
             }
-            await markSeen(slug, dateKey);
-            summary.downloaded.push({ slug, dateKey, drivePath: `${drivePath.join('/')}/${filename}`, driveFileId });
+        } catch (e) {
+            log.warning(`Telegram summary failed: ${e.message}`);
+            summary.errors.push({ stage: 'telegram-summary', message: e.message });
+            summary.type = 'partial';
         }
     }
 
@@ -149,7 +179,6 @@ async function run() {
 try {
     await run();
 } finally {
-    await closeRedis();
     await ctx.close();
     await browser.close();
     await Actor.exit();

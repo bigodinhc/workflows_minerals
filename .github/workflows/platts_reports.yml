@@ -38,8 +38,8 @@ jobs:
           APIFY_PLATTS_REPORTS_ACTOR_ID: bigodeio05/platts-scrap-reports
           PLATTS_USERNAME: ${{ secrets.PLATTS_USERNAME }}
           PLATTS_PASSWORD: ${{ secrets.PLATTS_PASSWORD }}
-          GDRIVE_PLATTS_REPORTS_FOLDER_ID: ${{ secrets.GDRIVE_PLATTS_REPORTS_FOLDER_ID }}
-          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REDIS_URL: ${{ secrets.REDIS_URL }}

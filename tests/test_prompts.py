@@ -149,6 +149,18 @@ def test_curator_has_no_silencio_profissional():
     assert "SILÊNCIO PROFISSIONAL" not in CURATOR_SYSTEM
 
 
+def test_curator_has_hard_ceiling():
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert "TETO DURO" in CURATOR_SYSTEM
+    assert "25 linhas" in CURATOR_SYSTEM
+
+
+def test_curator_removes_source_footer():
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    lower = CURATOR_SYSTEM.lower()
+    assert "platts is part of" in lower
+
+
 def test_adjuster_importable():
     from execution.core.prompts.adjuster import ADJUSTER_SYSTEM
     assert isinstance(ADJUSTER_SYSTEM, str)

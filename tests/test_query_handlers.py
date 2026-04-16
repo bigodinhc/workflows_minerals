@@ -117,7 +117,7 @@ def test_stats_empty_day(fake_redis):
 
 def test_stats_populated(fake_redis):
     from webhook.query_handlers import format_stats
-    fake_redis.sadd("platts:seen:2026-04-15", "a", "b", "c", "d")
+    fake_redis.sadd("platts:scraped:2026-04-15", "a", "b", "c", "d")
     fake_redis.set("platts:staging:s1", json.dumps({"id": "s1"}))
     fake_redis.set("platts:archive:2026-04-15:x1", json.dumps({"id": "x1"}))
     fake_redis.set("platts:archive:2026-04-15:x2", json.dumps({"id": "x2"}))

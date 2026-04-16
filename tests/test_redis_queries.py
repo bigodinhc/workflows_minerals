@@ -175,8 +175,8 @@ def test_stats_for_date_populated(fake_redis):
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     other_day = "2020-01-01"
-    # scraped: 3 in seen set
-    fake_redis.sadd(f"platts:seen:{today}", "a", "b", "c")
+    # scraped: 3 in scraped set (v2 key)
+    fake_redis.sadd(f"platts:scraped:{today}", "a", "b", "c")
     # staging: 2
     fake_redis.set("platts:staging:s1", json.dumps({"id": "s1"}))
     fake_redis.set("platts:staging:s2", json.dumps({"id": "s2"}))

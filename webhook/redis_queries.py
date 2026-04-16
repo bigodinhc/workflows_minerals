@@ -7,7 +7,7 @@ curation to preserve contact_admin.py-style modularity.
 Keyspaces used:
 - platts:staging:<id>               (read)
 - platts:archive:<date>:<id>        (read)
-- platts:seen:<date>                (read, for stats)
+- platts:scraped:<date>             (read, for stats — daily telemetry set)
 - platts:pipeline:processed:<date>  (read + write, new)
 - webhook:feedback:<ts>-<id>        (read + write, new Hash)
 - webhook:feedback:index            (read + write, new Sorted Set)
@@ -201,7 +201,7 @@ def stats_for_date(date_iso: str) -> dict:
     feedback actions (e.g., 'adjust', 'approve') do not inflate the metric.
     """
     client = _get_client()
-    scraped = client.scard(f"platts:seen:{date_iso}")
+    scraped = client.scard(f"platts:scraped:{date_iso}")
     staging = sum(1 for _ in client.scan_iter(match="platts:staging:*", count=200))
     archived = sum(1 for _ in client.scan_iter(match=f"platts:archive:{date_iso}:*", count=200))
     pipeline = client.scard(f"platts:pipeline:processed:{date_iso}")

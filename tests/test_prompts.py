@@ -101,3 +101,31 @@ def test_curator_has_no_silencio_profissional():
     """v2: Removed redundant section."""
     from execution.core.prompts.curator import CURATOR_SYSTEM
     assert "SILÊNCIO PROFISSIONAL" not in CURATOR_SYSTEM
+
+
+def test_adjuster_importable():
+    from execution.core.prompts.adjuster import ADJUSTER_SYSTEM
+    assert isinstance(ADJUSTER_SYSTEM, str)
+    assert len(ADJUSTER_SYSTEM) > 50
+
+
+def test_adjuster_preserves_tables():
+    from execution.core.prompts.adjuster import ADJUSTER_SYSTEM
+    lower = ADJUSTER_SYSTEM.lower()
+    assert "tabela" in lower
+
+
+def test_adjuster_preserves_header():
+    from execution.core.prompts.adjuster import ADJUSTER_SYSTEM
+    assert "📊" in ADJUSTER_SYSTEM
+    assert "MINERALS TRADING" in ADJUSTER_SYSTEM
+
+
+def test_all_prompts_importable_from_package():
+    """Verify __init__.py re-exports all 4 constants."""
+    from execution.core.prompts import (
+        WRITER_SYSTEM, CRITIQUE_SYSTEM, CURATOR_SYSTEM, ADJUSTER_SYSTEM
+    )
+    assert all(isinstance(p, str) and len(p) > 50 for p in [
+        WRITER_SYSTEM, CRITIQUE_SYSTEM, CURATOR_SYSTEM, ADJUSTER_SYSTEM
+    ])

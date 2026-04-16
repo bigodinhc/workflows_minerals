@@ -8,8 +8,8 @@ import { applyExcludeFilter } from './filters/applyFilters.js';
 import { extractRows } from './grid/extractRows.js';
 import { navigateGrid } from './grid/navigateGrid.js';
 import { buildCaption,sendPdfDocument } from './notify/telegramSend.js';
-import { uploadPdf } from './storage/gdriveUpload.js';
-import { closeRedis,isSeen, markSeen } from './storage/redisDedup.js';
+import { uploadPdf } from './persist/gdriveUpload.js';
+import { closeRedis,isSeen, markSeen } from './persist/redisDedup.js';
 import { datePartsFromIso,parsePublishedDate } from './util/dates.js';
 import { slugify } from './util/slug.js';
 

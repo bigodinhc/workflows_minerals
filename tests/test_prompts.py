@@ -64,3 +64,40 @@ def test_critique_checks_trader_voice():
     from execution.core.prompts.critique import CRITIQUE_SYSTEM
     lower = CRITIQUE_SYSTEM.lower()
     assert "trader" in lower or "robótic" in lower
+
+
+def test_curator_importable():
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert isinstance(CURATOR_SYSTEM, str)
+    assert len(CURATOR_SYSTEM) > 100
+
+
+def test_curator_has_header_rules():
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert "📊" in CURATOR_SYSTEM
+    assert "MINERALS TRADING" in CURATOR_SYSTEM
+    assert "─────────────────" in CURATOR_SYSTEM
+
+
+def test_curator_has_whatsapp_format_rules():
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert "*texto*" in CURATOR_SYSTEM or "*negrito*" in CURATOR_SYSTEM
+    assert "###" in CURATOR_SYSTEM  # in PROIBIDO section
+
+
+def test_curator_has_tabular_data_rule():
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    lower = CURATOR_SYSTEM.lower()
+    assert "tabela" in lower
+    assert "prosa" in lower
+
+
+def test_curator_has_few_shot_examples():
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert "EXEMPLO" in CURATOR_SYSTEM
+
+
+def test_curator_has_no_silencio_profissional():
+    """v2: Removed redundant section."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert "SILÊNCIO PROFISSIONAL" not in CURATOR_SYSTEM

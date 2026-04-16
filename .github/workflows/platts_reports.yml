@@ -2,8 +2,8 @@ name: "Platts Reports (PDF Downloader)"
 
 on:
   schedule:
-    # 13:00 UTC = 10:00 BRT, daily including weekends
-    - cron: '0 13 * * *'
+    # 23:00 UTC = 20:00 BRT, daily including weekends
+    - cron: '0 23 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

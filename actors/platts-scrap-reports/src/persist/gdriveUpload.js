@@ -6,27 +6,52 @@ import { google } from 'googleapis';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 let driveClient = null;
-const folderCache = new Map(); // path → folderId
+const folderCache = new Map();
 
+/**
+ * Build a Google Drive client. Supports two auth modes:
+ *
+ *   1. OAuth2 (personal Drive) — set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET,
+ *      GOOGLE_OAUTH_REFRESH_TOKEN. Files are owned by the authorizing user.
+ *
+ *   2. Service Account (Shared Drive / Workspace) — set GOOGLE_CREDENTIALS_JSON.
+ *      Only works with Shared Drives (service accounts have 0 quota on personal Drive).
+ */
 function getDrive() {
     if (driveClient) return driveClient;
-    let raw = process.env.GOOGLE_CREDENTIALS_JSON;
-    if (!raw) throw new Error('GOOGLE_CREDENTIALS_JSON env var is required');
-    log.info(`[DEBUG] GOOGLE_CREDENTIALS_JSON length=${raw.length}, first30=${raw.substring(0, 30)}`);
-    // Strip wrapping quotes if pasted from a .env file that kept them
-    raw = raw.trim();
-    if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
-        raw = raw.slice(1, -1);
-        log.info(`[DEBUG] Stripped wrapping quotes, now starts with: ${raw.substring(0, 20)}`);
+
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+
+    if (clientId && clientSecret && refreshToken) {
+        log.info('Drive auth: OAuth2 (personal account)');
+        const oauth2 = new google.auth.OAuth2(clientId, clientSecret);
+        oauth2.setCredentials({ refresh_token: refreshToken });
+        driveClient = google.drive({ version: 'v3', auth: oauth2 });
+        return driveClient;
     }
-    const creds = JSON.parse(raw);
-    log.info(`[DEBUG] Parsed creds OK, type=${creds.type}, email=${creds.client_email}`);
-    const auth = new google.auth.GoogleAuth({
-        credentials: creds,
-        scopes: ['https://www.googleapis.com/auth/drive'],
-    });
-    driveClient = google.drive({ version: 'v3', auth });
-    return driveClient;
+
+    let raw = process.env.GOOGLE_CREDENTIALS_JSON;
+    if (raw) {
+        log.info('Drive auth: Service Account (Shared Drive only)');
+        raw = raw.trim();
+        if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
+            raw = raw.slice(1, -1);
+        }
+        const creds = JSON.parse(raw);
+        const auth = new google.auth.GoogleAuth({
+            credentials: creds,
+            scopes: ['https://www.googleapis.com/auth/drive'],
+        });
+        driveClient = google.drive({ version: 'v3', auth });
+        return driveClient;
+    }
+
+    throw new Error(
+        'Drive auth not configured. Set GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN (personal Drive) ' +
+        'or GOOGLE_CREDENTIALS_JSON (Shared Drive).',
+    );
 }
 
 async function findChildFolder(drive, parentId, name) {
@@ -52,10 +77,6 @@ async function ensureSubfolder(drive, parentId, name) {
     return created.data.id;
 }
 
-/**
- * Ensure folder path under rootFolderId exists, return innermost folder ID.
- * `pathParts` is e.g. ['Market Reports', '2026', '04'].
- */
 async function ensureFolderPath(drive, rootFolderId, pathParts) {
     const cacheKey = pathParts.join('/');
     if (folderCache.has(cacheKey)) return folderCache.get(cacheKey);
@@ -80,6 +101,6 @@ export async function uploadPdf(pdfBuffer, { rootFolderId, pathParts, filename }
         fields: 'id, webViewLink',
         supportsAllDrives: true,
     });
-    log.info(`☁️  Uploaded ${filename} to Drive (${res.data.id})`);
+    log.info(`Uploaded ${filename} to Drive (${res.data.id})`);
     return { fileId: res.data.id, webViewLink: res.data.webViewLink };
 }

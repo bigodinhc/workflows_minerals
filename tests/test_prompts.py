@@ -47,7 +47,7 @@ def test_writer_has_budget():
     from execution.core.prompts.writer import WRITER_SYSTEM
     lower = WRITER_SYSTEM.lower()
     assert "1/3" in WRITER_SYSTEM or "um terço" in lower
-    assert "18" in WRITER_SYSTEM and "22" in WRITER_SYSTEM
+    assert "18-22 linhas" in WRITER_SYSTEM
 
 
 def test_writer_forbids_inventing():

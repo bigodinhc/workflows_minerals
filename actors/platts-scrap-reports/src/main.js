@@ -119,29 +119,23 @@ async function run() {
                 continue;
             }
 
-            log.info(`[DEBUG] PDF ready (${pdfBuffer.length} bytes). Starting Drive upload for ${filename}...`);
             let driveFileId;
             try {
                 const upload = await uploadPdf(pdfBuffer, { rootFolderId: gdriveFolderId, pathParts: drivePath, filename });
                 driveFileId = upload.fileId;
-                log.info(`[DEBUG] Drive upload OK: fileId=${driveFileId}`);
             } catch (e) {
-                log.warning(`[DEBUG] Drive upload FAILED: ${e.message}`);
+                log.warning(`Drive upload failed for ${filename}: ${e.message}`);
                 summary.errors.push({ stage: 'drive-upload', reportName: row.reportName, message: e.message });
                 summary.type = 'partial';
                 continue;
             }
 
-            log.info(`[DEBUG] Starting Telegram send for ${filename}...`);
             try {
                 await sendPdfDocument(TG_TOKEN, TG_CHAT, pdfBuffer, filename, buildCaption(row));
-                log.info(`[DEBUG] Telegram send OK`);
             } catch (e) {
-                log.warning(`[DEBUG] Telegram send FAILED: ${e.message}`);
+                log.warning(`Telegram send failed for ${filename}: ${e.message}`);
                 summary.errors.push({ stage: 'telegram', reportName: row.reportName, message: e.message });
             }
-
-            log.info(`[DEBUG] Marking seen: ${slug}:${dateKey}`);
             await markSeen(slug, dateKey);
             summary.downloaded.push({ slug, dateKey, drivePath: `${drivePath.join('/')}/${filename}`, driveFileId });
         }

@@ -71,3 +71,20 @@ class WorkflowRun(CallbackData, prefix="wf_run"):
 
 class WorkflowList(CallbackData, prefix="wf"):
     action: str  # list, back_menu
+
+
+class UserApproval(CallbackData, prefix="user_approve"):
+    action: str  # approve, reject
+    chat_id: int
+
+
+class SubscriptionToggle(CallbackData, prefix="sub_toggle"):
+    workflow: str  # morning_check, baltic_ingestion, etc.
+
+
+class SubscriptionDone(CallbackData, prefix="sub_done"):
+    pass
+
+
+class OnboardingStart(CallbackData, prefix="onboard"):
+    pass

@@ -12,6 +12,7 @@ from bot.callback_data import (
     QueuePage, QueueOpen,
     ContactToggle, ContactPage,
     WorkflowRun, WorkflowList,
+    UserApproval, SubscriptionToggle, SubscriptionDone, OnboardingStart,
 )
 
 
@@ -135,3 +136,33 @@ def test_workflow_list_pack_unpack():
     packed = cb.pack()
     parsed = WorkflowList.unpack(packed)
     assert parsed.action == "list"
+
+
+def test_user_approval_pack_unpack():
+    cb = UserApproval(action="approve", chat_id=12345)
+    packed = cb.pack()
+    assert packed.startswith("user_approve:")
+    parsed = UserApproval.unpack(packed)
+    assert parsed.action == "approve"
+    assert parsed.chat_id == 12345
+
+
+def test_subscription_toggle_pack_unpack():
+    cb = SubscriptionToggle(workflow="morning_check")
+    packed = cb.pack()
+    parsed = SubscriptionToggle.unpack(packed)
+    assert parsed.workflow == "morning_check"
+
+
+def test_subscription_done_pack_unpack():
+    cb = SubscriptionDone()
+    packed = cb.pack()
+    parsed = SubscriptionDone.unpack(packed)
+    assert parsed is not None
+
+
+def test_onboarding_start_pack_unpack():
+    cb = OnboardingStart()
+    packed = cb.pack()
+    parsed = OnboardingStart.unpack(packed)
+    assert parsed is not None

@@ -1,14 +1,13 @@
 {
     "name": "platts-scrap-reports",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "type": "module",
-    "description": "Downloads Platts Market + Research Report PDFs to Google Drive and Telegram.",
+    "description": "Downloads Platts Market + Research Report PDFs to Supabase Storage and Telegram.",
     "dependencies": {
         "apify": "^3.4.2",
         "crawlee": "^3.13.8",
         "playwright": "1.54.1",
-        "googleapis": "^144.0.0",
-        "ioredis": "^5.4.1",
+        "@supabase/supabase-js": "^2.49.0",
         "node-fetch": "^3.3.2"
     },
     "devDependencies": {

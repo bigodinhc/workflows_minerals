@@ -10,7 +10,7 @@ def test_writer_importable():
 def test_writer_has_inviolable_rules():
     from execution.core.prompts.writer import WRITER_SYSTEM
     assert "jamais arredonde" in WRITER_SYSTEM.lower() or "nunca arredonde" in WRITER_SYSTEM.lower()
-    assert "interpretações pessoais" in WRITER_SYSTEM.lower() or "interpretação pessoal" in WRITER_SYSTEM.lower()
+    assert "nunca invente" in WRITER_SYSTEM.lower() or "não invente" in WRITER_SYSTEM.lower()
     assert "CFR" in WRITER_SYSTEM
     assert "FOB" in WRITER_SYSTEM
     assert "DATA NÃO ESPECIFICADA" in WRITER_SYSTEM
@@ -29,10 +29,43 @@ def test_writer_has_few_shot_examples():
     assert "<example>" in WRITER_SYSTEM or "EXEMPLO" in WRITER_SYSTEM
 
 
-def test_writer_has_tabular_data_rule():
+def test_writer_has_trader_persona():
     from execution.core.prompts.writer import WRITER_SYSTEM
     lower = WRITER_SYSTEM.lower()
-    assert "tabela" in lower or "tabular" in lower
+    assert "trader" in lower
+    assert "mesa" in lower
+
+
+def test_writer_has_drop_list():
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    lower = WRITER_SYSTEM.lower()
+    assert "sempre cortar" in lower or "o que cortar" in lower
+    assert "platts is part of" in lower
+
+
+def test_writer_has_budget():
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    lower = WRITER_SYSTEM.lower()
+    assert "1/3" in WRITER_SYSTEM or "um terço" in lower
+    assert "18" in WRITER_SYSTEM and "22" in WRITER_SYSTEM
+
+
+def test_writer_forbids_inventing():
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    lower = WRITER_SYSTEM.lower()
+    assert "nunca invente" in lower or "não invente" in lower
+
+
+def test_writer_drops_tabular_phrase():
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    assert "tabelas alinhadas" not in WRITER_SYSTEM
+
+
+def test_writer_prefers_bullets():
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    lower = WRITER_SYSTEM.lower()
+    assert "bullet" in lower
+    assert "prefira bullets" in lower or "bullets por default" in lower
 
 
 def test_critique_importable():

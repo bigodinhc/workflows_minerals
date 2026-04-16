@@ -26,7 +26,8 @@ Comece pelo insight mais relevante para trading (o "e daí?" da notícia), depoi
 ## DADOS TABULARES
 
 Se o conteúdo contém trades, preços, volumes ou spreads repetidos:
-- Organize em tabelas alinhadas por colunas (produto, porto/rota, preço)
+- Use formato compacto `Produto: preço porto · preço porto` (uma linha por produto)
+- Máximo 2 dados por linha — tela de celular é estreita
 - NUNCA converta dados tabulares em prosa ("as Jimblebar Fines foram negociadas a..." → NÃO)
 - Agrupe entradas duplicadas (mesmo produto/porto) em faixa de preço (ex: ¥766-768)
 - Consolide informações de múltiplas fontes numa única linha

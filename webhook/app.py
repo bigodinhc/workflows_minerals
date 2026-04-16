@@ -1197,20 +1197,28 @@ def _safe_call(fn, label):
 
 def _show_main_menu(chat_id):
     """Send a main menu with inline buttons for all bot features."""
-    text = "📋 *Menu Principal*\n\nEscolha uma opção:"
+    text = "⚡ *Antigravity WF*"
     markup = {
         "inline_keyboard": [
             [
                 {"text": "📊 Relatórios", "callback_data": "menu:reports"},
-                {"text": "📰 Fila Curadoria", "callback_data": "menu:queue"},
+                {"text": "📰 Fila", "callback_data": "menu:queue"},
             ],
             [
                 {"text": "📜 Histórico", "callback_data": "menu:history"},
                 {"text": "❌ Recusas", "callback_data": "menu:rejections"},
             ],
             [
-                {"text": "📈 Estatísticas", "callback_data": "menu:stats"},
+                {"text": "📈 Stats", "callback_data": "menu:stats"},
                 {"text": "🔄 Status", "callback_data": "menu:status"},
+            ],
+            [
+                {"text": "🔁 Reprocessar", "callback_data": "menu:reprocess"},
+                {"text": "📋 Listar", "callback_data": "menu:list"},
+            ],
+            [
+                {"text": "➕ Adicionar", "callback_data": "menu:add"},
+                {"text": "❓ Help", "callback_data": "menu:help"},
             ],
         ]
     }
@@ -1486,6 +1494,10 @@ def handle_callback(callback_query):
             "rejections": lambda: send_telegram_message(chat_id, _safe_text(lambda: query_handlers.format_rejections(), "recusas")),
             "stats": lambda: send_telegram_message(chat_id, _safe_text(lambda: query_handlers.format_stats(datetime.now(timezone.utc).strftime("%Y-%m-%d")), "stats")),
             "status": lambda: send_telegram_message(chat_id, _safe_text(lambda: _build_status_message(), "status")),
+            "reprocess": lambda: send_telegram_message(chat_id, "Uso: `/reprocess <item\\_id>`\n\nDigite o comando com o ID do item."),
+            "list": lambda: send_telegram_message(chat_id, "Uso: `/list [busca]`\n\nDigite o comando ou `/list` pra ver todos."),
+            "add": lambda: send_telegram_message(chat_id, "Uso: `/add`\n\nDigite o comando pra iniciar."),
+            "help": lambda: send_telegram_message(chat_id, _safe_text(lambda: query_handlers.format_help(), "help")),
         }
         handler = handlers.get(action_menu)
         if handler:

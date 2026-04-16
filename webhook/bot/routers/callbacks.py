@@ -24,7 +24,7 @@ from bot.callback_data import (
 )
 from bot.states import AdjustDraft, RejectReason
 from bot.keyboards import build_main_menu_keyboard, build_approval_keyboard
-from bot.middlewares.auth import AdminAuthMiddleware
+from bot.middlewares.auth import RoleMiddleware
 from bot.routers._helpers import (
     drafts_get, drafts_contains, drafts_update,
     process_adjustment, run_pipeline_and_archive,
@@ -42,7 +42,7 @@ from execution.integrations.sheets_client import SheetsClient
 logger = logging.getLogger(__name__)
 
 callback_router = Router(name="callbacks")
-callback_router.callback_query.middleware(AdminAuthMiddleware())
+callback_router.callback_query.middleware(RoleMiddleware(allowed_roles={"admin"}))
 
 
 # ── Helper ──

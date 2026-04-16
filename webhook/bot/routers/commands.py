@@ -1,7 +1,8 @@
 """All slash-command handlers.
 
-Public router (no auth middleware): /start
-Admin router (with AdminAuthMiddleware): everything else
+Public router (no auth middleware): placeholder, /start handled by onboarding.py
+Admin router (with RoleMiddleware): everything else
+Shared router (admin + subscriber): /settings, /menu
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from aiogram.fsm.context import FSMContext
 from bot.config import get_bot, ANTHROPIC_API_KEY, SHEET_ID, TELEGRAM_WEBHOOK_URL
 from bot.states import AddContact, NewsInput
 from bot.keyboards import build_main_menu_keyboard
-from bot.middlewares.auth import AdminAuthMiddleware
+from bot.middlewares.auth import RoleMiddleware
 import contact_admin
 import query_handlers
 from status_builder import build_status_message
@@ -31,25 +32,12 @@ logger = logging.getLogger(__name__)
 
 public_router = Router(name="commands_public")
 
-
-@public_router.message(Command("start"))
-async def cmd_start(message: Message):
-    await message.answer(
-        "👋 *Minerals Trading Bot*\n\n"
-        "*Notícias:*\n"
-        "Cole texto — viro relatório via IA e envio pra aprovação.\n\n"
-        "*Contatos (admin):*\n"
-        "`/status` — status dos workflows\n"
-        "`/add` — adicionar contato\n"
-        "`/list [busca]` — listar e ativar/desativar\n"
-        "`/cancel` — desistir do /add em curso",
-    )
-
+# /start is handled by onboarding.py
 
 # ── Admin router (with auth middleware) ──
 
 admin_router = Router(name="commands_admin")
-admin_router.message.middleware(AdminAuthMiddleware())
+admin_router.message.middleware(RoleMiddleware(allowed_roles={"admin"}))
 
 
 @admin_router.message(Command("status"))
@@ -159,6 +147,24 @@ async def cmd_workflows(message: Message):
 @admin_router.message(Command("s"))
 async def cmd_menu(message: Message):
     await message.answer("🥸 *SuperMustache BOT*", reply_markup=build_main_menu_keyboard())
+
+
+# ── Shared router (admin + subscriber) ──
+
+shared_router = Router(name="commands_shared")
+shared_router.message.middleware(RoleMiddleware(allowed_roles={"admin", "subscriber"}))
+
+
+@shared_router.message(Command("settings"))
+async def cmd_settings(message: Message):
+    from bot.routers.settings import show_subscription_panel
+    await show_subscription_panel(message.chat.id)
+
+
+@shared_router.message(Command("menu"))
+async def cmd_menu_reply(message: Message):
+    from bot.keyboards import build_reply_keyboard
+    await message.answer("🥸 *SuperMustache BOT*", reply_markup=build_reply_keyboard())
 
 
 # ── Helpers ──

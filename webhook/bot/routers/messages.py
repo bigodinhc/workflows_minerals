@@ -15,7 +15,7 @@ from aiogram.fsm.context import FSMContext
 
 from bot.config import ANTHROPIC_API_KEY, SHEET_ID
 from bot.states import AdjustDraft, RejectReason, AddContact
-from bot.middlewares.auth import AdminAuthMiddleware
+from bot.middlewares.auth import RoleMiddleware
 from bot.routers._helpers import process_news, process_adjustment
 import contact_admin
 import redis_queries
@@ -24,7 +24,7 @@ from execution.integrations.sheets_client import SheetsClient
 logger = logging.getLogger(__name__)
 
 message_router = Router(name="messages")
-message_router.message.middleware(AdminAuthMiddleware())
+message_router.message.middleware(RoleMiddleware(allowed_roles={"admin"}))
 
 
 @message_router.message(AdjustDraft.waiting_feedback, F.text)

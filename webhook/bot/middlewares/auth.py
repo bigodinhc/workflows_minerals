@@ -1,23 +1,32 @@
-"""Admin authorization middleware.
+"""Role-aware authorization middleware.
 
-Applied to admin-only routers. Silently drops updates from unauthorized users.
-The /start command lives on a separate public router without this middleware.
+Replaces the binary AdminAuthMiddleware with a configurable RoleMiddleware
+that accepts a set of allowed roles. Uses bot.users.get_user_role() to
+determine the user's role (admin, subscriber, pending, unknown).
+
+Usage:
+  admin_router.message.middleware(RoleMiddleware(allowed_roles={"admin"}))
+  shared_router.message.middleware(RoleMiddleware(allowed_roles={"admin", "subscriber"}))
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Set
 
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 
-import contact_admin
+from bot.users import get_user_role
 
 logger = logging.getLogger(__name__)
 
 
-class AdminAuthMiddleware(BaseMiddleware):
+class RoleMiddleware(BaseMiddleware):
+    def __init__(self, allowed_roles: Set[str]):
+        self.allowed_roles = allowed_roles
+        super().__init__()
+
     async def __call__(
         self,
         handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
@@ -28,9 +37,15 @@ class AdminAuthMiddleware(BaseMiddleware):
         if from_user is None:
             return await handler(event, data)
 
-        chat_id = from_user.id
-        if not contact_admin.is_authorized(chat_id):
-            logger.debug(f"Unauthorized access attempt from chat_id={chat_id}")
+        role = get_user_role(from_user.id)
+        if role not in self.allowed_roles:
+            logger.debug(f"Role '{role}' not in {self.allowed_roles} for chat_id={from_user.id}")
             return None
 
+        data["user_role"] = role
         return await handler(event, data)
+
+
+# Backward compat: factory function that returns a RoleMiddleware configured for admin-only
+def AdminAuthMiddleware():
+    return RoleMiddleware(allowed_roles={"admin"})

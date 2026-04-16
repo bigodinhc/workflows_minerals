@@ -87,16 +87,29 @@ def test_critique_has_no_praise_section():
     assert "OTIMIZAÇÕES OPCIONAIS" not in CRITIQUE_SYSTEM
 
 
-def test_critique_checks_tabular_data():
-    from execution.core.prompts.critique import CRITIQUE_SYSTEM
-    lower = CRITIQUE_SYSTEM.lower()
-    assert "tabela" in lower or "tabular" in lower
-
-
 def test_critique_checks_trader_voice():
     from execution.core.prompts.critique import CRITIQUE_SYSTEM
     lower = CRITIQUE_SYSTEM.lower()
     assert "trader" in lower or "robótic" in lower
+
+
+def test_critique_checks_essence_not_completeness():
+    from execution.core.prompts.critique import CRITIQUE_SYSTEM
+    lower = CRITIQUE_SYSTEM.lower()
+    assert "essência" in lower or "tese" in lower
+    assert "dados completos" not in lower
+
+
+def test_critique_checks_bloat():
+    from execution.core.prompts.critique import CRITIQUE_SYSTEM
+    lower = CRITIQUE_SYSTEM.lower()
+    assert "inchado" in lower or "boilerplate" in lower or "repetição" in lower
+
+
+def test_critique_checks_invention():
+    from execution.core.prompts.critique import CRITIQUE_SYSTEM
+    lower = CRITIQUE_SYSTEM.lower()
+    assert "invenção" in lower or "invent" in lower
 
 
 def test_curator_importable():

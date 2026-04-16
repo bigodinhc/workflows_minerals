@@ -1191,6 +1191,44 @@ def _reports_show_types(chat_id, message_id=None):
         send_telegram_message(chat_id, text, reply_markup=markup)
 
 
+def _reports_show_latest(chat_id, message_id, report_type):
+    """Show the 10 most recent reports of a given type."""
+    sb = get_supabase()
+    if not sb:
+        edit_message(chat_id, message_id, "⚠️ Supabase não configurado")
+        return
+    try:
+        result = sb.table("platts_reports") \
+            .select("id, report_name, date_key, frequency") \
+            .eq("report_type", report_type) \
+            .order("date_key", desc=True) \
+            .limit(10) \
+            .execute()
+        rows = result.data or []
+    except Exception as exc:
+        logger.error(f"reports latest query error: {exc}")
+        edit_message(chat_id, message_id, "⚠️ Erro ao consultar relatórios")
+        return
+
+    if not rows:
+        keyboard = [[{"text": "⬅ Voltar", "callback_data": "rpt_back:types"}]]
+        edit_message(chat_id, message_id, "Nenhum relatório encontrado.", reply_markup={"inline_keyboard": keyboard})
+        return
+
+    esc = lambda s: str(s).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`")
+    text = f"📊 *{esc(report_type)}*\n\nÚltimos relatórios:"
+    keyboard = []
+    for r in rows:
+        dk = r["date_key"]
+        label = f"{esc(r['report_name'])} — {dk}"
+        keyboard.append([{"text": label, "callback_data": f"report_dl:{r['id']}"}])
+    keyboard.append([
+        {"text": "📅 Ver por data", "callback_data": f"rpt_years:{report_type}"},
+        {"text": "⬅ Voltar", "callback_data": "rpt_back:types"},
+    ])
+    edit_message(chat_id, message_id, text, reply_markup={"inline_keyboard": keyboard})
+
+
 def handle_callback(callback_query):
     """Handle button press callbacks."""
     callback_id = callback_query["id"]
@@ -1327,6 +1365,14 @@ def handle_callback(callback_query):
         except Exception as exc:
             logger.error(f"report_dl error: {exc}")
             answer_callback(callback_id, "Erro ao baixar relatório")
+        return jsonify({"ok": True})
+
+    # ---------- Reports navigation ----------
+    if callback_data.startswith("rpt_type:"):
+        report_type = callback_data.split(":", 1)[1]
+        message_id = callback_query["message"]["message_id"]
+        _reports_show_latest(chat_id, message_id, report_type)
+        answer_callback(callback_id, "")
         return jsonify({"ok": True})
 
     parts = callback_data.split(":", 1)

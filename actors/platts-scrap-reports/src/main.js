@@ -89,7 +89,9 @@ async function run() {
 
         for (const row of filtered) {
             const slug = slugify(row.reportName);
-            const dateKey = parsePublishedDate(row.publishedDate);
+            // Use coverDate (named months like "09 Apr 2026") instead of publishedDate
+            // (numeric "04/09/2026" whose DD/MM vs MM/DD is locale-dependent and ambiguous)
+            const dateKey = parsePublishedDate(row.coverDate);
             if (!slug || !dateKey) {
                 summary.errors.push({ stage: 'parse-row', reportName: row.reportName, message: 'missing slug or dateKey' });
                 summary.type = 'partial';

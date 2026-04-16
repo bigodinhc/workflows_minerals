@@ -27,9 +27,10 @@ from bot.config import (
     WEBAPP_HOST, WEBAPP_PORT, WEBHOOK_PATH, TELEGRAM_WEBHOOK_URL,
     TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, UAZAPI_URL, UAZAPI_TOKEN,
 )
-from bot.routers.commands import public_router, admin_router
+from bot.routers.onboarding import onboarding_router
+from bot.routers.commands import public_router, admin_router, shared_router
 from bot.routers.callbacks import callback_router
-from bot.routers.messages import message_router
+from bot.routers.messages import message_router, reply_kb_router
 from routes.api import routes as api_routes
 from routes.preview import routes as preview_routes
 
@@ -70,10 +71,13 @@ async def on_shutdown(app: web.Application):
 def create_app() -> web.Application:
     # Dispatcher + routers
     dp = get_dispatcher()
-    dp.include_router(public_router)
-    dp.include_router(admin_router)
-    dp.include_router(callback_router)
-    dp.include_router(message_router)
+    dp.include_router(onboarding_router)   # /start + approval + subscription (public)
+    dp.include_router(public_router)        # other public commands
+    dp.include_router(admin_router)         # admin-only commands
+    dp.include_router(shared_router)        # /settings, /menu (admin + subscriber)
+    dp.include_router(callback_router)      # inline button callbacks (admin)
+    dp.include_router(reply_kb_router)      # reply keyboard text (admin + subscriber)
+    dp.include_router(message_router)       # FSM + catch-all text (admin)
 
     # aiohttp app
     app = web.Application()

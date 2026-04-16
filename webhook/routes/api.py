@@ -63,12 +63,17 @@ async def store_draft(request: web.Request) -> web.Response:
     if not draft_id or not message:
         return web.json_response({"error": "Missing draft_id or message"}, status=400)
 
+    workflow_type = data.get("workflow_type")
+    direct_delivery = data.get("direct_delivery", False)
+
     draft = {
         "message": message,
         "status": "pending",
         "original_text": "",
         "uazapi_token": (data.get("uazapi_token") or "").strip() or None,
         "uazapi_url": (data.get("uazapi_url") or "").strip() or None,
+        "workflow_type": workflow_type,
+        "direct_delivery": direct_delivery,
     }
     drafts_set(draft_id, draft)
 
@@ -77,8 +82,23 @@ async def store_draft(request: web.Request) -> web.Response:
     else:
         logger.info(f"Draft has no UAZAPI token, will use env var")
 
-    logger.info(f"Draft stored: {draft_id} ({len(message)} chars)")
-    return web.json_response({"success": True, "draft_id": draft_id})
+    logger.info(f"Draft stored: {draft_id} ({len(message)} chars, workflow={workflow_type}, direct={direct_delivery})")
+
+    # Telegram delivery to subscribers (non-blocking)
+    telegram_result = None
+    if direct_delivery and workflow_type:
+        from bot.delivery import deliver_to_subscribers
+        try:
+            telegram_result = await deliver_to_subscribers(workflow_type, message)
+            logger.info(f"Telegram delivery: {telegram_result}")
+        except Exception as exc:
+            logger.error(f"Telegram delivery failed: {exc}")
+            telegram_result = {"sent": 0, "failed": 0, "error": str(exc)}
+
+    response = {"success": True, "draft_id": draft_id}
+    if telegram_result:
+        response["telegram_delivery"] = telegram_result
+    return web.json_response(response)
 
 
 @routes.get("/seen-articles")

@@ -12,12 +12,15 @@ function getDrive() {
     if (driveClient) return driveClient;
     let raw = process.env.GOOGLE_CREDENTIALS_JSON;
     if (!raw) throw new Error('GOOGLE_CREDENTIALS_JSON env var is required');
+    log.info(`[DEBUG] GOOGLE_CREDENTIALS_JSON length=${raw.length}, first30=${raw.substring(0, 30)}`);
     // Strip wrapping quotes if pasted from a .env file that kept them
     raw = raw.trim();
     if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
         raw = raw.slice(1, -1);
+        log.info(`[DEBUG] Stripped wrapping quotes, now starts with: ${raw.substring(0, 20)}`);
     }
     const creds = JSON.parse(raw);
+    log.info(`[DEBUG] Parsed creds OK, type=${creds.type}, email=${creds.client_email}`);
     const auth = new google.auth.GoogleAuth({
         credentials: creds,
         scopes: ['https://www.googleapis.com/auth/drive'],

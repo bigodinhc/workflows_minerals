@@ -1,13 +1,13 @@
 {
-    "actorSpecification": 1,
-    "fields": {},
-    "views": {
+    "actorOutputSchemaVersion": 1,
+    "title": "Platts Reports PDF Downloader",
+    "description": "Summary dataset with counts of downloaded/skipped/errored PDFs. PDFs themselves go to Google Drive; only the run summary is stored here.",
+    "properties": {
         "summary": {
+            "type": "string",
             "title": "Run summary",
-            "transformation": {
-                "fields": ["type", "downloaded", "skipped", "errors", "would_download"]
-            },
-            "display": { "component": "table" }
+            "description": "Single object with type (success|partial|error), downloaded[], skipped[], errors[], and would_download[] when dryRun=true.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
         }
     }
 }

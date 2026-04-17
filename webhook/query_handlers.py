@@ -8,7 +8,9 @@ The handlers here do not know about Flask, requests, or Telegram — they
 consume webhook.redis_queries and produce text. app.py wires them to
 the chat.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+_BRT = timezone(timedelta(hours=-3))
 from typing import Optional
 from execution.curation.telegram_poster import _escape_md
 import redis_queries
@@ -92,9 +94,9 @@ def format_stats(date_iso: str) -> str:
 
 
 def _format_hhmm(epoch_seconds: float) -> str:
-    """Epoch seconds -> 'HH:MM' UTC."""
+    """Epoch seconds -> 'HH:MM' BRT."""
     try:
-        return datetime.fromtimestamp(float(epoch_seconds), tz=timezone.utc).strftime("%H:%M")
+        return datetime.fromtimestamp(float(epoch_seconds), tz=_BRT).strftime("%H:%M")
     except (ValueError, OSError):
         return "??:??"
 
@@ -130,11 +132,11 @@ def _type_icon(item: dict) -> str:
 
 
 def _format_staged_time(iso_date: str) -> str:
-    """'2026-04-17T12:30:45+00:00' -> '12:30'. Returns '' on failure."""
+    """'2026-04-17T12:30:45+00:00' -> '09:30' (BRT). Returns '' on failure."""
     if not iso_date:
         return ""
     try:
-        dt = datetime.fromisoformat(iso_date)
+        dt = datetime.fromisoformat(iso_date).astimezone(_BRT)
         return dt.strftime("%H:%M")
     except (ValueError, TypeError):
         return ""
@@ -173,7 +175,7 @@ def format_queue_page(page: int = 1) -> tuple[str, Optional[dict]]:
     if staged_times:
         oldest = _format_staged_time(min(staged_times))
         newest = _format_staged_time(max(staged_times))
-        time_info = f" · coletados {oldest}–{newest} UTC" if oldest != newest else f" · coletado {newest} UTC"
+        time_info = f" · coletados {oldest}–{newest} BRT" if oldest != newest else f" · coletado {newest} BRT"
     else:
         time_info = ""
 

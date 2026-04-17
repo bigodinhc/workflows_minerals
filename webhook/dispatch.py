@@ -97,10 +97,13 @@ async def process_approval_async(chat_id, draft_message, uazapi_token=None, uaza
         raw_contacts = await get_contacts()
         delivery_contacts = [bc for c in raw_contacts if (bc := build_contact_from_row(c))]
 
-        await bot.edit_message_text(
-            f"⏳ Enviando para {len(delivery_contacts)} contatos...\n0/{len(delivery_contacts)}",
-            chat_id=chat_id, message_id=progress_msg_id,
-        )
+        try:
+            await bot.edit_message_text(
+                f"⏳ Enviando para {len(delivery_contacts)} contatos...\n0/{len(delivery_contacts)}",
+                chat_id=chat_id, message_id=progress_msg_id,
+            )
+        except Exception:
+            pass
 
         # DeliveryReporter is sync — use sync send_fn + to_thread
         def send_fn(phone, text):
@@ -121,13 +124,17 @@ async def process_approval_async(chat_id, draft_message, uazapi_token=None, uaza
 
         def on_progress_sync(processed, total_, result):
             if processed % 10 == 0:
-                asyncio.run_coroutine_threadsafe(
-                    bot.edit_message_text(
-                        f"⏳ Enviando...\n{processed}/{total_} processados",
-                        chat_id=chat_id, message_id=progress_msg_id,
-                    ),
-                    loop,
-                )
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        bot.edit_message_text(
+                            f"⏳ Enviando...\n{processed}/{total_} processados",
+                            chat_id=chat_id, message_id=progress_msg_id,
+                        ),
+                        loop,
+                    )
+                    future.result(timeout=5)
+                except Exception:
+                    pass  # ignore "message not modified" — don't crash delivery
 
         reporter = DeliveryReporter(
             workflow="webhook_approval",
@@ -140,10 +147,13 @@ async def process_approval_async(chat_id, draft_message, uazapi_token=None, uaza
             reporter.dispatch, delivery_contacts, draft_message, on_progress_sync,
         )
 
-        await bot.edit_message_text(
-            "✔️ Envio finalizado — veja resumo detalhado abaixo.",
-            chat_id=chat_id, message_id=progress_msg_id,
-        )
+        try:
+            await bot.edit_message_text(
+                "✔️ Envio finalizado — veja resumo detalhado abaixo.",
+                chat_id=chat_id, message_id=progress_msg_id,
+            )
+        except Exception:
+            pass
 
         logger.info(
             f"Approval complete: {report.success_count} sent, {report.failure_count} failed"

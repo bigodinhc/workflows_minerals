@@ -87,6 +87,15 @@ def find_curation_item(item_id):
     return None
 
 
+async def _safe_edit(bot, text, chat_id, message_id):
+    """Edit message text, ignoring 'message not modified' errors from Telegram."""
+    try:
+        await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id)
+    except Exception as exc:
+        if "not modified" not in str(exc).lower():
+            logger.warning(f"edit_message failed: {exc}")
+
+
 async def process_news(chat_id, raw_text, progress_msg_id):
     """Process news text through 3 agents as background task."""
     from execution.core.agents_progress import format_pipeline_progress
@@ -101,14 +110,11 @@ async def process_news(chat_id, raw_text, progress_msg_id):
         done.clear()
         done.extend(phase_order[:idx])
         if progress_msg_id:
-            try:
-                await bot.edit_message_text(
-                    format_pipeline_progress(current=phase_name, done=list(done)),
-                    chat_id=chat_id,
-                    message_id=progress_msg_id,
-                )
-            except Exception:
-                pass  # ignore "message not modified" from Telegram
+            await _safe_edit(
+                bot,
+                format_pipeline_progress(current=phase_name, done=list(done)),
+                chat_id, progress_msg_id,
+            )
 
     try:
         final_message = await run_3_agents(raw_text, on_phase_start=hook)
@@ -123,10 +129,10 @@ async def process_news(chat_id, raw_text, progress_msg_id):
         })
 
         if progress_msg_id:
-            await bot.edit_message_text(
+            await _safe_edit(
+                bot,
                 format_pipeline_progress(current=None, done=list(phase_order)),
-                chat_id=chat_id,
-                message_id=progress_msg_id,
+                chat_id, progress_msg_id,
             )
 
         display = final_message[:3500] if len(final_message) > 3500 else final_message
@@ -141,10 +147,10 @@ async def process_news(chat_id, raw_text, progress_msg_id):
         if progress_msg_id:
             remaining = [p for p in phase_order if p not in done]
             current = remaining[0] if remaining else None
-            await bot.edit_message_text(
+            await _safe_edit(
+                bot,
                 format_pipeline_progress(current=current, done=list(done), error=str(e)[:120]),
-                chat_id=chat_id,
-                message_id=progress_msg_id,
+                chat_id, progress_msg_id,
             )
 
 

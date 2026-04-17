@@ -185,14 +185,14 @@ def test_queue_single_page_titles_in_buttons(fake_redis):
             "stagedAt": f"2026-04-15T{ts}:00Z"
         }))
     text, markup = format_queue_page(page=1)
-    assert "*🗂️ STAGING · 3 items*" in text
-    # Texto NÃO deve mais conter "1. Title 0"/"N. Abrir"
-    assert "1. Title" not in text
-    assert "Abrir" not in text
-    # Mas os 3 botões (1 por item) carregam o título com ícone
+    assert "STAGING" in text
+    assert "3 items" in text
+    assert "coletados" in text
+    # Buttons carry title with icon + collection time
     buttons = markup["inline_keyboard"]
     assert len(buttons) == 3
-    assert buttons[0][0]["text"] == "🗞️ Title 0"
+    assert buttons[0][0]["text"].startswith("🗞️ Title 0")
+    assert "🕐" in buttons[0][0]["text"]
     assert buttons[0][0]["callback_data"] == "queue_open:item0"
 
 
@@ -203,7 +203,8 @@ def test_queue_button_uses_rationale_icon(fake_redis):
         "stagedAt": "2026-04-15T10:00:00Z"
     }))
     _, markup = format_queue_page(page=1)
-    assert markup["inline_keyboard"][0][0]["text"] == "📊 Daily Rationale"
+    assert markup["inline_keyboard"][0][0]["text"].startswith("📊 Daily Rationale")
+    assert "🕐" in markup["inline_keyboard"][0][0]["text"]
 
 
 def test_queue_paginated(fake_redis):
@@ -214,11 +215,13 @@ def test_queue_paginated(fake_redis):
             "stagedAt": f"2026-04-15T{i:02d}:00:00Z"
         }))
     text_p1, markup_p1 = format_queue_page(page=1)
-    assert "*🗂️ STAGING · 12 items*" in text_p1
+    assert "STAGING" in text_p1
+    assert "12 items" in text_p1
+    assert "coletados" in text_p1
     # 5 item rows + 1 pagination row
     assert len(markup_p1["inline_keyboard"]) == 6
     # Item buttons têm o título
-    assert markup_p1["inline_keyboard"][0][0]["text"] == "🗞️ Title 11"
+    assert markup_p1["inline_keyboard"][0][0]["text"].startswith("🗞️ Title 11")
     # Pagination row (última)
     pag_texts = [b["text"] for b in markup_p1["inline_keyboard"][-1]]
     assert any("1/3" in t for t in pag_texts)

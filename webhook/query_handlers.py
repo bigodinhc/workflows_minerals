@@ -129,6 +129,17 @@ def _type_icon(item: dict) -> str:
     return _ICON_BY_TYPE.get(item.get("type", "news"), "🗞️")
 
 
+def _format_staged_time(iso_date: str) -> str:
+    """'2026-04-17T12:30:45+00:00' -> '12:30'. Returns '' on failure."""
+    if not iso_date:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_date)
+        return dt.strftime("%H:%M")
+    except (ValueError, TypeError):
+        return ""
+
+
 def _queue_button_text(item: dict) -> str:
     """Return the button text with type icon + truncated title."""
     icon = _type_icon(item)
@@ -157,13 +168,24 @@ def format_queue_page(page: int = 1) -> tuple[str, Optional[dict]]:
     end = start + _QUEUE_PAGE_SIZE
     page_items = items[start:end]
 
-    text = f"*🗂️ STAGING · {total} items*"
+    # Show collection time range from stagedAt
+    staged_times = [i.get("stagedAt", "") for i in items if i.get("stagedAt")]
+    if staged_times:
+        oldest = _format_staged_time(min(staged_times))
+        newest = _format_staged_time(max(staged_times))
+        time_info = f" · coletados {oldest}–{newest} UTC" if oldest != newest else f" · coletado {newest} UTC"
+    else:
+        time_info = ""
+
+    text = f"*🗂️ STAGING · {total} items{time_info}*"
 
     keyboard: list[list[dict]] = []
     for item in page_items:
         item_id = item.get("id") or ""
+        staged = _format_staged_time(item.get("stagedAt", ""))
+        time_tag = f" 🕐{staged}" if staged else ""
         keyboard.append([{
-            "text": _queue_button_text(item),
+            "text": _queue_button_text(item) + time_tag,
             "callback_data": f"queue_open:{item_id}",
         }])
 

@@ -429,3 +429,99 @@ async def toggle_contact(request: web.Request) -> web.Response:
         "phone": phone,
         "active": new_status == "Big",
     })
+
+
+# ── Stats endpoint ──────────────────────────────────────────────────
+
+
+async def _fetch_workflow_health() -> dict:
+    """Compute workflow health from GitHub runs. Returns {health_pct, ok, total}."""
+    try:
+        data = await _fetch_github_runs()
+        runs = data.get("workflow_runs", [])
+
+        by_wf: dict[str, list] = {}
+        for run in runs:
+            path = run.get("path", "")
+            wf_id = path.split("/")[-1] if "/" in path else path
+            if wf_id not in by_wf:
+                by_wf[wf_id] = []
+            if len(by_wf[wf_id]) < 5:
+                by_wf[wf_id].append(run)
+
+        ok_count = 0
+        for wf in WORKFLOW_CATALOG:
+            wf_runs = by_wf.get(wf["id"], [])
+            completed = [r for r in wf_runs if r.get("status") == "completed"]
+            if completed and all(r.get("conclusion") == "success" for r in completed):
+                ok_count += 1
+
+        total = len(WORKFLOW_CATALOG)
+        health_pct = round(ok_count / total * 100) if total else 0
+        return {"health_pct": health_pct, "ok": ok_count, "total": total}
+    except Exception as exc:
+        logger.error("workflow health error: %s", exc)
+        return {"health_pct": 0, "ok": 0, "total": len(WORKFLOW_CATALOG)}
+
+
+async def _fetch_contacts_active() -> int:
+    """Count active contacts from Google Sheets."""
+    try:
+        sheets = SheetsClient()
+        contacts, _ = await asyncio.to_thread(
+            sheets.list_contacts, SHEET_ID, page=1, per_page=10_000,
+        )
+        return sum(1 for c in contacts if str(c.get("ButtonPayload", "")).strip() == "Big")
+    except Exception as exc:
+        logger.error("contacts count error: %s", exc)
+        return 0
+
+
+async def _fetch_news_count() -> int:
+    """Count news items in staging."""
+    try:
+        items = await asyncio.to_thread(redis_queries.list_staging, 500)
+        return len(items)
+    except Exception as exc:
+        logger.error("news count error: %s", exc)
+        return 0
+
+
+async def _fetch_runs_today() -> int:
+    """Count GitHub Actions runs created today."""
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{_GH_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/actions/runs",
+                headers=_gh_headers(),
+                params={"per_page": 1, "created": f">={today}"},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("total_count", 0)
+    except Exception as exc:
+        logger.error("runs today error: %s", exc)
+    return 0
+
+
+@routes.get("/api/mini/stats")
+async def get_stats(request: web.Request) -> web.Response:
+    await validate_init_data(request)
+
+    wf_health, contacts_active, news_count, runs_today = await asyncio.gather(
+        _fetch_workflow_health(),
+        _fetch_contacts_active(),
+        _fetch_news_count(),
+        _fetch_runs_today(),
+    )
+
+    return web.json_response({
+        "health_pct": wf_health["health_pct"],
+        "workflows_ok": wf_health["ok"],
+        "workflows_total": wf_health["total"],
+        "runs_today": runs_today,
+        "contacts_active": contacts_active,
+        "news_today": news_count,
+    })

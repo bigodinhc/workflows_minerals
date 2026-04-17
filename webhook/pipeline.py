@@ -22,8 +22,12 @@ logger = logging.getLogger(__name__)
 
 async def call_claude(system_prompt: str, user_prompt: str) -> str:
     """Call Claude API (async) and return text response."""
+    logger.info(f"call_claude: system={len(system_prompt)} chars, user={len(user_prompt)} chars")
     try:
-        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        client = anthropic.AsyncAnthropic(
+            api_key=ANTHROPIC_API_KEY,
+            timeout=120.0,
+        )
         message = await client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=4096,

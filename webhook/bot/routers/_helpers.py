@@ -192,6 +192,15 @@ async def run_pipeline_and_archive(chat_id, raw_text, progress_msg_id, item_id):
         await process_news(chat_id, raw_text, progress_msg_id)
     except Exception as exc:
         logger.error(f"pipeline failed for {item_id}: {exc}")
+        bot = get_bot()
+        try:
+            await bot.edit_message_text(
+                f"❌ Pipeline falhou\n\n`{str(exc)[:200]}`",
+                chat_id=chat_id,
+                message_id=progress_msg_id,
+            )
+        except Exception:
+            pass
         return
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:

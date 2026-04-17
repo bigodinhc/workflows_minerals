@@ -564,17 +564,7 @@ async def on_broadcast_confirm(query: CallbackQuery, callback_data: BroadcastCon
         return
 
     if callback_data.action == "send":
-        # Extract draft_id from preview message text
-        msg_text = query.message.text or ""
-        draft_id = ""
-        for line in msg_text.splitlines():
-            if line.strip().startswith("broadcast_"):
-                draft_id = line.strip()
-                break
-        if not draft_id:
-            await query.answer("❌ Draft não encontrado")
-            return
-
+        draft_id = callback_data.draft_id
         draft = drafts_get(draft_id)
         if not draft:
             await query.answer("❌ Draft expirou")

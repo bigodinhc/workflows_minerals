@@ -90,5 +90,6 @@ class OnboardingStart(CallbackData, prefix="onboard"):
     pass
 
 
-class BroadcastConfirm(CallbackData, prefix="broadcast"):
+class BroadcastConfirm(CallbackData, prefix="bcast"):
     action: str  # send, cancel
+    draft_id: str = ""

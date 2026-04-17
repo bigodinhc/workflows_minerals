@@ -110,13 +110,13 @@ async def on_broadcast_text(message: Message, state: FSMContext):
     keyboard = {
         "inline_keyboard": [
             [
-                {"text": "✅ Enviar para WhatsApp", "callback_data": BroadcastConfirm(action="send").pack()},
-                {"text": "❌ Cancelar", "callback_data": BroadcastConfirm(action="cancel").pack()},
+                {"text": "✅ Enviar para WhatsApp", "callback_data": BroadcastConfirm(action="send", draft_id=draft_id).pack()},
+                {"text": "❌ Cancelar", "callback_data": BroadcastConfirm(action="cancel", draft_id=draft_id).pack()},
             ],
         ],
     }
     await message.answer(
-        f"📲 *PREVIEW*\n🆔 `{draft_id}`\n\n{preview}\n\n"
+        f"📲 *PREVIEW*\n\n{preview}\n\n"
         f"────────────────────\n"
         f"_{len(text)} caracteres_",
         reply_markup=keyboard,
@@ -198,8 +198,15 @@ async def on_add_contact_data(message: Message, state: FSMContext):
 # ── Free-form news text (no FSM state — catch-all for text) ──
 
 @message_router.message(F.text)
-async def on_news_text(message: Message):
-    """Process free-form text through the 3-agent pipeline."""
+async def on_news_text(message: Message, state: FSMContext):
+    """Process free-form text through the 3-agent pipeline.
+
+    Catch-all: only fires when NO FSM state is active.
+    """
+    current_state = await state.get_state()
+    if current_state is not None:
+        return  # another handler should process this
+
     if not ANTHROPIC_API_KEY:
         await message.answer("❌ ANTHROPIC\\_API\\_KEY não configurada no servidor.")
         return

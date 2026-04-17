@@ -227,18 +227,43 @@ async def get_news(request: web.Request) -> web.Response:
     limit = int(request.query.get("limit", "20"))
 
     items: list[dict] = []
+
+    async def _fetch_staging():
+        try:
+            staging = await asyncio.to_thread(redis_queries.list_staging, 500)
+            return [_staging_to_news_item(i) for i in staging]
+        except Exception as exc:
+            logger.error(f"news staging error: {exc}")
+            return []
+
+    async def _fetch_archived():
+        try:
+            archived = await asyncio.to_thread(redis_queries.list_archive_recent, 500)
+            return [_archive_to_news_item(i) for i in archived]
+        except Exception as exc:
+            logger.error(f"news archive error: {exc}")
+            return []
+
+    async def _fetch_rejected():
+        try:
+            feedback = await asyncio.to_thread(redis_queries.list_feedback, 500)
+            rejected = [f for f in feedback if f.get("action") in _REJECT_ACTIONS]
+            return [_feedback_to_news_item(i) for i in rejected]
+        except Exception as exc:
+            logger.error(f"news feedback error: {exc}")
+            return []
+
+    tasks = []
     if status_filter in ("all", "pending"):
-        staging = await asyncio.to_thread(redis_queries.list_staging, 500)
-        items.extend(_staging_to_news_item(i) for i in staging)
-
+        tasks.append(_fetch_staging())
     if status_filter in ("all", "archived"):
-        archived = await asyncio.to_thread(redis_queries.list_archive_recent, 500)
-        items.extend(_archive_to_news_item(i) for i in archived)
-
+        tasks.append(_fetch_archived())
     if status_filter in ("all", "rejected"):
-        feedback = await asyncio.to_thread(redis_queries.list_feedback, 500)
-        rejected = [f for f in feedback if f.get("action") in _REJECT_ACTIONS]
-        items.extend(_feedback_to_news_item(i) for i in rejected)
+        tasks.append(_fetch_rejected())
+
+    results = await asyncio.gather(*tasks)
+    for result in results:
+        items.extend(result)
 
     items.sort(key=lambda x: x.get("date", ""), reverse=True)
     total = len(items)

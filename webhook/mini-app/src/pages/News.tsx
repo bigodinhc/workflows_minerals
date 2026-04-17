@@ -1,13 +1,11 @@
-import { useState, useCallback } from "react";
-import useSWRInfinite from "swr/infinite";
+import { useState } from "react";
+import { useApi } from "../hooks/useApi";
 import { useTelegram } from "../hooks/useTelegram";
-import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 import { FilterChips } from "../components/FilterChips";
 import { StatusDot } from "../components/StatusDot";
 import { Skeleton } from "../components/Skeleton";
 import { GlassCard } from "../components/GlassCard";
 import { formatRelativeTime } from "../lib/format";
-import { apiFetch } from "../lib/api";
 import type { NewsItem, NewsResponse } from "../lib/types";
 
 const FILTER_OPTIONS = [
@@ -45,36 +43,21 @@ interface NewsProps {
 
 export default function News({ onItemClick }: NewsProps) {
   const [status, setStatus] = useState("all");
-  const { initData, haptic } = useTelegram();
+  const [page, setPage] = useState(1);
+  const { haptic } = useTelegram();
 
-  const getKey = useCallback(
-    (pageIndex: number, prev: NewsResponse | null) => {
-      if (prev && prev.items.length === 0) return null;
-      if (!initData) return null;
-      return `/api/mini/news?status=${status}&page=${pageIndex + 1}&limit=${PAGE_SIZE}`;
-    },
-    [status, initData],
+  const { data, isLoading, error } = useApi<NewsResponse>(
+    `/api/mini/news?status=${status}&page=${page}&limit=${PAGE_SIZE}`,
   );
 
-  const { data, size, setSize, isLoading, isValidating } = useSWRInfinite<NewsResponse>(
-    getKey,
-    (url: string) => apiFetch<NewsResponse>(url, initData),
-    { revalidateOnFocus: false },
-  );
-
-  const items = data?.flatMap((page) => page.items) ?? [];
-  const total = data?.[0]?.total ?? 0;
-  const hasMore = items.length < total;
-
-  const sentinelRef = useInfiniteScroll(
-    () => setSize(size + 1),
-    hasMore,
-    isLoading || isValidating,
-  );
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const hasMore = page * PAGE_SIZE < total;
 
   const handleFilterChange = (id: string) => {
     haptic?.impactOccurred("light");
     setStatus(id);
+    setPage(1);
   };
 
   return (
@@ -88,18 +71,39 @@ export default function News({ onItemClick }: NewsProps) {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
+        ) : error ? (
+          <p className="text-error text-sm text-center py-8">Erro ao carregar noticias.</p>
         ) : items.length === 0 ? (
           <p className="text-text-muted text-sm text-center py-8">Nenhum item encontrado.</p>
         ) : (
           <GlassCard className="divide-y divide-white/[0.02] px-3">
-            {items.map((item, i) => (
-              <div key={item.id} ref={i === items.length - 1 ? sentinelRef : undefined}>
-                <NewsRow item={item} onClick={() => onItemClick(item.id)} />
-              </div>
+            {items.map((item) => (
+              <NewsRow key={item.id} item={item} onClick={() => onItemClick(item.id)} />
             ))}
           </GlassCard>
         )}
-        {isValidating && items.length > 0 && <Skeleton className="h-12 w-full mt-2" />}
+
+        {total > PAGE_SIZE && (
+          <div className="flex justify-center items-center gap-4 pt-3">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="text-sm text-accent disabled:text-text-muted"
+            >
+              {"\u2190"} Anterior
+            </button>
+            <span className="text-xs text-text-muted">
+              {page} / {Math.ceil(total / PAGE_SIZE)}
+            </span>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!hasMore}
+              className="text-sm text-accent disabled:text-text-muted"
+            >
+              Proxima {"\u2192"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

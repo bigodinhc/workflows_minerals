@@ -10,12 +10,11 @@ import asyncio
 import logging
 
 from aiogram import Router, F
-from aiogram.filters import StateFilter
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from bot.config import ANTHROPIC_API_KEY, SHEET_ID
-from bot.states import AdjustDraft, RejectReason, AddContact, BroadcastMessage
+from bot.states import AdjustDraft, RejectReason, AddContact, BroadcastMessage, WriterInput
 from bot.middlewares.auth import RoleMiddleware
 from bot.routers._helpers import process_news, process_adjustment
 import contact_admin
@@ -58,6 +57,22 @@ async def on_reply_workflows(message: Message):
 async def on_reply_settings(message: Message):
     from bot.routers.settings import show_subscription_panel
     await show_subscription_panel(message.chat.id)
+
+
+@reply_kb_router.message(F.text == "🖋️ Writer")
+async def on_reply_writer(message: Message, state: FSMContext):
+    from bot.users import is_admin
+    if not is_admin(message.chat.id):
+        return
+    await state.set_state(WriterInput.waiting_text)
+    await message.answer(
+        "🖋️ *Writer — 3 agentes IA*\n\n"
+        "Cole ou digite o texto que sera processado por:\n"
+        "1\\. Writer — redige\n"
+        "2\\. Reviewer — revisa\n"
+        "3\\. Finalizer — formata\n\n"
+        "Use `/cancel` para cancelar.",
+    )
 
 
 @reply_kb_router.message(F.text == "📲 Enviar Msg")
@@ -196,21 +211,20 @@ async def on_add_contact_data(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ── Free-form news text (no FSM state — catch-all for text) ──
+# ── Writer input (via "🖋️ Writer" button) ──
 
-@message_router.message(StateFilter(None), F.text)
-async def on_news_text(message: Message):
-    """Process free-form text through the 3-agent pipeline.
+@message_router.message(WriterInput.waiting_text, F.text)
+async def on_writer_text(message: Message, state: FSMContext):
+    """Process text through 3-agent pipeline (Writer → Reviewer → Finalizer)."""
+    await state.clear()
 
-    StateFilter(None) ensures this ONLY fires when no FSM state is active.
-    """
     if not ANTHROPIC_API_KEY:
         await message.answer("❌ ANTHROPIC\\_API\\_KEY não configurada no servidor.")
         return
 
     chat_id = message.chat.id
     text = message.text or ""
-    logger.info(f"New news text from chat {chat_id} ({len(text)} chars)")
+    logger.info(f"Writer input from chat {chat_id} ({len(text)} chars)")
 
-    progress = await message.answer("⏳ Processando sua notícia com 3 agentes IA...")
+    progress = await message.answer("⏳ Processando com 3 agentes IA...")
     asyncio.create_task(process_news(chat_id, text, progress.message_id))

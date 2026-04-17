@@ -30,3 +30,8 @@ class NewsInput(StatesGroup):
 class BroadcastMessage(StatesGroup):
     """Admin wants to send a free-form message to WhatsApp contacts."""
     waiting_text = State()
+
+
+class WriterInput(StatesGroup):
+    """Admin wants to process text through the 3-agent pipeline."""
+    waiting_text = State()

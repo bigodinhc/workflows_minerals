@@ -219,6 +219,17 @@ async def on_menu_action(query: CallbackQuery, callback_data: MenuAction, state:
         await query.message.answer("Uso: `/list [busca]`\n\nDigite o comando ou `/list` pra ver todos.")
     elif target == "add":
         await query.message.answer("Uso: `/add`\n\nDigite o comando pra iniciar.")
+    elif target == "writer":
+        from bot.states import WriterInput
+        await state.set_state(WriterInput.waiting_text)
+        await query.message.answer(
+            "🖋️ *Writer — 3 agentes IA*\n\n"
+            "Cole ou digite o texto que sera processado por:\n"
+            "1\\. Writer — redige\n"
+            "2\\. Reviewer — revisa\n"
+            "3\\. Finalizer — formata\n\n"
+            "Use `/cancel` para cancelar.",
+        )
     elif target == "broadcast":
         from bot.states import BroadcastMessage
         await state.set_state(BroadcastMessage.waiting_text)

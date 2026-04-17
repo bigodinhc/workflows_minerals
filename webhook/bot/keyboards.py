@@ -62,6 +62,7 @@ def build_main_menu_keyboard() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="➕ Add Contato", callback_data=MenuAction(target="add").pack()),
+        InlineKeyboardButton(text="📲 Enviar Msg", callback_data=MenuAction(target="broadcast").pack()),
     )
     builder.row(
         InlineKeyboardButton(text="⚡ Workflows", callback_data=WorkflowList(action="list").pack()),
@@ -94,7 +95,7 @@ def build_reply_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="⚡ Workflows"), KeyboardButton(text="⚙️ Settings")],
     ]
     if is_admin:
-        rows.append([KeyboardButton(text="🥸 Admin")])
+        rows.append([KeyboardButton(text="📲 Enviar Msg"), KeyboardButton(text="🥸 Admin")])
     return ReplyKeyboardMarkup(
         keyboard=rows,
         resize_keyboard=True,

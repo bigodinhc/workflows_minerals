@@ -14,7 +14,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from bot.config import ANTHROPIC_API_KEY, SHEET_ID
-from bot.states import AdjustDraft, RejectReason, AddContact
+from bot.states import AdjustDraft, RejectReason, AddContact, BroadcastMessage
 from bot.middlewares.auth import RoleMiddleware
 from bot.routers._helpers import process_news, process_adjustment
 import contact_admin
@@ -59,6 +59,19 @@ async def on_reply_settings(message: Message):
     await show_subscription_panel(message.chat.id)
 
 
+@reply_kb_router.message(F.text == "📲 Enviar Msg")
+async def on_reply_broadcast(message: Message, state: FSMContext):
+    from bot.users import is_admin
+    if not is_admin(message.chat.id):
+        return
+    await state.set_state(BroadcastMessage.waiting_text)
+    await message.answer(
+        "📲 *Enviar mensagem direta*\n\n"
+        "Digite o texto que sera enviado para todos os contatos WhatsApp.\n\n"
+        "Use `/cancel` para cancelar.",
+    )
+
+
 @reply_kb_router.message(F.text == "🥸 Admin")
 async def on_reply_admin(message: Message):
     from bot.keyboards import build_main_menu_keyboard
@@ -70,6 +83,44 @@ async def on_reply_admin(message: Message):
 
 message_router = Router(name="messages")
 message_router.message.middleware(RoleMiddleware(allowed_roles={"admin"}))
+
+
+@message_router.message(BroadcastMessage.waiting_text, F.text)
+async def on_broadcast_text(message: Message, state: FSMContext):
+    import time as _time
+    from bot.callback_data import BroadcastConfirm
+    from bot.routers._helpers import drafts_set
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("❌ Texto vazio. Tente novamente.")
+        return
+
+    await state.clear()
+
+    draft_id = f"broadcast_{int(_time.time())}"
+    drafts_set(draft_id, {
+        "message": text,
+        "status": "pending",
+        "original_text": text,
+        "uazapi_token": None,
+        "uazapi_url": None,
+    })
+
+    preview = text[:3500] if len(text) > 3500 else text
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Enviar para WhatsApp", "callback_data": BroadcastConfirm(action="send").pack()},
+                {"text": "❌ Cancelar", "callback_data": BroadcastConfirm(action="cancel").pack()},
+            ],
+        ],
+    }
+    await message.answer(
+        f"📲 *PREVIEW*\n🆔 `{draft_id}`\n\n{preview}\n\n"
+        f"────────────────────\n"
+        f"_{len(text)} caracteres_",
+        reply_markup=keyboard,
+    )
 
 
 @message_router.message(AdjustDraft.waiting_feedback, F.text)

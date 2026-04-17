@@ -25,3 +25,8 @@ class AddContact(StatesGroup):
 class NewsInput(StatesGroup):
     """Guard: text is being processed by the 3-agent pipeline."""
     processing = State()
+
+
+class BroadcastMessage(StatesGroup):
+    """Admin wants to send a free-form message to WhatsApp contacts."""
+    waiting_text = State()

@@ -88,3 +88,7 @@ class SubscriptionDone(CallbackData, prefix="sub_done"):
 
 class OnboardingStart(CallbackData, prefix="onboard"):
     pass
+
+
+class BroadcastConfirm(CallbackData, prefix="broadcast"):
+    action: str  # send, cancel

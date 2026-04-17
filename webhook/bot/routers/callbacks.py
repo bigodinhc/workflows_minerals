@@ -21,6 +21,7 @@ from bot.callback_data import (
     QueuePage, QueueOpen,
     ContactToggle, ContactPage,
     WorkflowRun, WorkflowList,
+    BroadcastConfirm,
 )
 from bot.states import AdjustDraft, RejectReason
 from bot.keyboards import build_main_menu_keyboard, build_approval_keyboard
@@ -178,7 +179,7 @@ async def on_draft_action(query: CallbackQuery, callback_data: DraftAction):
 # ── Menu actions ──
 
 @callback_router.callback_query(MenuAction.filter())
-async def on_menu_action(query: CallbackQuery, callback_data: MenuAction):
+async def on_menu_action(query: CallbackQuery, callback_data: MenuAction, state: FSMContext):
     chat_id = query.message.chat.id
     await query.answer("")
     target = callback_data.target
@@ -218,6 +219,14 @@ async def on_menu_action(query: CallbackQuery, callback_data: MenuAction):
         await query.message.answer("Uso: `/list [busca]`\n\nDigite o comando ou `/list` pra ver todos.")
     elif target == "add":
         await query.message.answer("Uso: `/add`\n\nDigite o comando pra iniciar.")
+    elif target == "broadcast":
+        from bot.states import BroadcastMessage
+        await state.set_state(BroadcastMessage.waiting_text)
+        await query.message.answer(
+            "📲 *Enviar mensagem direta*\n\n"
+            "Digite o texto que sera enviado para todos os contatos WhatsApp.\n\n"
+            "Use `/cancel` para cancelar.",
+        )
     elif target == "help":
         try:
             await query.message.answer(query_handlers.format_help())
@@ -541,6 +550,47 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
         # Build a simple message with title + text
         message = f"*{title}*\n\n{raw_text}" if title else raw_text
         asyncio.create_task(process_approval_async(chat_id, message))
+
+
+# ── Broadcast confirm/cancel ──
+
+@callback_router.callback_query(BroadcastConfirm.filter())
+async def on_broadcast_confirm(query: CallbackQuery, callback_data: BroadcastConfirm):
+    chat_id = query.message.chat.id
+
+    if callback_data.action == "cancel":
+        await query.answer("❌ Cancelado")
+        await _finalize_card(query, "❌ *Envio cancelado*")
+        return
+
+    if callback_data.action == "send":
+        # Extract draft_id from preview message text
+        msg_text = query.message.text or ""
+        draft_id = ""
+        for line in msg_text.splitlines():
+            if line.strip().startswith("broadcast_"):
+                draft_id = line.strip()
+                break
+        if not draft_id:
+            await query.answer("❌ Draft não encontrado")
+            return
+
+        draft = drafts_get(draft_id)
+        if not draft:
+            await query.answer("❌ Draft expirou")
+            await _finalize_card(query, "❌ *Draft expirado*")
+            return
+
+        drafts_update(draft_id, status="approved")
+        await query.answer("📲 Enviando...")
+        await _finalize_card(
+            query,
+            f"📲 *Enviando para WhatsApp*\n🕒 {datetime.now(timezone.utc).strftime('%H:%M')} UTC",
+        )
+        from dispatch import process_approval_async
+        asyncio.create_task(
+            process_approval_async(chat_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
+        )
 
 
 # ── Nop callback ──

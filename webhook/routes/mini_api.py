@@ -5,12 +5,15 @@ Prefix: /api/mini/
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import aiohttp
 from aiohttp import web
 
+import redis_queries
+from execution.curation import redis_client
 from routes.mini_auth import validate_init_data
 from workflow_trigger import (
     WORKFLOW_CATALOG,
@@ -168,3 +171,110 @@ async def trigger_workflow_endpoint(request: web.Request) -> web.Response:
     if not ok:
         return web.json_response({"ok": False, "error": error}, status=502)
     return web.json_response({"ok": True})
+
+
+# ── News endpoints ─────────────────────────────────────────────────────
+
+_REJECT_ACTIONS = {"curate_reject", "draft_reject"}
+
+
+def _staging_to_news_item(item: dict) -> dict:
+    return {
+        "id": item.get("id", ""),
+        "title": item.get("title", ""),
+        "source": item.get("source", ""),
+        "source_feed": item.get("source_feed", ""),
+        "date": item.get("publishDate", ""),
+        "status": "pending",
+        "preview_url": f"/preview/{item.get('id', '')}",
+    }
+
+
+def _archive_to_news_item(item: dict) -> dict:
+    return {
+        "id": item.get("id", ""),
+        "title": item.get("title", ""),
+        "source": item.get("source", ""),
+        "source_feed": item.get("source_feed", ""),
+        "date": item.get("publishDate", item.get("archivedAt", "")),
+        "status": "archived",
+        "preview_url": f"/preview/{item.get('id', '')}",
+    }
+
+
+def _feedback_to_news_item(item: dict) -> dict:
+    ts = item.get("timestamp", 0)
+    date = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else ""
+    return {
+        "id": item.get("item_id", ""),
+        "title": item.get("title", ""),
+        "source": "",
+        "source_feed": "",
+        "date": date,
+        "status": "rejected",
+        "preview_url": None,
+    }
+
+
+@routes.get("/api/mini/news")
+async def get_news(request: web.Request) -> web.Response:
+    await validate_init_data(request)
+    status_filter = request.query.get("status", "all")
+    page = int(request.query.get("page", "1"))
+    limit = int(request.query.get("limit", "20"))
+
+    items: list[dict] = []
+    if status_filter in ("all", "pending"):
+        staging = await asyncio.to_thread(redis_queries.list_staging, 500)
+        items.extend(_staging_to_news_item(i) for i in staging)
+
+    if status_filter in ("all", "archived"):
+        archived = await asyncio.to_thread(redis_queries.list_archive_recent, 500)
+        items.extend(_archive_to_news_item(i) for i in archived)
+
+    if status_filter in ("all", "rejected"):
+        feedback = await asyncio.to_thread(redis_queries.list_feedback, 500)
+        rejected = [f for f in feedback if f.get("action") in _REJECT_ACTIONS]
+        items.extend(_feedback_to_news_item(i) for i in rejected)
+
+    items.sort(key=lambda x: x.get("date", ""), reverse=True)
+    total = len(items)
+    start = (page - 1) * limit
+    page_items = items[start : start + limit]
+
+    return web.json_response({
+        "items": page_items,
+        "total": total,
+        "page": page,
+    })
+
+
+@routes.get("/api/mini/news/{item_id}")
+async def get_news_detail(request: web.Request) -> web.Response:
+    await validate_init_data(request)
+    item_id = request.match_info["item_id"]
+
+    item = await asyncio.to_thread(redis_client.get_staging, item_id)
+    status = "pending"
+    if item is None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        item = await asyncio.to_thread(redis_client.get_archive, today, item_id)
+        status = "archived"
+    if item is None:
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+        item = await asyncio.to_thread(redis_client.get_archive, yesterday, item_id)
+        status = "archived"
+    if item is None:
+        return web.json_response({"error": "Item not found"}, status=404)
+
+    return web.json_response({
+        "id": item_id,
+        "title": item.get("title", ""),
+        "source": item.get("source", ""),
+        "source_feed": item.get("source_feed", ""),
+        "date": item.get("publishDate", ""),
+        "status": status,
+        "fullText": item.get("fullText", ""),
+        "tables": item.get("tables", []),
+        "preview_url": f"/preview/{item_id}",
+    })

@@ -34,6 +34,7 @@ from bot.routers.messages import message_router, reply_kb_router
 from routes.api import routes as api_routes
 from routes.preview import routes as preview_routes
 from routes.mini_api import routes as mini_api_routes
+from routes.mini_static import routes as mini_static_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ def create_app() -> web.Application:
     app.router.add_routes(api_routes)
     app.router.add_routes(preview_routes)
     app.router.add_routes(mini_api_routes)
+    app.router.add_routes(mini_static_routes)
 
     # Mount Aiogram webhook handler
     bot = get_bot()

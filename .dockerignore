@@ -1,0 +1,11 @@
+.git
+.worktrees
+.next
+dashboard/node_modules
+dashboard/.next
+webhook/mini-app/node_modules
+webhook/mini-app/dist
+*.pyc
+__pycache__
+.pytest_cache
+.env

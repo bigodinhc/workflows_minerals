@@ -35,6 +35,35 @@ function NewsRow({ item, onClick }: { item: NewsItem; onClick: () => void }) {
   );
 }
 
+function QueueBanner({
+  onGoToQueue,
+}: {
+  onGoToQueue: () => void;
+}) {
+  const { data } = useApi<NewsResponse>(
+    "/api/mini/news?status=pending&page=1&limit=1",
+  );
+  const count = data?.total ?? 0;
+
+  if (count === 0) return null;
+
+  return (
+    <button
+      onClick={onGoToQueue}
+      className="w-full flex items-center gap-3 p-3 mb-3 glass rounded-card border border-warning/20 text-left"
+    >
+      <span className="text-xl">{"\uD83D\uDCE8"}</span>
+      <div className="flex-1">
+        <span className="text-sm font-medium text-text-primary">Fila de curadoria</span>
+        <span className="text-xs text-text-secondary ml-2">{count} aguardando</span>
+      </div>
+      <span className="px-2 py-0.5 rounded-chip bg-warning/20 text-warning text-xs font-medium">
+        {count}
+      </span>
+    </button>
+  );
+}
+
 const PAGE_SIZE = 20;
 
 interface NewsProps {
@@ -60,9 +89,18 @@ export default function News({ onItemClick }: NewsProps) {
     setPage(1);
   };
 
+  const handleGoToQueue = () => {
+    haptic?.impactOccurred("light");
+    setStatus("pending");
+    setPage(1);
+  };
+
   return (
     <div className="p-4">
       <h1 className="text-lg font-semibold mb-3">{"\uD83D\uDCF0"} News</h1>
+
+      {status !== "pending" && <QueueBanner onGoToQueue={handleGoToQueue} />}
+
       <FilterChips options={FILTER_OPTIONS} active={status} onChange={handleFilterChange} />
       <div className="mt-3">
         {isLoading && items.length === 0 ? (

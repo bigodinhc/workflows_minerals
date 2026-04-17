@@ -1,0 +1,7 @@
+export default function Contacts({
+  onBack: _,
+}: {
+  onBack: () => void;
+}) {
+  return <div className="p-4 text-text-secondary">Contacts loading...</div>;
+}

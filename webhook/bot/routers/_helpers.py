@@ -101,20 +101,16 @@ async def process_news(chat_id, raw_text, progress_msg_id):
         done.clear()
         done.extend(phase_order[:idx])
         if progress_msg_id:
-            await bot.edit_message_text(
-                format_pipeline_progress(current=phase_name, done=list(done)),
-                chat_id=chat_id,
-                message_id=progress_msg_id,
-            )
+            try:
+                await bot.edit_message_text(
+                    format_pipeline_progress(current=phase_name, done=list(done)),
+                    chat_id=chat_id,
+                    message_id=progress_msg_id,
+                )
+            except Exception:
+                pass  # ignore "message not modified" from Telegram
 
     try:
-        if progress_msg_id:
-            await bot.edit_message_text(
-                format_pipeline_progress(current="Writer", done=[]),
-                chat_id=chat_id,
-                message_id=progress_msg_id,
-            )
-
         final_message = await run_3_agents(raw_text, on_phase_start=hook)
 
         draft_id = f"news_{int(time.time())}"

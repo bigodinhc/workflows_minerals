@@ -14,6 +14,7 @@ from aiohttp import web
 
 import redis_queries
 from execution.curation import redis_client
+from reports_nav import _get_supabase
 from routes.mini_auth import validate_init_data
 from workflow_trigger import (
     WORKFLOW_CATALOG,
@@ -278,3 +279,87 @@ async def get_news_detail(request: web.Request) -> web.Response:
         "tables": item.get("tables", []),
         "preview_url": f"/preview/{item_id}",
     })
+
+
+# ── Reports endpoints ─────────────────────────────────────────────────
+
+
+@routes.get("/api/mini/reports")
+async def get_reports(request: web.Request) -> web.Response:
+    await validate_init_data(request)
+    report_type = request.query.get("type", "")
+    year = request.query.get("year")
+    month = request.query.get("month")
+
+    sb = _get_supabase()
+    if not sb:
+        return web.json_response({"error": "Supabase not configured"}, status=503)
+
+    def _query():
+        q = sb.table("platts_reports").select("id, report_name, date_key, frequency")
+        if report_type:
+            q = q.eq("report_type", report_type)
+        if year and month:
+            m = int(month)
+            y = int(year)
+            start = f"{y}-{m:02d}-01"
+            end = f"{y + 1}-01-01" if m == 12 else f"{y}-{m + 1:02d}-01"
+            q = q.gte("date_key", start).lt("date_key", end)
+        elif year:
+            q = q.gte("date_key", f"{year}-01-01").lte("date_key", f"{year}-12-31")
+        else:
+            q = q.limit(10)
+        return q.order("date_key", desc=True).execute()
+
+    try:
+        result = await asyncio.to_thread(_query)
+    except Exception as exc:
+        logger.error("reports query error: %s", exc)
+        return web.json_response({"error": "Query failed"}, status=500)
+
+    reports = [
+        {
+            "id": r["id"],
+            "report_name": r["report_name"],
+            "date_key": r["date_key"],
+            "download_url": f"/api/mini/reports/{r['id']}/download",
+        }
+        for r in (result.data or [])
+    ]
+    return web.json_response({"reports": reports})
+
+
+@routes.get("/api/mini/reports/{report_id}/download")
+async def download_report(request: web.Request) -> web.Response:
+    await validate_init_data(request)
+    report_id = request.match_info["report_id"]
+
+    sb = _get_supabase()
+    if not sb:
+        return web.json_response({"error": "Supabase not configured"}, status=503)
+
+    def _get_signed_url():
+        row = (
+            sb.table("platts_reports")
+            .select("storage_path")
+            .eq("id", report_id)
+            .single()
+            .execute()
+        )
+        if not row.data:
+            return None
+        storage_path = row.data["storage_path"]
+        signed = sb.storage.from_("platts-reports").create_signed_url(
+            storage_path, 3600,
+        )
+        return signed.get("signedURL") if signed else None
+
+    try:
+        url = await asyncio.to_thread(_get_signed_url)
+    except Exception as exc:
+        logger.error("report download error: %s", exc)
+        return web.json_response({"error": "Download failed"}, status=500)
+
+    if not url:
+        return web.json_response({"error": "Report not found"}, status=404)
+    return web.json_response({"download_url": url})

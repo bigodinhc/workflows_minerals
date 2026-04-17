@@ -116,8 +116,11 @@ def build_keyboard(item_id: str, preview_url: str) -> dict:
                 {"text": "✅ Arquivar", "callback_data": f"curate:archive:{item_id}"},
             ],
             [
-                {"text": "❌ Recusar", "callback_data": f"curate:reject:{item_id}"},
                 {"text": "🖋️ Writer", "callback_data": f"curate:pipeline:{item_id}"},
+                {"text": "📲 WhatsApp", "callback_data": f"curate:send_raw:{item_id}"},
+            ],
+            [
+                {"text": "❌ Recusar", "callback_data": f"curate:reject:{item_id}"},
             ],
         ]
     }

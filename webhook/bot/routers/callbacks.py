@@ -509,6 +509,39 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
         )
         asyncio.create_task(run_pipeline_and_archive(chat_id, raw_text, progress.message_id, item_id))
 
+    elif action == "send_raw":
+        from execution.curation import redis_client
+        from dispatch import process_approval_async
+        try:
+            item = await asyncio.to_thread(redis_client.get_staging, item_id)
+        except Exception as exc:
+            logger.error(f"curate_send_raw redis error: {exc}")
+            await query.answer("⚠️ Redis indisponível")
+            return
+        if item is None:
+            await query.answer("⚠️ Item expirou")
+            await _finalize_card(query, "⚠️ Item expirou ou já processado")
+            return
+        raw_text = item.get("fullText", "")
+        title = item.get("title", "")
+        if not raw_text:
+            await query.answer("⚠️ Item sem texto")
+            return
+        # Archive the item
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            await asyncio.to_thread(redis_client.archive, item_id, date, chat_id=chat_id)
+        except Exception as exc:
+            logger.warning(f"archive after send_raw failed: {exc}")
+        await query.answer("📲 Enviando para WhatsApp...")
+        await _finalize_card(
+            query,
+            f"📲 *Enviado direto para WhatsApp*\n🕒 {datetime.now(timezone.utc).strftime('%H:%M')} UTC · 🆔 `{item_id}`",
+        )
+        # Build a simple message with title + text
+        message = f"*{title}*\n\n{raw_text}" if title else raw_text
+        asyncio.create_task(process_approval_async(chat_id, message))
+
 
 # ── Nop callback ──
 

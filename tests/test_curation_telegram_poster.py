@@ -50,17 +50,18 @@ def test_format_message_for_flash():
     assert "02/20/2026 15:09 UTC" in msg
 
 
-def test_build_keyboard_has_4_buttons():
+def test_build_keyboard_has_5_buttons():
     from execution.curation.telegram_poster import build_keyboard
     kb = build_keyboard("abc123", preview_url="https://example.com/preview/abc123")
     all_buttons = [b for row in kb["inline_keyboard"] for b in row]
-    assert len(all_buttons) == 4
+    assert len(all_buttons) == 5
     urls = [b.get("url") for b in all_buttons if "url" in b]
     callbacks = [b.get("callback_data") for b in all_buttons if "callback_data" in b]
     assert "https://example.com/preview/abc123" in urls
     assert "curate:archive:abc123" in callbacks
     assert "curate:reject:abc123" in callbacks
     assert "curate:pipeline:abc123" in callbacks
+    assert "curate:send_raw:abc123" in callbacks
 
 
 def test_post_for_curation_calls_send_with_keyboard(monkeypatch):
@@ -216,15 +217,16 @@ def test_build_keyboard_has_2x2_layout_plus_url_row():
     from execution.curation.telegram_poster import build_keyboard
     kb = build_keyboard("abc123", preview_url="https://example.com/preview/abc123")
     rows = kb["inline_keyboard"]
-    # Layout: row 1 = [Ler completo + Arquivar], row 2 = [Recusar + Writer]
-    # OR: row 1 = [Ler completo alone], row 2 = [Arquivar, Recusar], row 3 = [Writer]
-    # Per spec: 2x2 → [[Ler completo, Arquivar], [Recusar, Writer]]
-    assert len(rows) == 2
+    # Layout: row 1 = [Ler completo, Arquivar], row 2 = [Writer, WhatsApp], row 3 = [Recusar]
+    assert len(rows) == 3
     assert len(rows[0]) == 2
     assert len(rows[1]) == 2
+    assert len(rows[2]) == 1
     row0_texts = [b["text"] for b in rows[0]]
     row1_texts = [b["text"] for b in rows[1]]
+    row2_texts = [b["text"] for b in rows[2]]
     assert "📖 Ler completo" in row0_texts
     assert "✅ Arquivar" in row0_texts
-    assert "❌ Recusar" in row1_texts
     assert "🖋️ Writer" in row1_texts
+    assert "📲 WhatsApp" in row1_texts
+    assert "❌ Recusar" in row2_texts

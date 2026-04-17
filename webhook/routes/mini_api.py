@@ -15,6 +15,8 @@ from aiohttp import web
 import redis_queries
 from execution.curation import redis_client
 from reports_nav import _get_supabase
+from bot.config import SHEET_ID
+from execution.integrations.sheets_client import SheetsClient
 from routes.mini_auth import validate_init_data
 from workflow_trigger import (
     WORKFLOW_CATALOG,
@@ -363,3 +365,67 @@ async def download_report(request: web.Request) -> web.Response:
     if not url:
         return web.json_response({"error": "Report not found"}, status=404)
     return web.json_response({"download_url": url})
+
+
+# ── Contacts endpoints ───────────────────────────────────────────────
+
+
+def _phone_from_contact(contact: dict) -> str:
+    for col in ("Evolution-api", "n8n-evo", "From"):
+        val = contact.get(col, "")
+        if val:
+            return str(val).strip()
+    return ""
+
+
+@routes.get("/api/mini/contacts")
+async def get_contacts(request: web.Request) -> web.Response:
+    await validate_init_data(request)
+    search = request.query.get("search", "").strip() or None
+    page = int(request.query.get("page", "1"))
+
+    try:
+        sheets = SheetsClient()
+        contacts, total_pages = await asyncio.to_thread(
+            sheets.list_contacts, SHEET_ID, search=search, page=page, per_page=20,
+        )
+    except Exception as exc:
+        logger.error(f"contacts query error: {exc}")
+        return web.json_response({"error": "Failed to fetch contacts"}, status=500)
+
+    result = [
+        {
+            "name": c.get("ProfileName", ""),
+            "phone": _phone_from_contact(c),
+            "active": str(c.get("ButtonPayload", "")).strip() == "Big",
+        }
+        for c in contacts
+    ]
+    return web.json_response({
+        "contacts": result,
+        "total": len(result),
+        "page": page,
+    })
+
+
+@routes.post("/api/mini/contacts/{phone}/toggle")
+async def toggle_contact(request: web.Request) -> web.Response:
+    await validate_init_data(request)
+    phone = request.match_info["phone"]
+
+    try:
+        sheets = SheetsClient()
+        name, new_status = await asyncio.to_thread(
+            sheets.toggle_contact, SHEET_ID, phone,
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except Exception as exc:
+        logger.error(f"toggle contact error: {exc}")
+        return web.json_response({"error": "Toggle failed"}, status=500)
+
+    return web.json_response({
+        "name": name,
+        "phone": phone,
+        "active": new_status == "Big",
+    })

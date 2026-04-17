@@ -104,16 +104,20 @@ def format_message(item: dict) -> str:
 
 
 def build_keyboard(item_id: str, preview_url: str) -> dict:
-    """Build Telegram inline keyboard: 2×2 layout with URL + 3 callback buttons."""
+    """Build Telegram inline keyboard: 2×2 layout with URL + 3 callback buttons.
+
+    Callback format: curate:{action}:{item_id} — matches CurateAction(prefix="curate")
+    in webhook/bot/callback_data.py.
+    """
     return {
         "inline_keyboard": [
             [
                 {"text": "📖 Ler completo", "url": preview_url},
-                {"text": "✅ Arquivar", "callback_data": f"curate_archive:{item_id}"},
+                {"text": "✅ Arquivar", "callback_data": f"curate:archive:{item_id}"},
             ],
             [
-                {"text": "❌ Recusar", "callback_data": f"curate_reject:{item_id}"},
-                {"text": "🖋️ Writer", "callback_data": f"curate_pipeline:{item_id}"},
+                {"text": "❌ Recusar", "callback_data": f"curate:reject:{item_id}"},
+                {"text": "🖋️ Writer", "callback_data": f"curate:pipeline:{item_id}"},
             ],
         ]
     }

@@ -58,9 +58,9 @@ def test_build_keyboard_has_4_buttons():
     urls = [b.get("url") for b in all_buttons if "url" in b]
     callbacks = [b.get("callback_data") for b in all_buttons if "callback_data" in b]
     assert "https://example.com/preview/abc123" in urls
-    assert "curate_archive:abc123" in callbacks
-    assert "curate_reject:abc123" in callbacks
-    assert "curate_pipeline:abc123" in callbacks
+    assert "curate:archive:abc123" in callbacks
+    assert "curate:reject:abc123" in callbacks
+    assert "curate:pipeline:abc123" in callbacks
 
 
 def test_post_for_curation_calls_send_with_keyboard(monkeypatch):

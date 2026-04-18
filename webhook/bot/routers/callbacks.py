@@ -14,52 +14,18 @@ from datetime import datetime, timezone
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
-from bot.config import get_bot, SHEET_ID
+from bot.config import get_bot
 from bot.callback_data import (
-    ContactToggle, ContactPage,
     WorkflowRun, WorkflowList,
 )
 from bot.keyboards import build_main_menu_keyboard, build_approval_keyboard
 from bot.middlewares.auth import RoleMiddleware
 import contact_admin
-from execution.integrations.sheets_client import SheetsClient
 
 logger = logging.getLogger(__name__)
 
 callback_router = Router(name="callbacks")
 callback_router.callback_query.middleware(RoleMiddleware(allowed_roles={"admin"}))
-
-
-# ── Contact admin ──
-
-@callback_router.callback_query(ContactToggle.filter())
-async def on_contact_toggle(query: CallbackQuery, callback_data: ContactToggle):
-    from bot.routers.commands import _render_list_view
-    try:
-        sheets = SheetsClient()
-        name, new_status = await asyncio.to_thread(sheets.toggle_contact, SHEET_ID, callback_data.phone)
-    except ValueError as e:
-        await query.answer(f"❌ {str(e)[:100]}")
-        return
-    except Exception as e:
-        logger.error(f"toggle_contact failed: {e}")
-        await query.answer("❌ Erro")
-        return
-
-    toast = f"✅ {name} ativado" if new_status == "Big" else f"❌ {name} desativado"
-    await query.answer(toast)
-    await _render_list_view(query.message.chat.id, page=1, search=None, message_id=query.message.message_id)
-
-
-@callback_router.callback_query(ContactPage.filter())
-async def on_contact_page(query: CallbackQuery, callback_data: ContactPage):
-    from bot.routers.commands import _render_list_view
-    await query.answer("")
-    search = callback_data.search if callback_data.search else None
-    await _render_list_view(
-        query.message.chat.id, page=callback_data.page,
-        search=search, message_id=query.message.message_id,
-    )
 
 
 # ── Workflow actions ──

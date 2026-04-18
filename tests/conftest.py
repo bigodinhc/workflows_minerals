@@ -16,7 +16,6 @@ import pytest
 from aiogram import Bot
 from aiogram.types import CallbackQuery, Message, Chat, User
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State
 
 
 @pytest.fixture

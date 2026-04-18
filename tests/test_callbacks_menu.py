@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from bot.callback_data import MenuAction
-from bot.routers.callbacks import on_menu_action
+from bot.routers.callbacks_menu import on_menu_action
 from bot.states import WriterInput, BroadcastMessage
 
 
@@ -21,7 +21,7 @@ async def test_menu_action_reports_invokes_reports_show_types(
 ):
     query = mock_callback_query(chat_id=100)
     state = fsm_context_in_state()
-    show_types = mocker.patch("reports_nav.reports_show_types", new=AsyncMock())
+    show_types = mocker.patch("bot.routers.callbacks_menu.reports_show_types", new=AsyncMock())
 
     await on_menu_action(query, MenuAction(target="reports"), state)
 
@@ -36,7 +36,7 @@ async def test_menu_action_queue_posts_formatted_queue(
     query = mock_callback_query(chat_id=100)
     state = fsm_context_in_state()
     mocker.patch(
-        "bot.routers.callbacks.query_handlers.format_queue_page",
+        "bot.routers.callbacks_menu.query_handlers.format_queue_page",
         return_value=("body", {"inline_keyboard": []}),
     )
 
@@ -107,7 +107,7 @@ async def test_menu_action_query_handlers_targets_swallow_errors(
     """
     query = mock_callback_query(chat_id=100)
     state = fsm_context_in_state()
-    mocker.patch(f"bot.routers.callbacks.query_handlers.{handler_fn}", return_value="body")
+    mocker.patch(f"bot.routers.callbacks_menu.query_handlers.{handler_fn}", return_value="body")
 
     await on_menu_action(query, MenuAction(target=target), state)
 

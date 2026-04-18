@@ -1,319 +1,731 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-02-13
+**Analysis Date:** 2026-04-17
 
-## Tech Debt
+## Security
 
-**Hardcoded Credentials in Source Code:**
-- Issue: Plaintext password stored directly in Python script
-- Files: `execution/scripts/rationale_ingestion.py` (line 73)
-- Impact: Security vulnerability; credentials exposed in repository history
-- Details:
-  ```python
-  "password": os.getenv("PLATTS_PASSWORD", "141204*MtM"), # Should use Env Var ideally
-  ```
-- Fix approach: Move all defaults to .env files, remove hardcoded values, implement secret rotation for exposed credentials
+### Hardcoded API Key (CRITICAL)
 
-**Excessive Debug Logging in Production Code:**
-- Issue: Debug print statements left scattered throughout source code
-- Files: `execution/integrations/baltic_client.py` (17 print statements), `execution/integrations/sheets_client.py` (8 prints), `execution/integrations/uazapi_client.py` (2 prints), `execution/scripts/morning_check.py`
-- Impact: Debug output pollutes logs, may leak sensitive information (URLs, IDs, partial tokens)
-- Count: 49+ print statements across execution layer
-- Fix approach: Replace all `print()` with `logger` calls from `WorkflowLogger` module; standardize logging levels (DEBUG, INFO, WARNING, ERROR)
+**Issue:** IronMarket API key exposed in source code with comment suggesting awareness of security risk.
 
-**Overly Large Single Files:**
-- Issue: `webhook/app.py` is 1044 lines - monolithic Flask application with mixed concerns
-- Files: `webhook/app.py`
-- Impact: Difficult to test, maintain, and reason about; tight coupling between routing, AI logic, external APIs
-- Responsibilities mixed:
-  - Telegram webhook handling (routing)
-  - AI agent prompts (4 large prompts embedded)
-  - Sheets API client calls
-  - WhatsApp integration
-  - Draft state management
-  - Anthropic API calls
-- Fix approach: Break into modules: `handlers/`, `agents/`, `integrations/`, `state_manager.py`; extract prompts to separate files
+**File:** `execution/scripts/baltic_ingestion.py:36`
 
-**Large Dashboard Components:**
-- Issue: `dashboard/app/page.tsx` (294 lines) and `dashboard/app/workflows/page.tsx` (314 lines) contain business logic mixed with UI
-- Files: `dashboard/app/page.tsx`, `dashboard/app/workflows/page.tsx`
-- Impact: Component reusability reduced, state management distributed, testing difficult
-- Details: Health calculations, workflow catalog definitions, API calls inlined in components
-- Fix approach: Extract to custom hooks (`useWorkflowHealth`, `useWorkflowRuns`), separate data from presentation
+```python
+IRONMARKET_API_KEY = "ironmkt_WUbuYLe4m06GTiYos_fVwvBfNa2l8GWoJtE9K8MJFCY" # Keeping hardcoded as requested, or load from env
+```
 
-**Unconfirmed Database Table Names:**
-- Issue: Table name assumption without schema verification
-- Files: `execution/integrations/supabase_client.py` (line 23)
-- Impact: Runtime errors if table name doesn't exist; no migration tracking
-- Fix approach: Add schema validation on client initialization; document actual table schema; add database migration files
+**Impact:** If repository is exposed (git clone, archive leak), IronMarket API credentials are compromised. Could allow unauthorized API calls costing resources.
 
-**Global In-Memory State in Webhook:**
-- Issue: Flask global dictionaries used for state management
-- Files: `webhook/app.py` (lines 34-35)
-- Details:
-  ```python
-  DRAFTS = {}         # draft_id → {message, status, original_text, uazapi_token, uazapi_url}
-  ADJUST_STATE = {}   # chat_id → {draft_id, awaiting_feedback: True}
-  ```
-- Impact: Lost on process restart; no persistence; race conditions in multi-instance deployments
-- Fix approach: Use database (Supabase or Redis) for state persistence; implement proper concurrency control
+**Fix approach:** Move to environment variable with fallback. Use `os.getenv("IRONMARKET_API_KEY", IRONMARKET_API_KEY_DEFAULT)` and document required env vars in README.
 
 ---
 
-## Known Bugs
+### Unvalidated User Input in Telegram Handlers
 
-**Shell Injection Vulnerability in News Route:**
-- Symptoms: API route executes Python script with user-controlled input
-- Files: `dashboard/app/api/news/route.ts` (line 79)
-- Details: Calling `exec()` to run `send_news.py` with draft message as argument
-- Trigger: Approve draft with special characters (quotes, backticks, semicolons)
-- Workaround: Currently uses file-based temp file approach (safer than inline args), but exec is still inherently risky
-- Fix approach: Call Python subprocess directly via Node.js child_process module; use proper serialization/deserialization instead of shell
+**Issue:** User-provided text (especially in broadcast/news) flows directly to WhatsApp with minimal validation beyond truncation.
 
-**Inconsistent Error Handling:**
-- Symptoms: Some API endpoints return 500 with generic messages; others expose stack traces
-- Files: `dashboard/app/api/logs/route.ts`, `dashboard/app/api/contacts/route.ts`
-- Impact: Debugging harder; user feedback unclear
-- Fix approach: Standardize error response shape; use error codes for programmatic handling; never expose stack traces to client
+**Files:** 
+- `webhook/bot/routers/messages.py:93-130` (BroadcastMessage handler)
+- `webhook/dispatch.py:65-75` (send_whatsapp function)
 
-**Missing News Draft Validation:**
-- Symptoms: Draft text sent directly without sanitization
-- Files: `dashboard/app/api/news/route.ts`
-- Impact: Could send malformed WhatsApp markup if draft editing doesn't validate
-- Fix approach: Add text validation schema; enforce WhatsApp message format rules
+**Evidence:** No input sanitization, XSS-like risk if WhatsApp client interprets HTML/special chars. Markdown escaping exists in `query_handlers.py` but not uniformly applied to all user inputs.
+
+**Impact:** Malicious users could inject commands or formatting that breaks WhatsApp display or bypasses intended formatting.
+
+**Fix approach:** 
+1. Centralize input validation for all user-provided text
+2. Use `_escape_md()` consistently before sending to WhatsApp
+3. Add length validation beyond truncation
+4. Test edge cases (emoji, RTL text, special unicode)
 
 ---
 
-## Security Considerations
+### Missing Rate Limiting on Webhook Endpoints
 
-**Unencrypted Environment Secrets:**
-- Risk: GITHUB_TOKEN, UAZAPI_TOKEN, ANTHROPIC_API_KEY exposed via environment variables
-- Files: `dashboard/app/api/workflows/route.ts` (requires GITHUB_TOKEN), `webhook/app.py` (requires UAZAPI_TOKEN, ANTHROPIC_API_KEY)
-- Current mitigation: .env file (not committed), but no rotation policy
-- Recommendations:
-  - Implement secret rotation schedule (quarterly minimum)
-  - Use secret management service (GitHub Secrets Environments, Railway Vault)
-  - Add secret scanning in CI/CD pipeline
-  - Audit logs for which processes accessed which secrets
+**Issue:** No rate limiting on `/api/mini/*` endpoints or webhook callbacks. An attacker could spam requests.
 
-**Broadened GitHub API Permissions:**
-- Risk: GITHUB_TOKEN has full repo access (workflow dispatch)
-- Files: `dashboard/app/api/workflows/route.ts`
-- Impact: Compromised token could modify workflows, delete runs, access repo contents
-- Recommendations: Create fine-grained personal access token with minimal scope (workflows only)
+**Files:** 
+- `webhook/routes/mini_api.py` (all routes)
+- `webhook/routes/api.py` (approval/test endpoints)
 
-**Missing Input Validation:**
-- Risk: News route accepts arbitrary text without sanitization
-- Files: `dashboard/app/api/news/route.ts`
-- Impact: Could inject WhatsApp/Telegram format exploits
-- Fix: Add zod schema validation on all POST/PUT requests
+**Impact:** Bot could be disabled via request flooding. No protection against distributed abuse.
 
-**Azure Graph API Token Generation:**
-- Risk: Client secrets stored in environment
-- Files: `execution/integrations/baltic_client.py`
-- Impact: Exposed secret could be used to access all mail in organization
-- Recommendations: Use managed identity (if on Azure) or rotate client secret monthly; audit mailbox access logs
+**Fix approach:** Add aiohttp-based rate limiter (e.g., `aiolimiter` package) per IP/user_id with exponential backoff. Configurable via env var.
 
-**No Rate Limiting:**
-- Risk: API routes have no rate limiting or authentication
-- Files: `dashboard/app/api/workflows/route.ts`, `dashboard/app/api/news/route.ts`, `dashboard/app/api/logs/route.ts`, `dashboard/app/api/contacts/route.ts`
-- Impact: DOS vulnerability; anyone with URL can trigger workflows or access logs
-- Fix: Add authentication middleware (OAuth, JWT, or API key); implement rate limiting per IP/user
+---
+
+### Weak Auth on /api/mini Routes (Authorization Only, No Rate Limiting)
+
+**Issue:** Auth via Telegram initData validates signature but no secondary checks exist. Replay attacks or token forgery not explicitly defended against.
+
+**File:** `webhook/routes/mini_auth.py:19-36`
+
+```python
+data = safe_parse_webapp_init_data(TELEGRAM_BOT_TOKEN, init_data)
+```
+
+**Impact:** Relies entirely on aiogram's `safe_parse_webapp_init_data()`. If signature validation is weak, unauthorized access possible. No timestamp validation visible.
+
+**Fix approach:** 
+1. Verify Telegram's recommended `query_id` uniqueness + timestamp freshness check
+2. Add blacklist for revoked tokens (not currently done)
+3. Add secondary check for user role freshness (cache with TTL)
+
+---
+
+## Technical Debt & Fragile Areas
+
+### Catch-All Message Handler Recently Fixed But Pattern Remains Risky
+
+**Issue:** Recent commits (2cab598, a6214a0, 17135d8) show repeated bugs with catch-all text handlers intercepting FSM state messages.
+
+**File:** `webhook/bot/routers/messages.py` (entire message_router)
+
+**Evidence:** Git history shows:
+- 17135d8: "catch-all news handler intercepting text + draft not found"
+- a6214a0: "use StateFilter(None) on catch-all to prevent 3-agent activation"
+- 2cab598: "remove catch-all text handler, add explicit Writer button"
+
+**Impact:** FSM states can be silently intercepted. Users typing in AdjustDraft state or RejectReason state could have messages misrouted.
+
+**Safe modification:** 
+1. Register specific FSM handlers BEFORE any F.text handlers
+2. Use explicit `StateFilter` on all FSM transitions
+3. Add integration test for FSM state isolation (TextInputStateTest)
+4. Consider router registration order as documented in code (line 90 comment)
+
+---
+
+### God File: callbacks.py (601 lines)
+
+**Issue:** Single router with 601 lines handling all callback logic (reports, queues, contacts, workflows, approvals).
+
+**File:** `webhook/bot/routers/callbacks.py`
+
+**Impact:** Hard to modify, test, or review. Small change risks side effects. Multiple error handling patterns.
+
+**Fix approach:** Split into domain routers:
+- `callbacks_curation.py` — draft adjust/reject/approve
+- `callbacks_reports.py` — report navigation
+- `callbacks_queue.py` — queue pagination
+- `callbacks_contacts.py` — contact toggle/admin
+- `callbacks_workflows.py` — workflow triggers
+
+Each <200 lines, easier to test.
+
+---
+
+### Inline Imports Shadow Module Scope
+
+**Issue:** Many functions import modules inside function bodies, creating hidden dependencies and making tracing harder.
+
+**Files:**
+- `webhook/bot/routers/commands.py` — `from reports_nav import ...` inside functions
+- `webhook/bot/routers/callbacks.py` — `from reports_nav import ...`, `from workflow_trigger import ...`
+- `webhook/dispatch.py` — `from bot.keyboards import ...` inside functions
+
+**Impact:** Circular import risks, harder to trace dependencies. Makes static analysis difficult.
+
+**Fix approach:** Move all imports to module top. Use `.` relative imports. Document cyclic dependencies in module docstring.
+
+---
+
+### Silent Exception Swallowing in edit_message_text Calls
+
+**Issue:** Many handlers catch all exceptions on edit calls and silently pass.
+
+**Files:**
+- `webhook/dispatch.py:104-105, 121-122, 145-146`
+- `webhook/bot/routers/callbacks.py:53-58` (in _finalize_card)
+
+**Evidence:**
+```python
+try:
+    await bot.edit_message_text(...)
+except Exception:
+    pass  # ignore "message not modified" — don't crash delivery
+```
+
+**Impact:** Messages not being edited silently fail. User sees stale state. Hard to debug in production.
+
+**Fix approach:** 
+1. Catch specific exceptions: `aiogram.exceptions.TelegramBadRequest` with "message is not modified" substring
+2. Log other exceptions with level WARNING
+3. Add counter metric for edit failures
+4. Return success/failure flag from helpers
+
+---
+
+### Trailing-Space Path Issue (Known from Memory)
+
+**Issue:** Supabase storage paths may have trailing spaces causing mismatches on retrieval.
+
+**Files:** `webhook/reports_nav.py` (noted in memory as "trailing-space path")
+
+**Impact:** Reports may not be downloadable or retrievable if path keys don't match.
+
+**Fix approach:** 
+1. Strip all path keys on write and read: `path.strip()`
+2. Add migration script to fix existing paths
+3. Add validation test for path normalization
 
 ---
 
 ## Performance Bottlenecks
 
-**Synchronous PDF Download in Email Processing:**
-- Problem: Baltic client downloads PDF files without timeout or size limits
-- Files: `execution/integrations/baltic_client.py` (lines 84-172)
-- Cause: Single-threaded requests.get() blocks entire workflow
-- Impact: If PDF link is slow/unavailable, workflow hangs; no max-size check could cause memory exhaustion
-- Improvement path:
-  - Add request timeout (current: infinite)
-  - Add max content-length check before download
-  - Consider async requests (httpx) or background job queue
+### Blocking Sync Google Sheets Calls in Async Context
 
-**N+1 Query in Platts Data Retrieval:**
-- Problem: Fetching data for each product key individually
-- Files: `execution/scripts/morning_check.py` (lines 201-230)
-- Cause: Loop through symbols and fetch one-by-one from Platts
-- Impact: Unnecessary API calls; slow report generation
-- Improvement path: Batch requests if Platts API supports; cache results with TTL
+**Issue:** `_get_contacts_sync()` makes blocking Google Sheets API calls in webhook handler, bridged with `asyncio.to_thread()` but still synchronous.
 
-**Unoptimized GitHub API Polling:**
-- Problem: Dashboard fetches full workflow runs every 10 seconds
-- Files: `dashboard/app/page.tsx` (line 27)
-- Impact: 8640 GitHub API calls per day; potential rate limit hits
-- Improvement path:
-  - Increase polling interval (30+ seconds)
-  - Cache results server-side
-  - Use webhook instead of polling
+**File:** `webhook/dispatch.py:25-47`
 
-**Large JSON Payloads:**
-- Problem: No pagination or field selection in API responses
-- Files: `dashboard/app/api/workflows/route.ts` (line 18: per_page: 100)
-- Impact: Transfers unnecessary data (commit messages, author info not displayed)
-- Fix: Use GraphQL to request only needed fields; implement pagination
+```python
+def _get_contacts_sync():
+    """Fetch WhatsApp contacts from Google Sheets (sync)."""
+    # ... max 3 retries with sleep()
+```
+
+**Impact:** If Google Sheets API is slow (2-3s per request), thread pool fills up. Multiple simultaneous requests can exhaust thread pool.
+
+**Fix approach:** 
+1. Implement async Google Sheets client using `aiohttp` directly instead of gspread
+2. Or: cache contacts in Redis with TTL=300s to reduce API calls
+3. Add timeout to thread: `asyncio.wait_for(asyncio.to_thread(...), timeout=10)`
 
 ---
 
-## Fragile Areas
+### N+1 Query Pattern in Mini API (News Endpoint)
 
-**AI Prompt Management:**
-- Files: `webhook/app.py` (lines 46-200+ hardcoded prompts)
-- Why fragile: Prompts define behavior of Writer, Critique, Curator agents; small text changes break output parsing
-- Safe modification:
-  - Change prompts in isolated environment first
-  - Test with same input corpus before deploying
-  - Version control prompts separately (separate file)
-  - Add regression tests with expected output samples
-- Test coverage: Only manual testing via Telegram
+**Issue:** `list_staging()` and `list_archive_recent()` fetch all items from Redis, then filter in Python. For large queues, this loads entire dataset into memory.
 
-**Apify Integration:**
-- Files: `execution/scripts/rationale_ingestion.py`, `execution/integrations/apify_client.py`
-- Why fragile: Depends on external actor; if Apify changes output format, script breaks silently
-- Safe modification:
-  - Add data validation after Apify response
-  - Log actual response structure
-  - Add test with fixture data
-- Test coverage: No unit tests
+**Files:** 
+- `webhook/routes/mini_api.py:160-175` (news endpoint)
+- `webhook/redis_queries.py:78-86` (list_staging implementation)
 
-**State Persistence (Local JSON Files):**
-- Files: `execution/core/state.py`, `dashboard/app/api/news/route.ts`
-- Why fragile: JSON files on filesystem not atomic; concurrent writes corrupt data
-- Safe modification:
-  - Add file locking or database
-  - Validate JSON on read (handle corrupt files)
-  - Add backup/versioning
-- Risk scenario: Two processes write state simultaneously → corrupted state file
+**Evidence:** `pipe.execute()` returns all keys, then Python does filtering:
+```python
+items = [pipe.execute()]  # All items loaded
+return [_staging_to_news_item(i) for i in staging]  # Python filter
+```
 
-**Azure Mailbox Access:**
-- Files: `execution/integrations/baltic_client.py`
-- Why fragile: Depends on Azure Graph API behavior; email parsing uses regex and heuristics
-- Safe modification:
-  - Add detailed error logging for each step
-  - Test with sample emails before deploying
-  - Document expected email format
-- Test coverage: No unit tests; manual testing only
+**Impact:** For 10k+ items in queue, allocates large in-memory list. Slow pagination.
+
+**Fix approach:** 
+1. Use Redis Lua scripting to filter on server side
+2. Or: implement cursor-based pagination with SCAN
+3. Set Redis key limit: max 500 items in staging, archive excess to Postgres
+
+---
+
+### Missing TTL on Redis Curation State
+
+**Issue:** Most Redis keys in curation layer lack explicit TTL. Long-lived entries accumulate.
+
+**File:** `execution/curation/redis_client.py:56`
+
+```python
+client.expire(key, _SEEN_TTL_SECONDS)  # Only on SEEN items
+```
+
+**Impact:** Other keyspaces (staging, archive, feedback) grow unbounded. Redis memory usage climbs.
+
+**Fix approach:** 
+1. Set TTL on all keys at creation: `client.setex(key, ttl_seconds, value)`
+2. Configure TTLs per keyspace:
+   - staging: 7 days
+   - archive: 30 days
+   - feedback: 60 days
+   - seen: 1 day (current)
+3. Add Redis memory monitoring/alerts
+
+---
+
+### Synchronous Platts Scraping May Block Event Loop
+
+**Issue:** `platts_ingestion.py` and `baltic_ingestion.py` run as scheduled jobs with synchronous API calls.
+
+**Files:** `execution/scripts/platts_ingestion.py`, `execution/scripts/baltic_ingestion.py`
+
+**Impact:** If scraping takes 5+ minutes, blocks other events. No async/await pattern.
+
+**Fix approach:** Convert to async with `aiohttp` for all HTTP calls. Use `asyncio.gather()` to parallelize requests.
+
+---
+
+## Reliability
+
+### No Idempotency Token on WhatsApp Send (Webhook Handler)
+
+**Issue:** `send_whatsapp()` has no idempotency check. If webhook is called twice, message sends twice.
+
+**File:** `webhook/dispatch.py:65-77`
+
+**Impact:** Users may receive duplicate WhatsApp messages. Confusing UX.
+
+**Fix approach:** 
+1. Generate idempotency key per send: hash(phone + timestamp + message_hash)
+2. Store in Redis with TTL=3600s
+3. Check key before calling UAZAPI: if key exists, return cached response
+4. Use key in UAZAPI call if API supports it (check docs)
+
+---
+
+### Retry Logic Missing on GitHub API Calls
+
+**Issue:** `_fetch_github_runs()` makes single request with generic exception handler, no retry.
+
+**File:** `webhook/routes/mini_api.py:58-70`
+
+**Evidence:**
+```python
+except Exception as exc:
+    logger.error("GitHub API error: %s", exc)
+return {"workflow_runs": []}  # Silent failure
+```
+
+**Impact:** Temporary GitHub outage returns empty runs list, UI shows "no runs". User has no visibility into transient failure vs real empty state.
+
+**Fix approach:** 
+1. Use `@retry_with_backoff` decorator from `execution.core.retry` (already exists)
+2. Add exponential backoff: 1s, 2s, 4s max
+3. Log retry attempts
+4. Return cached last-known-good state if all retries fail
+
+---
+
+### Missing Error Callback for Telegram Messages
+
+**Issue:** Telegram message sends are fire-and-forget. No confirmation they reached Telegram server.
+
+**Files:**
+- `webhook/dispatch.py:128-138` (progress message edits)
+- `webhook/bot/routers/callbacks.py:214+` (keyboard edits)
+
+**Impact:** Users see stale/incorrect buttons/text if message edit fails. No logging of Telegram API failures.
+
+**Fix approach:** 
+1. Capture result of all `bot.send_message()` and `bot.edit_message_text()` calls
+2. Log HTTP status on failure
+3. Add fallback: if edit fails, send new message with same content
+4. Consider using aiogram's built-in error handler middleware
+
+---
+
+### Silently Dropped Errors in Approval Processing
+
+**Issue:** Multiple try/except blocks in `process_approval_async()` silence errors, continuing with incomplete data.
+
+**File:** `webhook/dispatch.py:123-125, 133-134`
+
+**Evidence:**
+```python
+try:
+    await bot.edit_message_text(...)
+except Exception:
+    pass  # Continue to next
+```
+
+**Impact:** If editing progress message fails, subsequent edits are skipped silently. User sees 0/N completed, then suddenly ✔️ without intermediate updates.
+
+**Fix approach:** 
+1. Log each exception at WARNING level
+2. Add circuit breaker: if 3 consecutive edits fail, fall back to single final message
+3. Track success/failure metrics
+
+---
+
+## Maintainability
+
+### Inconsistent Error Handling Across Modules
+
+**Issue:** Different patterns for handling the same error types:
+- Some use `logger.error(...); raise`
+- Some use `logger.warning(...); return None`
+- Some use bare `except Exception: pass`
+
+**Files:** `webhook/dispatch.py`, `webhook/routes/mini_api.py`, `webhook/bot/routers/callbacks.py`
+
+**Impact:** Hard to predict behavior. Some failures log, others don't. Inconsistent observability.
+
+**Fix approach:** Define error policy module `webhook/error_policy.py`:
+```python
+POLICY = {
+    "github_api": {"retry": 3, "log_level": "warning", "fallback": "cached"},
+    "telegram": {"retry": 0, "log_level": "error", "fallback": "new_message"},
+    "sheets": {"retry": 3, "log_level": "warning", "fallback": "cached"},
+}
+```
+
+Apply consistently via decorators.
+
+---
+
+### No Observability for Mini App Frontend Errors
+
+**Issue:** Webhook mini-app frontend catches errors but only shows user toast. No error reporting to backend.
+
+**File:** `webhook/mini-app/src/lib/api.ts:1-13`
+
+```typescript
+if (!response.ok) {
+  throw new Error(`API ${response.status}: ${response.statusText}`);
+}
+```
+
+**Impact:** Silent failures in prod. If API returns 500, only user sees error, no server logs it. No error metrics.
+
+**Fix approach:** 
+1. Add error reporting endpoint: `POST /api/mini/logs`
+2. Send: {timestamp, pathname, error, stack, status}
+3. Store in centralized logging service (consider Sentry)
+4. Add frontend performance metrics (load time, first paint, API latency)
+
+---
+
+### Duplicate Logic: _escape_md() in Multiple Files
+
+**Issue:** `_escape_md()` defined in both `webhook/query_handlers.py` and `execution/curation/telegram_poster.py`.
+
+**Files:**
+- `webhook/query_handlers.py:14-20`
+- `execution/curation/telegram_poster.py` (imported, not duplicated)
+
+**Impact:** If escape rules change, must update in multiple places. Risk of inconsistency.
+
+**Fix approach:** Move to shared module `execution/core/markdown.py`, export as public utility.
+
+---
+
+### No Test Coverage for Critical Paths
+
+**Issue:** Large files like `callbacks.py` (601 lines) have minimal test coverage visible in git.
+
+**Files:** `tests/test_query_handlers.py` (258 lines) tests query handlers but not callbacks.py directly.
+
+**Impact:** Changes to callback logic risk regressions. Especially risky for FSM state transitions and error handling.
+
+**Fix approach:** Add callback router tests:
+```python
+tests/test_callback_draft_actions.py  # 100+ lines
+tests/test_callback_reports.py        # 80+ lines
+tests/test_callback_queues.py         # 60+ lines
+```
+
+Target 80%+ coverage on callbacks.py and messages.py.
 
 ---
 
 ## Scaling Limits
 
-**Single-Instance Webhook Deployment:**
-- Current capacity: 1 Railway container (default)
-- Limit: ~100 concurrent requests before timeout (gunicorn workers = 4 by default)
-- Blocking operations: Telegram API (3-5 seconds), Anthropic API (5-10 seconds), WhatsApp send (2-3 seconds)
-- Scaling path:
-  - Add task queue (Celery/RabbitMQ) for async operations
-  - Scale Railway container replicas to 3+
-  - Move long-running AI tasks to background workers
+### Redis Key Expiration Not Enforced Uniformly
 
-**No Database for Distributed State:**
-- Current capacity: In-memory only; lost on restart
-- Limit: Works for <10 concurrent draft sessions
-- Scaling path: Migrate DRAFTS/ADJUST_STATE to Supabase; adds latency but enables multi-instance
+**Issue:** Only `execution/curation/redis_client.py` sets TTLs via `expire()`. Other keyspaces accumulate.
 
-**Supabase Limits on News Drafts:**
-- Current approach: JSON files on filesystem
-- Limit: Scales to 1000+ files before filesystem becomes slow
-- Scaling path: Move to Supabase RLS with user-scoped access; add pagination UI
+**Files:** `execution/curation/redis_client.py:56`, `webhook/redis_queries.py` (no TTL calls)
 
-**GitHub API Rate Limiting:**
-- Current: 100 requests per dashboard refresh
-- Limit: 60 requests/hour (unauthenticated) or 5000/hour (authenticated)
-- Current token is authenticated, so capacity: ~1 refresh every 1 minute indefinitely
-- Scaling path: Cache on server-side; use GraphQL to fetch only deltas; implement exponential backoff
+**Impact:** With 10k+ curated items/day, Redis grows unbounded. At 1MB/day, fills 100GB in 274 years. But with heavy usage (100 items/hour), fills in weeks.
+
+**Fix approach:** 
+1. Enforce TTLs at data entry: `client.setex(key, 30*86400, value)` on all new keys
+2. Add Redis memory monitor: alert if >80% capacity
+3. Implement eviction policy: `redis.conf` maxmemory-policy=allkeys-lru
+4. Set Redis max memory in Railway deployment
+
+---
+
+### Supabase Queries Not Paginated on Large Reports
+
+**Issue:** `reports_show_month_list()` fetches all reports for month without pagination.
+
+**File:** `webhook/reports_nav.py:145-160`
+
+```python
+reports = sb.table("platts_reports").select(...).eq("report_type", ...).execute()
+```
+
+**Impact:** If month has 10k reports, fetches all at once. Slow response, memory spike.
+
+**Fix approach:** 
+1. Add pagination: `offset(page * 50).limit(50)`
+2. Or: use `count` to show "123 reports" and lazy-load on scroll
+3. Add index on (report_type, date_key) in Postgres
+
+---
+
+## Observability
+
+### No Central Error Tracking (Sentry/Similar)
+
+**Issue:** Errors logged to stdout only. No aggregation, alerting, or error trending.
+
+**Files:** All Python modules use `logging` but logs go to console only.
+
+**Impact:** In production, errors are lost in pod logs. Can't detect patterns (e.g., "X fails 10x/day"). No PagerDuty/Slack alerts.
+
+**Fix approach:** Integrate Sentry:
+1. `pip install sentry-sdk`
+2. Initialize in `webhook/app.py` and `execution/scripts/*.py`
+3. Set tags: workflow name, chat_id, draft_id
+4. Configure alerts for error count spike
+5. Link to GitHub issues via breadcrumbs
+
+---
+
+### Missing Metrics on WhatsApp Delivery
+
+**Issue:** `process_approval_async()` logs success/failure text but no metrics (Prometheus counters).
+
+**File:** `webhook/dispatch.py:127`
+
+```python
+logger.info(f"Approval complete: {report.success_count} sent, {report.failure_count} failed")
+```
+
+**Impact:** No dashboard visibility. Can't see delivery rate trends or correlate with Uazapi outages.
+
+**Fix approach:** 
+1. Add `prometheus_client` counters:
+   - `whatsapp_messages_sent_total{status=success/failure}`
+   - `whatsapp_delivery_time_seconds`
+2. Expose `/metrics` endpoint
+3. Scrape into monitoring (Railway supports Prometheus)
+
+---
+
+### Insufficient Logging in Mini App Backend Routes
+
+**Issue:** `webhook/routes/mini_api.py` has only 8 logger calls across 552 lines.
+
+**Impact:** Request flow unclear. Slow queries hard to diagnose.
+
+**Fix approach:** Add structured logging at entry/exit:
+```python
+@routes.get("/api/mini/news")
+async def get_news(request: web.Request) -> web.Response:
+    logger.info("GET /api/mini/news", extra={"page": page, "limit": limit})
+    try:
+        ...
+        logger.info("GET /api/mini/news SUCCESS", extra={"count": len(items)})
+    except Exception as e:
+        logger.error("GET /api/mini/news FAILED", exc_info=e)
+        raise
+```
 
 ---
 
 ## Dependencies at Risk
 
-**python-dotenv (unmaintained):**
-- Risk: Last update 2022; potential security vulnerabilities
-- Impact: Could not load environment variables properly in edge cases
-- Migration plan: Use `python-decouple` (actively maintained) or built-in `os.environ`
+### Python Version Mismatch Between Modules
 
-**spgci (0.0.70):**
-- Risk: Pre-release version; API could change
-- Impact: Platts data retrieval breaks
-- Migration plan: Check if newer stable version exists; pin to tested version
+**Issue:** `webhook/pyproject.toml` requires Python >=3.9, but some scripts may assume >=3.10 (use of type hints like `dict[str, Any]`).
 
-**lseg-data (1.0.0):**
-- Risk: Low version number; few downloads suggest low adoption
-- Impact: API may be unstable
-- Migration plan: Evaluate alternatives; add fallback data source
+**Files:** `webhook/pyproject.toml:6` vs `execution/scripts/*.py` (type hints usage)
 
-**msal (31.0+):**
-- Risk: Azure authentication; if tokens break, email sync stops
-- Current mitigation: Error handling in place
-- Monitoring needed: Token expiration; Azure API changes
+**Impact:** Code may fail on Python 3.9 deployments. Unclear minimum version.
+
+**Fix approach:** 
+1. Specify `python_requires = ">=3.10"` in pyproject.toml
+2. Use `from __future__ import annotations` at top of all files with modern type hints
+3. Test CI matrix: Python 3.10, 3.11, 3.12
 
 ---
 
-## Missing Critical Features
+### Outdated spgci Version
 
-**No Workflow Failure Recovery:**
-- Problem: If morning_check.py fails midway, no automatic retry
-- Files: `.github/workflows/` (not visible in repo) coordinates this
-- Blocks: Need manual intervention or cron retry
-- Fix: Implement exponential backoff in retry.py; add circuit breaker for failing APIs
+**Issue:** `requirements.txt` pins `spgci>=0.0.70` (old version, no upper bound).
 
-**No Draft Versioning:**
-- Problem: Editing draft overwrites original; can't see what changed
-- Files: `dashboard/app/api/news/route.ts`, `data/news_drafts.json`
-- Impact: Can't audit approvals; accidental overwrite loses content
-- Fix: Store edit history with timestamps; show diff view
+**Impact:** Unpredictable behavior if maintainer releases breaking changes. No security constraints.
 
-**No Webhook Signature Validation:**
-- Problem: Flask routes accept any POST request
-- Files: `webhook/app.py`
-- Impact: Anyone can send fake approval requests if URL is known
-- Fix: Add Telegram signature validation (verify via token hash)
+**Fix approach:** 
+1. Check latest version: `pip index versions spgci`
+2. Pin range: `spgci>=0.0.70,<1.0.0`
+3. Add version check in CI: fail if any dependency is >1y old
 
-**No Audit Logging:**
-- Problem: No record of who approved/rejected drafts or triggered workflows
-- Impact: Cannot trace data back to person for compliance
-- Fix: Log all mutations with timestamp, user context, IP address
+---
+
+### anthropic Package Version Constraint Loose
+
+**Issue:** `requirements.txt` specifies `anthropic>=0.40.0` with no upper bound.
+
+**Impact:** If anthropic releases 1.0 with breaking API changes, production breaks silently.
+
+**Fix approach:** Pin to tested version range: `anthropic>=0.40.0,<1.0.0`.
+
+---
+
+## Fragile Areas Requiring Careful Modification
+
+### FSM State Handlers (Airframe-Level Fragility)
+
+**Area:** Entire FSM router system in `webhook/bot/routers/messages.py`
+
+**Why Fragile:** 
+1. Callback routing must respect FSM state boundaries
+2. Filter order matters (specific states BEFORE generic F.text)
+3. Recent history of catch-all intercepting FSM states (3 commits)
+
+**Safe Modification:**
+1. Add router registration order test:
+   ```python
+   def test_fsm_isolation():
+       # Simulate StateFilter(AdjustDraft.waiting_feedback, F.text)
+       # Verify F.text handler doesn't trigger
+   ```
+2. Use type hints for state: `@message_router.message(AdjustDraft.waiting_feedback, F.text)` (currently done)
+3. Never add bare `F.text` handler without StateFilter
+
+**Test Coverage:** Currently minimal. Need dedicated test file.
+
+---
+
+### Redis Transaction Pipeline (Data Consistency)
+
+**Area:** `execution/curation/redis_client.py:115-125` (SET + DELETE in pipeline)
+
+**Why Fragile:** 
+1. Two-step operation: if pipeline fails mid-operation, state is inconsistent
+2. No rollback mechanism
+3. Memory leak if delete fails
+
+**Safe Modification:**
+1. Use Lua script for atomic operation:
+   ```python
+   script = """
+   redis.call('SET', KEYS[1], ARGV[1])
+   redis.call('LPUSH', KEYS[2], ARGV[2])
+   return 1
+   """
+   client.eval(script, 2, key1, key2, val1, val2)
+   ```
+2. Add transaction-level error logging
+3. Test rollback scenarios
+
+---
+
+### Supabase Storage Download URL Signing
+
+**Area:** `webhook/reports_nav.py:_get_signed_url()` (assumed to exist in codebase)
+
+**Why Fragile:** URL expiry timing is critical. URL generation must match Supabase's signing algorithm.
+
+**Safe Modification:**
+1. Test URL expiry with actual file: fetch immediately, then after 1h
+2. Log signed URL generation errors with request details (not URL)
+3. Add unit test with mock Supabase client
+4. Verify token format matches Supabase docs quarterly
+
+---
+
+## Missing Critical Features / Limitations
+
+### No Notification System for Failed Workflows
+
+**Issue:** Workflows fail silently unless user manually checks `/status` command. No push notification or email alert.
+
+**Impact:** Issues go unnoticed for hours. Baltic report missing, market data stale.
+
+**Fix approach:** 
+1. Add alert rule in state_store: if failure streak >= 2, send alert
+2. Configure Telegram or Slack notifications
+3. Track last-alert-sent to avoid spam
+
+---
+
+### No Audit Log for Approvals/Rejections
+
+**Issue:** Draft approvals and rejections happen in Telegram, no permanent record of who approved what.
+
+**Files:** `webhook/bot/routers/callbacks.py` (approval flow)
+
+**Impact:** Can't trace decision history. Compliance risk.
+
+**Fix approach:** Add audit table in Postgres:
+```sql
+CREATE TABLE draft_audits (
+  id SERIAL PRIMARY KEY,
+  draft_id TEXT,
+  user_id INT,
+  action TEXT,
+  timestamp TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+Insert on approve/reject/adjust.
+
+---
+
+### No Rate Limiting Per User
+
+**Issue:** User can spam approval requests, broadcast requests without throttle.
+
+**Impact:** Telegram bot API rate limits (30 msg/sec per bot) could be exceeded, causing 429 responses.
+
+**Fix approach:** 
+1. Track user action counts in Redis: `user:123:approvals:minute`
+2. Reject if count > 10 per minute with backoff message
+3. Log rate limit violations
 
 ---
 
 ## Test Coverage Gaps
 
-**No Unit Tests for Core Integration Clients:**
-- What's not tested: All API clients (Platts, LSEG, Supabase, Sheets, Telegram, Baltic, Apify, Claude)
-- Files: `execution/integrations/`
-- Risk: Refactoring breaks APIs silently
-- Priority: **HIGH** - These are critical paths; integration test suite needed
+### Callback Router Not Tested (601-line File)
 
-**No E2E Tests for Workflows:**
-- What's not tested: Full workflow execution (morning_check → format → send)
-- Files: `execution/scripts/`, `execution/agents/`
-- Risk: Changes to pricing format or filtering logic break production reports
-- Priority: **HIGH** - This is main business logic
+**What's Not Tested:** 
+- Draft adjust/reject/approve flow
+- Report navigation (type → year → month → list)
+- Queue pagination
+- Contact toggle
+- Workflow triggers
+- All error handlers (except Exception: pass clauses)
 
-**No API Contract Tests:**
-- What's not tested: Response formats from dashboard endpoints
-- Files: `dashboard/app/api/`
-- Risk: Frontend breaks on API schema changes
-- Priority: **MEDIUM** - UI can break but fallback to error messages
+**Files:** `webhook/bot/routers/callbacks.py`, no corresponding test file.
 
-**No Prompt/Agent Tests:**
-- What's not tested: Writer, Critique, Curator agent outputs
-- Files: `webhook/app.py` (prompts), `execution/agents/rationale_agent.py`
-- Risk: Prompt tuning breaks silently; hard to regression test
-- Priority: **MEDIUM** - Affects news quality but not system stability
+**Risk:** High. Frequent changes to callback logic, no test protection.
 
-**Only 1 Test File (Format Only):**
-- Files: `tests/test_format.py` - only tests WhatsApp message formatting
-- Coverage: <1% of codebase
-- Fix approach: Add:
-  - `tests/test_integrations/` for mocked API clients
-  - `tests/test_workflows/` for end-to-end scenarios
-  - `tests/test_agents/` for prompt outputs with fixtures
-  - `tests/test_api.py` for dashboard endpoints
+**Priority:** High. Add `tests/test_callback_router.py` with:
+- 10 tests for draft actions
+- 8 tests for report navigation
+- 5 tests for queue pagination
+- 4 tests for contact ops
+- 6 tests for error handling
+
+Target: 80% coverage.
 
 ---
 
-*Concerns audit: 2026-02-13*
+### Mini API Routes Lightly Tested
+
+**What's Not Tested:** 
+- News endpoint pagination
+- Workflows endpoint health calc
+- Contacts endpoint search
+- Error paths (GitHub API down, Supabase timeout)
+- Auth validation (init data signature)
+
+**Files:** `webhook/routes/mini_api.py` (552 lines), minimal corresponding tests.
+
+**Risk:** Medium. Frontend depends on API contracts. Breaking changes undetected.
+
+**Priority:** Medium. Add `tests/test_mini_api_routes.py` with mocked GitHub/Supabase.
+
+---
+
+### Dispatch Module Missing Integration Tests
+
+**What's Not Tested:**
+- Full WhatsApp send flow with progress updates
+- Google Sheets contact fetch with retries
+- Error handling (Sheets timeout, Uazapi 500)
+- Progress message edit failures
+- Concurrent sends (thread pool behavior)
+
+**Files:** `webhook/dispatch.py` (211 lines), no corresponding integration test.
+
+**Risk:** Medium. Critical path for broadcast approvals.
+
+**Priority:** Medium. Add `tests/test_dispatch_integration.py` with mock aiohttp + Google Sheets.
+
+---
+
+*Concerns audit: 2026-04-17*

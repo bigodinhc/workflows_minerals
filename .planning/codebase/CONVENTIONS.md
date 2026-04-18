@@ -1,244 +1,321 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-02-13
+**Analysis Date:** 2026-04-17
 
 ## Naming Patterns
 
 **Files:**
-- React components: PascalCase (`SideNav.tsx`, `Button.tsx`, `Card.tsx`)
-- API routes: lowercase kebab-case in route directories (`/api/workflows/route.ts`, `/api/news/route.ts`)
-- Python scripts: snake_case (`morning_check.py`, `send_daily_report.py`)
-- Python classes and modules: snake_case (`platts_client.py`, `claude_client.py`, `StateManager` for classes)
-- Configuration files: lowercase with dots (`.eslintrc.mjs`, `tsconfig.json`, `postcss.config.mjs`)
+- Python: `snake_case.py` - modules, scripts, test files (e.g., `dispatch.py`, `pipeline.py`, `test_mini_auth.py`)
+- TypeScript/React: `camelCase.ts`, `camelCase.tsx`, `PascalCase.tsx` for components (e.g., `useApi.ts`, `GlassCard.tsx`)
+- Tests: `test_*.py` (pytest convention) or `*.test.tsx`, `*.test.ts` (vitest convention in mini-app)
 
 **Functions:**
-- TypeScript/JavaScript: camelCase (`handleTrigger`, `formatDistanceToNow`, `fetcher`)
-- Python: snake_case (`normalize_text`, `format_price_message`, `retry_with_backoff`)
-- React hooks: camelCase with `use` prefix (`usePathname`, `useSWR`)
+- Python: `snake_case` - all function definitions follow snake_case strictly
+- TypeScript: `camelCase` for functions, async functions, hooks
+- React Components: `PascalCase` for exported components (e.g., `function GlassCard(...)`)
 
 **Variables:**
-- camelCase for mutable state (`selectedRunId`, `isLoadingLogs`, `triggeringId`)
-- camelCase for constants in JS/TS (e.g., `WORKFLOWS`, `FINES_KEYS` as uppercase only for whitelists)
-- PascalCase for React component props interfaces (`NavItem`)
-- SCREAMING_SNAKE_CASE for environment config constants (`TELEGRAM_BOT_TOKEN`, `UAZAPI_URL`)
+- Python: `snake_case` - all variables and constants follow snake_case (e.g., `_STAGING_TTL_SECONDS`, `_client`, `fake_redis`)
+- TypeScript: `camelCase` for variables, properties, parameters
+- Python constants: `UPPER_SNAKE_CASE` for module-level constants (e.g., `_STAGING_TTL_SECONDS = 48 * 60 * 60`)
 
 **Types:**
-- TypeScript interfaces: PascalCase (`NavItem`, `ApiResponse`)
-- Type aliases: PascalCase
-- React component types: implicit via function parameters and return types
+- Python: Type hints in function signatures using `typing` module - `Optional[T]`, `dict`, `list`, dataclasses with `@dataclass`
+  - Example: `def get_staging(item_id: str) -> Optional[dict]:`
+  - Dataclass usage: `@dataclass class Contact:` (in `execution/core/delivery_reporter.py`)
+- TypeScript: Interface declarations for props and types (e.g., `interface GlassCardProps { children: React.ReactNode }`)
+- TypeScript: Inline types with `type` keyword for exported utility types (e.g., `type Stats = { health_pct: number }`)
 
 ## Code Style
 
 **Formatting:**
-- Tool: ESLint 9 with Next.js and TypeScript configs
-- Config: `dashboard/eslint.config.mjs`
-- Uses `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript` presets
-- No Prettier detected; ESLint handles linting, formatting deferred to IDE
+- Python: No automatic formatter configured (ruff/Black not detected in configs)
+- TypeScript: TypeScript strict mode enabled via `tsconfig.json` (`strict: true`)
+  - `noUnusedLocals: true`, `noUnusedParameters: true`, `noFallthroughCasesInSwitch: true`
+  - No ESLint config detected; relies on TypeScript compiler checks
+- Python convention: 4-space indentation (standard Python)
+- TypeScript convention: 2-space indentation (Vite/modern JS default)
 
 **Linting:**
-- ESLint v9 with flat config (modern ESLint)
-- Core configs: `@eslint-config-next/core-web-vitals` and `@eslint-config-next/typescript`
-- Ignores: `.next/**`, `out/**`, `build/**`, `next-env.d.ts`
-- Python: No centralized linter configured; code should follow PEP 8 by convention
-
-**TypeScript Compiler:**
-- Target: ES2017
-- Strict mode: enabled
-- Module: esnext
-- JSX: react-jsx (React 19.2.3 with new JSX transform)
-- Module resolution: bundler
-- Path aliases configured: `@/*` maps to root directory `./`
-- incremental builds enabled for faster rebuilds
+- Python: No linter config detected (no `.pylintrc`, `.flake8`, `ruff.toml`)
+- TypeScript: TypeScript compiler in strict mode acts as linter
+- No ESLint/Prettier configs found; code relies on editor defaults
 
 ## Import Organization
 
 **Order:**
-1. Standard library imports (e.g., `import os`, `import sys`, `from datetime import`)
-2. Third-party packages (e.g., `from anthropic import Anthropic`, `import React`)
-3. Local application imports (e.g., `from execution.core.logger import WorkflowLogger`)
-4. Relative imports (e.g., `from .logger import WorkflowLogger`)
+1. Future imports (`from __future__ import annotations`) - always first in Python files
+2. Standard library imports (`asyncio`, `json`, `logging`, `os`, `time`, `sys`)
+3. Third-party imports (`aiohttp`, `aiogram`, `anthropic`, `pytest`, `redis`)
+4. Local/relative imports (`from bot.config import ...`, `import contact_admin`)
+
+**Examples:**
+
+Python (`webhook/dispatch.py`):
+```python
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+
+import aiohttp
+import requests
+
+from bot.config import get_bot, UAZAPI_URL, UAZAPI_TOKEN, GOOGLE_CREDENTIALS_JSON, SHEET_ID
+from bot.keyboards import build_approval_keyboard
+from execution.core.delivery_reporter import DeliveryReporter, build_contact_from_row
+from execution.integrations.sheets_client import SheetsClient
+```
+
+TypeScript (`webhook/mini-app/src/pages/Home.tsx`):
+```typescript
+import { useApi } from "../hooks/useApi";
+import { GlassCard } from "../components/GlassCard";
+import { RingChart } from "../components/RingChart";
+import type { Stats, WorkflowsResponse, Workflow } from "../lib/types";
+```
 
 **Path Aliases:**
-- TypeScript: Use `@/*` alias for root-relative imports: `@/components/ui/button`, `@/lib/utils`
-- Avoid relative paths like `../../../` in favor of `@/` imports
-- Example: `import { Button } from "@/components/ui/button"`
-
-**Python imports:**
-- Use absolute imports with `sys.path.append` when necessary:
-  ```python
-  sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
-  from execution.core.logger import WorkflowLogger
-  ```
+- Not used (no `paths` config in `tsconfig.json` or `baseUrl`)
+- Relative imports common: `../hooks/`, `../components/`, `../lib/`
 
 ## Error Handling
 
-**TypeScript/JavaScript Patterns:**
-- Wrap fetch/API calls in try-catch blocks
-- Log errors with `console.error()` (currently used in routes and components)
-- Return NextResponse error responses with appropriate status codes:
-  ```typescript
-  if (!token) {
-    return NextResponse.json({ error: "Missing Token" }, { status: 500 });
-  }
-  try {
-    // operation
-  } catch (error) {
-    console.error("Operation Error:", error);
-    return NextResponse.json({ error: "Failed to..." }, { status: 500 });
-  }
-  ```
+**Patterns:**
 
-**Python Patterns:**
-- Use try-catch for API calls and file operations
-- Log errors through `WorkflowLogger`: `logger.error("Step failed", {"error": str(e)})`
-- Raise descriptive exceptions or return error states
-- Example from `execution/core/runner.py`:
-  ```python
-  try:
-    # operation
-  except Exception as e:
-    logger.critical("Workflow failed", {"error": str(e)})
-    return {"success": False, "run_id": logger.run_id, "error": str(e)}
-  ```
+Python:
+- Try/except blocks wrapping async operations and API calls
+- Specific exception types when possible (e.g., `anthropic.APIConnectionError`, `anthropic.AuthenticationError`)
+- Fallback to broad `Exception` for external APIs with unpredictable failures
+- Logging errors with `logger.error(f"message: {e}")` before re-raising
+
+Example from `webhook/pipeline.py`:
+```python
+try:
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
+    message = await client.messages.create(...)
+    return message.content[0].text
+except anthropic.APIConnectionError as e:
+    logger.error(f"Anthropic connection error: {e}")
+    raise
+except anthropic.AuthenticationError as e:
+    logger.error(f"Anthropic auth error (bad key?): {e}")
+    raise
+except Exception as e:
+    logger.error(f"Anthropic error ({type(e).__name__}): {e}")
+    raise
+```
+
+- For HTTP/external service errors: catch by status code or exception type, log details, return boolean or raise
+- Telegram API Markdown escaping: Special handling in error messages to escape special characters
+
+TypeScript/aiohttp:
+- HTTP handlers raise specific exceptions (`web.HTTPUnauthorized`, `web.HTTPForbidden`)
+- Promise-based error handling with async/await and try/catch
+
+Example from `webhook/routes/mini_auth.py`:
+```python
+try:
+    data = safe_parse_webapp_init_data(TELEGRAM_BOT_TOKEN, init_data)
+except ValueError:
+    raise web.HTTPUnauthorized(text="Invalid initData signature")
+```
 
 ## Logging
 
-**Framework:**
-- TypeScript/JavaScript: `console.error()` for error logging (found in: `dashboard/app/page.tsx`, `dashboard/app/api/workflows/route.ts`)
-- Python: Custom `WorkflowLogger` class (`execution/core/logger.py`) using JSON-formatted logs
+**Framework:** Python `logging` module (built-in) — all modules use `logger = logging.getLogger(__name__)`
 
 **Patterns:**
+- Module-level logger: `logger = logging.getLogger(__name__)` (in `webhook/dispatch.py`, `webhook/pipeline.py`, `webhook/bot/config.py`)
+- Log levels used: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+- Info-level for workflow progress (e.g., `logger.info(f"Writer done ({len(writer_output)} chars)")`)
+- Warning-level for retries/backoff (e.g., `logger.warning(f"Google Sheets API error {e}. Retrying in {sleep_time}s...")`)
+- Error-level for exceptions and failures (e.g., `logger.error(f"Failed to fetch contacts after {max_retries} attempts: {e}")`)
+- Structured logging via `WorkflowLogger` class in `execution/core/logger.py` for JSON logs with workflow/run context
 
-**Python structured logging (`WorkflowLogger`):**
+Example from `execution/core/logger.py`:
 ```python
-from execution.core.logger import WorkflowLogger
-
-logger = WorkflowLogger("workflow_name")
-logger.info("Processing started", {"items": 10})
-logger.error("Step failed", {"error": str(e)})
-logger.critical("Workflow failed", {"error": "message"})
+class WorkflowLogger:
+    """Structured logger for workflow execution with JSON output."""
+    def _log(self, level: str, message: str, data: Optional[dict] = None):
+        entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "workflow": self.workflow,
+            "run_id": self.run_id,
+            "step": self.step,
+            "level": level,
+            "message": message,
+            "data": data or {}
+        }
 ```
-
-**Logs structure:**
-- Location: `.tmp/logs/{workflow_name}/{run_id}.json`
-- Format: JSON with timestamp, workflow, run_id, step, level, message, data
-- Each entry is immutable and appended to file
-
-**JavaScript error logging:**
-- Use `console.error()` only in error paths
-- Include context: `console.error("GitHub API Error:", error)`
-- Routes should log errors before returning error responses
 
 ## Comments
 
 **When to Comment:**
-- Explain complex business logic (e.g., market data whitelist logic in `morning_check.py`)
-- Document non-obvious algorithm choices
-- Add context for temporary workarounds or TODOs
-- Do NOT comment obvious code (e.g., `// increment counter`)
+- Before complex functions or flows (e.g., "─── Google Sheets (contacts) ───" before `_get_contacts_sync()`)
+- For non-obvious business logic (e.g., Telegram Markdown escaping requirements)
+- For workarounds or known limitations
 
-**JSDoc/TSDoc:**
-- Python uses module-level docstrings and function docstrings (Google style):
+**Docstrings/Comments Style:**
+
+Python:
+- Triple-quoted docstrings for functions and classes
+- Format: Single-line summary, blank line, optional description, Args/Returns sections
+- Example from `execution/core/logger.py`:
   ```python
-  def run_workflow(directive: str, inputs: Optional[dict] = None) -> dict:
+  def __init__(self, workflow: str, run_id: Optional[str] = None):
       """
-      Execute a workflow defined by a directive.
-
+      Initialize logger for a workflow.
+      
       Args:
-          directive: Name of the directive (without path/extension)
-          inputs: Input data for the workflow
-
-      Returns:
-          dict with 'success', 'outputs', and 'logs'
+          workflow: Name of the workflow/directive
+          run_id: Optional run ID (auto-generated if not provided)
       """
   ```
-- TypeScript: Minimal JSDoc; types are self-documenting with TypeScript
+
+- Module-level docstrings with overview and usage examples (e.g., `webhook/dispatch.py` starts with module docstring)
+
+TypeScript/React:
+- JSDoc-style comments for components (e.g., `interface GlassCardProps { children: React.ReactNode; className?: string; }`)
+- Inline comments for complex logic
+- No strict DocString enforcement detected
 
 ## Function Design
 
-**Size:**
-- Keep functions under 50 lines where possible
-- React components should be focused on a single responsibility
-- Example: `handleTrigger()` in `dashboard/app/page.tsx` is ~15 lines
+**Size:** Typically 30–100 lines for async operations, 10–50 lines for pure functions
+- Shorter functions preferred; async functions naturally longer due to await/error handling
+- Examples: `validate_init_data()` (30 lines), `call_claude()` (25 lines), `send_whatsapp()` (20 lines)
 
 **Parameters:**
-- Use object parameters for functions with >2 args
-- Prefer destructuring in function signatures
-- Example: `const { searchParams } = new URL(req.url)`
+- Python: Named parameters with type hints; optional params use defaults
+- TypeScript: Props as single object parameter for React components (destructured in function signature)
+- Example (TypeScript): `function GlassCard({ children, className = "" }: GlassCardProps)`
 
 **Return Values:**
-- Consistent return types (TypeScript enforces this)
-- API routes return `NextResponse.json()` for consistency
-- Python workflows return dict with: `{"success": bool, "outputs": any, "logs": list, ...}`
+- Python async: Return the result directly, raise exceptions on failure
+- TypeScript: Return typed objects (interfaces), use nullish values for missing data
+- Example: `async def get_staging(item_id: str) -> Optional[dict]:` returns None if not found
 
 ## Module Design
 
 **Exports:**
-- Named exports preferred over default exports
-- Example from `dashboard/components/ui/card.tsx`:
-  ```typescript
-  export { Card, CardHeader, CardFooter, CardTitle, CardAction, CardDescription, CardContent }
+
+Python:
+- Functions/classes exported implicitly (no `__all__` unless re-exporting from submodules)
+- Example from `execution/core/prompts/__init__.py`:
+  ```python
+  from execution.core.prompts.writer import WRITER_SYSTEM
+  from execution.core.prompts.critique import CRITIQUE_SYSTEM
+  __all__ = ["WRITER_SYSTEM", "CRITIQUE_SYSTEM", "CURATOR_SYSTEM", "ADJUSTER_SYSTEM"]
   ```
+
+TypeScript:
+- Named exports for functions, components, interfaces (e.g., `export function useApi<T>(...)`)
+- `export default` for page components (e.g., `export default function Home(...)`)
 
 **Barrel Files:**
-- Not heavily used; components export directly
-- UI components in `dashboard/components/ui/` are individual files
-- Python modules use `__all__` for public API:
+- Used in `execution/core/prompts/__init__.py` to aggregate agent system prompts
+- Used in mini-app for potential component grouping (not extensive)
+
+## Async Patterns
+
+**Python (asyncio + aiohttp + Aiogram):**
+- Async function definition: `async def function_name():`
+- Await calls: `await call_claude(...)`, `await asyncio.to_thread(_get_contacts_sync())`, `await session.post(...)`
+- Background task creation: `asyncio.create_task(coro)` with cleanup callback (in `webhook/bot/main.py`)
+- Async context managers: `async with aiohttp.ClientSession() as session:`, `async with session.post(...) as resp:`
+
+Example from `webhook/pipeline.py`:
+```python
+async def run_3_agents(raw_text: str, on_phase_start=None) -> str:
+    async def _notify(phase_name):
+        if on_phase_start is None:
+            return
+        result = on_phase_start(phase_name)
+        if asyncio.iscoroutine(result):
+            await result
+    
+    await _notify("Writer")
+    writer_output = await call_claude(WRITER_SYSTEM, user_prompt)
+```
+
+**TypeScript (React + SWR for data fetching):**
+- React hooks with side effects: `useEffect`, `useState`, `useSWR`
+- Example from `webhook/mini-app/src/hooks/useApi.ts`:
+  ```typescript
+  export function useApi<T>(path: string | null, config?: SWRConfiguration<T>) {
+    const { initData } = useTelegram();
+    return useSWR<T>(
+      path && initData ? path : null,
+      (url: string) => apiFetch<T>(url, initData),
+      { revalidateOnFocus: false, ...config }
+    );
+  }
+  ```
+
+## Type Hints
+
+**Python:**
+- Type hints used extensively in function signatures and variable declarations
+- `from typing import Optional, Union, Callable, Iterable, Dict, List`
+- Example: `def archive(item_id: str, date: str, chat_id: int) -> Optional[dict]:`
+- Dataclass-based typing for structured data (e.g., `@dataclass class Contact:`)
+- No MyPy configuration detected; type hints are informational/self-documenting
+
+**TypeScript:**
+- TypeScript strict mode enforces type checking at compile time (`strict: true` in `tsconfig.json`)
+- Generics used for reusable components/hooks (e.g., `function useApi<T>(...)`)
+- Interface-based prop typing for React components
+
+## Configuration & Secrets
+
+**Environment variables:**
+- Read via `os.getenv(name, default)` in Python (e.g., `TELEGRAM_BOT_TOKEN`, `REDIS_URL`, `ANTHROPIC_API_KEY`)
+- `.env` file exists and is gitignored; critical for local development
+- Secrets passed to GitHub Actions via `${{ secrets.VARIABLE_NAME }}`
+- Example from `webhook/bot/config.py`:
   ```python
-  __all__ = ["run_workflow", "create_step_executor"]
+  TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+  REDIS_URL = os.getenv("REDIS_URL", "")
+  ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
   ```
 
-**Immutability:**
-- React state updates use spread operator: `{ ...user, name }`
-- Python: Functions return new objects rather than mutating arguments
-- API payloads are immutable JSON structures
+**Secrets handling:**
+- Never hardcoded in source; always from environment
+- Partial logging of secrets (e.g., `UAZAPI_TOKEN[:8] + '...'`) for non-sensitive confirmation
+- JSON secrets (e.g., `GOOGLE_CREDENTIALS_JSON`) loaded from env and parsed inline
 
-## Data Flow Patterns
+## Commit Message Conventions
 
-**API Response Format:**
-- Consistent JSON structure with success/error fields
-- Example from workflows route:
-  ```typescript
-  return NextResponse.json(simplifiedRuns); // Array of objects
-  return NextResponse.json({ error: "Failed" }, { status: 500 });
-  ```
+**Format:** `<type>: <description>`
 
-**Component Data Fetching:**
-- SWR for client-side data fetching:
-  ```typescript
-  const { data: runs, error, mutate } = useSWR("/api/workflows", fetcher, { refreshInterval: 10000 });
-  ```
+Types observed:
+- `feat:` - new feature (e.g., "feat(bot): broadcast message — send free-form text direct to WhatsApp")
+- `fix:` - bug fix (e.g., "fix(broadcast): use StateFilter(None) on catch-all to prevent 3-agent activation")
+- `refactor:` - code refactoring without behavior change (e.g., "refactor(bot): remove catch-all text handler")
 
-**Error Boundaries:**
-- Frontend: Check for error state in render: `const isOnline = !error`
-- Backend: All API routes check for required env vars and return 500 on missing config
+**Style:**
+- Lowercase type and description
+- Parenthetical scope: `type(scope): description`
+- Description uses em-dashes (—) to separate rationale
+- Specific and actionable (e.g., "prevent 3-agent activation" not "fix bug")
 
-## TypeScript Configuration Details
+## Code Quality Markers
 
-**Compiler flags:**
-- `strict: true` - enables strict type checking
-- `noEmit: true` - only type-check, don't emit JS (Next.js handles emit)
-- `esModuleInterop: true` - allows import of CommonJS modules
-- `resolveJsonModule: true` - import JSON files as modules
-- `isolatedModules: true` - each file is independent module (required for Babel)
+**No mutations:**
+- Python dataclasses used for immutable data (via `@dataclass`)
+- Dictionaries copied before modification: `item = dict(item)` before setting fields
 
-**Path resolution:**
-- `moduleResolution: "bundler"` - modern resolution algorithm for bundlers
-- `paths: { "@/*": ["./*"] }` - enables `@/` imports throughout codebase
+**Docstring requirement:**
+- Module-level docstrings present in most workflow files
+- Function docstrings for public/async APIs
+- Not enforced uniformly across all utilities
 
-## Style & UI Conventions
-
-**Tailwind CSS:**
-- Used throughout dashboard for utility-first CSS
-- Custom colors for neon cyberpunk theme: `#00FF41` (neon green), `#0a0a0a` (black bg)
-- Responsive utilities: `md:` prefix for tablet+ breakpoints, mobile-first approach
-- Font: JetBrains Mono monospace via `@fontsource/jetbrains-mono`
-
-**Component Library:**
-- Radix UI primitives wrapped with Tailwind styling
-- shadcn/ui components for consistency (`Card`, `Button`, `Sheet`, `ScrollArea`)
-- Icon library: Lucide React for consistent icon set
+**Line length:**
+- Python: No strict limit detected; typical 80–120 characters
+- TypeScript: No enforced limit; matches editor defaults (~100 chars)
 
 ---
 
-*Convention analysis: 2026-02-13*
+*Convention analysis: 2026-04-17*

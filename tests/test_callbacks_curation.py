@@ -144,6 +144,23 @@ async def test_draft_action_approve_already_processed_short_circuits(
     create_task.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_draft_action_approve_missing_draft_answers_expired(
+    mock_callback_query, mocker,
+):
+    query = mock_callback_query(data="draft:approve:gone")
+    mocker.patch("bot.routers.callbacks.drafts_get", return_value=None)
+    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    drafts_update = mocker.patch("bot.routers.callbacks.drafts_update")
+    create_task = mocker.patch("asyncio.create_task")
+
+    await on_draft_action(query, DraftAction(action="approve", draft_id="gone"))
+
+    query.answer.assert_awaited_with("❌ Draft não encontrado")
+    drafts_update.assert_not_called()
+    create_task.assert_not_called()
+
+
 # ─── on_draft_action — test_approve branch ───────────────────────────────────
 
 @pytest.mark.asyncio
@@ -163,6 +180,39 @@ async def test_draft_action_test_approve_dispatches_test_send(
 
     query.answer.assert_awaited_with("🧪 Enviando teste para 1 contato...")
     create_task.assert_called_once()
+
+
+# ─── on_curate_action — archive branch ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_curate_action_archive_happy_path_finalizes_success(
+    mock_callback_query, fsm_context_in_state, mocker,
+):
+    query = mock_callback_query(data="curate:archive:item_arch")
+    state = fsm_context_in_state()
+    # archive branch: asyncio.to_thread(redis_client.archive, item_id, date, chat_id=...)
+    #   returns a truthy dict when archived OK, None when item expired
+    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value={"id": "item_arch"}))
+    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+
+    await on_curate_action(query, CurateAction(action="archive", item_id="item_arch"), state)
+
+    query.answer.assert_awaited_with("✅ Arquivado")
+
+
+@pytest.mark.asyncio
+async def test_curate_action_archive_expired_short_circuits(
+    mock_callback_query, fsm_context_in_state, mocker,
+):
+    query = mock_callback_query(data="curate:archive:item_gone")
+    state = fsm_context_in_state()
+    # Handler treats None return from archive() as "item expired or already processed"
+    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=None))
+    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+
+    await on_curate_action(query, CurateAction(action="archive", item_id="item_gone"), state)
+
+    query.answer.assert_awaited_with("⚠️ Item expirou ou já processado")
 
 
 # ─── on_curate_action — pipeline branch ──────────────────────────────────────

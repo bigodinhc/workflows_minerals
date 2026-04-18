@@ -6,7 +6,6 @@ fire only in its state.
 """
 from __future__ import annotations
 
-import inspect
 import pytest
 from unittest.mock import AsyncMock
 
@@ -40,15 +39,13 @@ def test_message_router_has_no_catchall_text_handler_without_state_filter():
             for f in filters
         )
         if not has_state_filter:
-            # Last resort: confirm via handler introspection
             func = handler.callback
-            sig = inspect.signature(func)
-            param_types = [str(p.annotation) for p in sig.parameters.values()]
-            if not any("FSMContext" in t for t in param_types):
-                pytest.fail(
-                    f"message_router has a catchall F.text handler: {func.__name__}. "
-                    "Add a StateFilter or register it on reply_kb_router."
-                )
+            pytest.fail(
+                f"message_router has a catchall F.text handler: {func.__name__}. "
+                "Every handler on message_router MUST have an explicit StateFilter or "
+                "StatesGroup member as its first positional filter. "
+                "If this handler does not need state, register it on reply_kb_router instead."
+            )
 
 
 # ─── FSM state handlers: happy path in their state ───────────────────────────

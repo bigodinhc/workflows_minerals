@@ -5,19 +5,19 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.callback_data import QueuePage, QueueOpen
-from bot.routers.callbacks import on_queue_page, on_queue_open
+from bot.routers.callbacks_queue import on_queue_page, on_queue_open
 
 
 @pytest.mark.asyncio
 async def test_on_queue_page_happy_path_edits_message(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100, message_id=200)
     mocker.patch(
-        "bot.routers.callbacks.query_handlers.format_queue_page",
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
         return_value=("queue body text", {"inline_keyboard": []}),
     )
     bot = AsyncMock()
     bot.edit_message_text = AsyncMock()
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=bot)
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
 
     await on_queue_page(query, QueuePage(page=2))
 
@@ -31,11 +31,11 @@ async def test_on_queue_page_happy_path_edits_message(mock_callback_query, mocke
 async def test_on_queue_page_format_error_returns_silently(mock_callback_query, mocker):
     query = mock_callback_query()
     mocker.patch(
-        "bot.routers.callbacks.query_handlers.format_queue_page",
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
         side_effect=RuntimeError("boom"),
     )
     bot = AsyncMock()
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=bot)
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
 
     # Must not raise
     await on_queue_page(query, QueuePage(page=1))

@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.callback_data import WorkflowRun, WorkflowList
-from bot.routers.callbacks import on_workflow_run, on_workflow_list, on_nop
+from bot.routers.callbacks_workflows import on_workflow_run, on_workflow_list, on_nop
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_workflow_run_happy_path_edits_and_tracks(mock_callback_query, moc
     mocker.patch("workflow_trigger.poll_and_update", new=AsyncMock())
     bot = AsyncMock()
     bot.edit_message_text = AsyncMock()
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=bot)
+    mocker.patch("bot.routers.callbacks_workflows.get_bot", return_value=bot)
     mocker.patch("asyncio.create_task")
 
     await on_workflow_run(query, WorkflowRun(workflow_id="wf_daily"))
@@ -37,7 +37,7 @@ async def test_workflow_run_trigger_failure_shows_error_with_retry(mock_callback
     )
     bot = AsyncMock()
     bot.edit_message_text = AsyncMock()
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=bot)
+    mocker.patch("bot.routers.callbacks_workflows.get_bot", return_value=bot)
 
     await on_workflow_run(query, WorkflowRun(workflow_id="fail_wf"))
 
@@ -55,7 +55,7 @@ async def test_workflow_run_no_run_id_shows_warning(mock_callback_query, mocker)
     mocker.patch("workflow_trigger.poll_and_update", new=AsyncMock())
     bot = AsyncMock()
     bot.edit_message_text = AsyncMock()
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=bot)
+    mocker.patch("bot.routers.callbacks_workflows.get_bot", return_value=bot)
 
     # Capture and immediately await the task so the _track() coroutine runs inline
     import asyncio
@@ -86,7 +86,7 @@ async def test_workflow_list_action_list_renders(mock_callback_query, mocker):
     )
     bot = AsyncMock()
     bot.edit_message_text = AsyncMock()
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=bot)
+    mocker.patch("bot.routers.callbacks_workflows.get_bot", return_value=bot)
 
     await on_workflow_list(query, WorkflowList(action="list"))
 
@@ -96,8 +96,8 @@ async def test_workflow_list_action_list_renders(mock_callback_query, mocker):
 @pytest.mark.asyncio
 async def test_workflow_list_back_menu_reopens_main_menu(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100)
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
-    mocker.patch("bot.routers.callbacks.build_main_menu_keyboard", return_value={"kb": 1})
+    mocker.patch("bot.routers.callbacks_workflows.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_workflows.build_main_menu_keyboard", return_value={"kb": 1})
 
     await on_workflow_list(query, WorkflowList(action="back_menu"))
 

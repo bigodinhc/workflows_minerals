@@ -1,36 +1,29 @@
-"""All callback query handlers.
+"""Callback handlers for workflow triggers + nop.
 
-Replaces callback_router.py with Aiogram CallbackData-filtered handlers.
-Menu switchboard (on_menu_action) was extracted to callbacks_menu.py in Phase 2.
+Extracted from webhook/bot/routers/callbacks.py during Phase 2 router split.
 """
-
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from datetime import datetime, timezone
 
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.types import CallbackQuery
 
+from bot.callback_data import WorkflowRun, WorkflowList
 from bot.config import get_bot
-from bot.callback_data import (
-    WorkflowRun, WorkflowList,
-)
-from bot.keyboards import build_main_menu_keyboard, build_approval_keyboard
+from bot.keyboards import build_main_menu_keyboard
 from bot.middlewares.auth import RoleMiddleware
-import contact_admin
 
 logger = logging.getLogger(__name__)
 
-callback_router = Router(name="callbacks")
-callback_router.callback_query.middleware(RoleMiddleware(allowed_roles={"admin"}))
+callbacks_workflows_router = Router(name="callbacks_workflows")
+callbacks_workflows_router.callback_query.middleware(RoleMiddleware(allowed_roles={"admin"}))
 
 
 # ── Workflow actions ──
 
-@callback_router.callback_query(WorkflowRun.filter())
+@callbacks_workflows_router.callback_query(WorkflowRun.filter())
 async def on_workflow_run(query: CallbackQuery, callback_data: WorkflowRun):
     from workflow_trigger import trigger_workflow, find_triggered_run, poll_and_update, _workflow_name_by_id
     chat_id = query.message.chat.id
@@ -77,7 +70,7 @@ async def on_workflow_run(query: CallbackQuery, callback_data: WorkflowRun):
     asyncio.create_task(_track())
 
 
-@callback_router.callback_query(WorkflowList.filter())
+@callbacks_workflows_router.callback_query(WorkflowList.filter())
 async def on_workflow_list(query: CallbackQuery, callback_data: WorkflowList):
     await query.answer("")
     bot = get_bot()
@@ -95,6 +88,6 @@ async def on_workflow_list(query: CallbackQuery, callback_data: WorkflowList):
 
 # ── Nop callback ──
 
-@callback_router.callback_query(lambda q: q.data in ("nop", "noop"))
+@callbacks_workflows_router.callback_query(lambda q: q.data in ("nop", "noop"))
 async def on_nop(query: CallbackQuery):
     await query.answer("")

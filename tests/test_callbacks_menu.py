@@ -21,7 +21,7 @@ async def test_menu_action_reports_invokes_reports_show_types(
 ):
     query = mock_callback_query(chat_id=100)
     state = fsm_context_in_state()
-    show_types = mocker.patch("bot.routers.callbacks.reports_show_types", new=AsyncMock())
+    show_types = mocker.patch("reports_nav.reports_show_types", new=AsyncMock())
 
     await on_menu_action(query, MenuAction(target="reports"), state)
 

@@ -17,7 +17,6 @@ from aiogram.fsm.context import FSMContext
 from bot.config import get_bot, SHEET_ID
 from bot.callback_data import (
     MenuAction,
-    ReportType, ReportYear, ReportMonth, ReportDownload, ReportBack, ReportYears,
     QueuePage, QueueOpen,
     ContactToggle, ContactPage,
     WorkflowRun, WorkflowList,
@@ -27,10 +26,6 @@ from bot.middlewares.auth import RoleMiddleware
 import contact_admin
 import query_handlers
 from status_builder import build_status_message
-from reports_nav import (
-    reports_show_types, reports_show_latest, reports_show_years,
-    reports_show_months, reports_show_month_list, handle_report_download,
-)
 from execution.integrations.sheets_client import SheetsClient
 
 logger = logging.getLogger(__name__)
@@ -48,6 +43,7 @@ async def on_menu_action(query: CallbackQuery, callback_data: MenuAction, state:
     target = callback_data.target
 
     if target == "reports":
+        from reports_nav import reports_show_types
         await reports_show_types(chat_id)
     elif target == "queue":
         try:
@@ -106,61 +102,6 @@ async def on_menu_action(query: CallbackQuery, callback_data: MenuAction, state:
             await query.message.answer(query_handlers.format_help())
         except Exception:
             pass
-
-
-# ── Report navigation ──
-
-@callback_router.callback_query(ReportType.filter())
-async def on_report_type(query: CallbackQuery, callback_data: ReportType):
-    await query.answer("")
-    await reports_show_latest(query.message.chat.id, query.message.message_id, callback_data.report_type)
-
-
-@callback_router.callback_query(ReportYears.filter())
-async def on_report_years(query: CallbackQuery, callback_data: ReportYears):
-    await query.answer("")
-    await reports_show_years(query.message.chat.id, query.message.message_id, callback_data.report_type)
-
-
-@callback_router.callback_query(ReportYear.filter())
-async def on_report_year(query: CallbackQuery, callback_data: ReportYear):
-    await query.answer("")
-    await reports_show_months(query.message.chat.id, query.message.message_id, callback_data.report_type, callback_data.year)
-
-
-@callback_router.callback_query(ReportMonth.filter())
-async def on_report_month(query: CallbackQuery, callback_data: ReportMonth):
-    await query.answer("")
-    await reports_show_month_list(
-        query.message.chat.id, query.message.message_id,
-        callback_data.report_type, callback_data.year, callback_data.month,
-    )
-
-
-@callback_router.callback_query(ReportDownload.filter())
-async def on_report_download(query: CallbackQuery, callback_data: ReportDownload):
-    ok, msg = await handle_report_download(query.message.chat.id, query.id, callback_data.report_id)
-    await query.answer(f"📤 {msg}" if ok else msg)
-
-
-@callback_router.callback_query(ReportBack.filter())
-async def on_report_back(query: CallbackQuery, callback_data: ReportBack):
-    await query.answer("")
-    chat_id = query.message.chat.id
-    message_id = query.message.message_id
-    target = callback_data.target
-    if target == "types":
-        await reports_show_types(chat_id, message_id=message_id)
-    elif target.startswith("type:"):
-        report_type = target[len("type:"):]
-        await reports_show_latest(chat_id, message_id, report_type)
-    elif target.startswith("years:"):
-        report_type = target[len("years:"):]
-        await reports_show_years(chat_id, message_id, report_type)
-    elif target.startswith("year:"):
-        parts = target[len("year:"):].rsplit(":", 1)
-        if len(parts) == 2:
-            await reports_show_months(chat_id, message_id, parts[0], int(parts[1]))
 
 
 # ── Queue navigation ──

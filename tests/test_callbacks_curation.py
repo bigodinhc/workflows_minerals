@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 from bot.callback_data import DraftAction, CurateAction, BroadcastConfirm
 from bot.states import AdjustDraft, RejectReason
-from bot.routers.callbacks import (
+from bot.routers.callbacks_curation import (
     on_draft_adjust, on_draft_reject, on_draft_action,
     on_curate_action, on_broadcast_confirm,
 )
@@ -24,9 +24,9 @@ async def test_draft_adjust_happy_path_sets_fsm_and_notifies(
 ):
     query = mock_callback_query(data="draft:adjust:abc123")
     state = fsm_context_in_state()
-    mocker.patch("bot.routers.callbacks.drafts_get",
+    mocker.patch("bot.routers.callbacks_curation.drafts_get",
                  return_value={"message": "hi", "status": "pending"})
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
 
     await on_draft_adjust(query, DraftAction(action="adjust", draft_id="abc123"), state)
 
@@ -42,8 +42,8 @@ async def test_draft_adjust_draft_missing_answers_error_and_does_not_set_state(
 ):
     query = mock_callback_query(data="draft:adjust:missing")
     state = fsm_context_in_state()
-    mocker.patch("bot.routers.callbacks.drafts_get", return_value=None)
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.drafts_get", return_value=None)
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
 
     await on_draft_adjust(query, DraftAction(action="adjust", draft_id="missing"), state)
 
@@ -60,15 +60,15 @@ async def test_draft_reject_happy_path_sets_reject_state_and_saves_feedback(
     query = mock_callback_query(data="draft:reject:xyz")
     state = fsm_context_in_state()
     mocker.patch(
-        "bot.routers.callbacks.drafts_get",
+        "bot.routers.callbacks_curation.drafts_get",
         return_value={"message": "📊 Iron ore up\n*MINERALS TRADING*", "status": "pending"},
     )
-    mocker.patch("bot.routers.callbacks.drafts_contains", return_value=True)
-    mocker.patch("bot.routers.callbacks.drafts_update")
+    mocker.patch("bot.routers.callbacks_curation.drafts_contains", return_value=True)
+    mocker.patch("bot.routers.callbacks_curation.drafts_update")
     save_feedback = mocker.patch(
-        "bot.routers.callbacks.redis_queries.save_feedback", return_value="fbk_1",
+        "bot.routers.callbacks_curation.redis_queries.save_feedback", return_value="fbk_1",
     )
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
 
     await on_draft_reject(query, DraftAction(action="reject", draft_id="xyz"), state)
 
@@ -87,12 +87,12 @@ async def test_draft_reject_missing_draft_still_sets_state_with_id_fallback_titl
 ):
     query = mock_callback_query(data="draft:reject:def456")
     state = fsm_context_in_state()
-    mocker.patch("bot.routers.callbacks.drafts_get", return_value=None)
-    mocker.patch("bot.routers.callbacks.drafts_contains", return_value=False)
+    mocker.patch("bot.routers.callbacks_curation.drafts_get", return_value=None)
+    mocker.patch("bot.routers.callbacks_curation.drafts_contains", return_value=False)
     save_feedback = mocker.patch(
-        "bot.routers.callbacks.redis_queries.save_feedback", return_value="fbk_2",
+        "bot.routers.callbacks_curation.redis_queries.save_feedback", return_value="fbk_2",
     )
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
 
     await on_draft_reject(query, DraftAction(action="reject", draft_id="def456"), state)
 
@@ -108,12 +108,12 @@ async def test_draft_action_approve_happy_path_dispatches_send(
 ):
     query = mock_callback_query(data="draft:approve:approved1")
     mocker.patch(
-        "bot.routers.callbacks.drafts_get",
+        "bot.routers.callbacks_curation.drafts_get",
         return_value={"message": "hi", "status": "pending",
                       "uazapi_token": None, "uazapi_url": None},
     )
-    drafts_update = mocker.patch("bot.routers.callbacks.drafts_update")
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    drafts_update = mocker.patch("bot.routers.callbacks_curation.drafts_update")
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
     mocker.patch("dispatch.process_approval_async", new=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
@@ -130,11 +130,11 @@ async def test_draft_action_approve_already_processed_short_circuits(
 ):
     query = mock_callback_query(data="draft:approve:dup1")
     mocker.patch(
-        "bot.routers.callbacks.drafts_get",
+        "bot.routers.callbacks_curation.drafts_get",
         return_value={"message": "hi", "status": "approved"},
     )
-    drafts_update = mocker.patch("bot.routers.callbacks.drafts_update")
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    drafts_update = mocker.patch("bot.routers.callbacks_curation.drafts_update")
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
     await on_draft_action(query, DraftAction(action="approve", draft_id="dup1"))
@@ -149,9 +149,9 @@ async def test_draft_action_approve_missing_draft_answers_expired(
     mock_callback_query, mocker,
 ):
     query = mock_callback_query(data="draft:approve:gone")
-    mocker.patch("bot.routers.callbacks.drafts_get", return_value=None)
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
-    drafts_update = mocker.patch("bot.routers.callbacks.drafts_update")
+    mocker.patch("bot.routers.callbacks_curation.drafts_get", return_value=None)
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
+    drafts_update = mocker.patch("bot.routers.callbacks_curation.drafts_update")
     create_task = mocker.patch("asyncio.create_task")
 
     await on_draft_action(query, DraftAction(action="approve", draft_id="gone"))
@@ -169,10 +169,10 @@ async def test_draft_action_test_approve_dispatches_test_send(
 ):
     query = mock_callback_query(data="draft:test_approve:t1")
     mocker.patch(
-        "bot.routers.callbacks.drafts_get",
+        "bot.routers.callbacks_curation.drafts_get",
         return_value={"message": "hi", "status": "pending"},
     )
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
     mocker.patch("dispatch.process_test_send_async", new=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
@@ -193,7 +193,7 @@ async def test_curate_action_archive_happy_path_finalizes_success(
     # archive branch: asyncio.to_thread(redis_client.archive, item_id, date, chat_id=...)
     #   returns a truthy dict when archived OK, None when item expired
     mocker.patch("asyncio.to_thread", new=AsyncMock(return_value={"id": "item_arch"}))
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
 
     await on_curate_action(query, CurateAction(action="archive", item_id="item_arch"), state)
 
@@ -208,7 +208,7 @@ async def test_curate_action_archive_expired_short_circuits(
     state = fsm_context_in_state()
     # Handler treats None return from archive() as "item expired or already processed"
     mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=None))
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
 
     await on_curate_action(query, CurateAction(action="archive", item_id="item_gone"), state)
 
@@ -230,10 +230,10 @@ async def test_curate_action_pipeline_happy_path_schedules_run_pipeline(
         new=AsyncMock(return_value={"title": "T", "fullText": "body", "publishDate": "2026-04-18",
                                     "source": "Platts"}),
     )
-    mocker.patch("bot.routers.callbacks.redis_queries.mark_pipeline_processed")
+    mocker.patch("bot.routers.callbacks_curation.redis_queries.mark_pipeline_processed")
     bot = AsyncMock()
     bot.send_message = AsyncMock(return_value=mocker.MagicMock(message_id=99))
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=bot)
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=bot)
     create_task = mocker.patch("asyncio.create_task")
 
     await on_curate_action(query, CurateAction(action="pipeline", item_id="item1"), state)
@@ -258,7 +258,7 @@ async def test_curate_action_send_raw_archives_and_dispatches(
         "asyncio.to_thread",
         new=AsyncMock(side_effect=[item, None]),
     )
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
     mocker.patch("dispatch.process_approval_async", new=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
@@ -278,11 +278,11 @@ async def test_broadcast_confirm_send_happy_path_dispatches(
 ):
     query = mock_callback_query(data="bcast:send:bcast_1")
     mocker.patch(
-        "bot.routers.callbacks.drafts_get",
+        "bot.routers.callbacks_curation.drafts_get",
         return_value={"message": "direct text", "uazapi_token": None, "uazapi_url": None},
     )
-    drafts_update = mocker.patch("bot.routers.callbacks.drafts_update")
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    drafts_update = mocker.patch("bot.routers.callbacks_curation.drafts_update")
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
     mocker.patch("dispatch.process_approval_async", new=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
@@ -298,7 +298,7 @@ async def test_broadcast_confirm_cancel_finalizes_without_dispatch(
     mock_callback_query, mocker,
 ):
     query = mock_callback_query(data="bcast:cancel:bcast_1")
-    mocker.patch("bot.routers.callbacks.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
     await on_broadcast_confirm(query, BroadcastConfirm(action="cancel", draft_id="bcast_1"))

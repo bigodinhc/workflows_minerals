@@ -30,6 +30,7 @@ from bot.config import (
 from bot.routers.onboarding import onboarding_router
 from bot.routers.commands import public_router, admin_router, shared_router
 from bot.routers.callbacks import callback_router
+from bot.routers.callbacks_curation import callbacks_curation_router
 from bot.routers.messages import message_router, reply_kb_router
 from routes.api import routes as api_routes
 from routes.preview import routes as preview_routes
@@ -77,7 +78,8 @@ def create_app() -> web.Application:
     dp.include_router(public_router)        # other public commands
     dp.include_router(admin_router)         # admin-only commands
     dp.include_router(shared_router)        # /settings, /menu (admin + subscriber)
-    dp.include_router(callback_router)      # inline button callbacks (admin)
+    dp.include_router(callbacks_curation_router)  # draft/curate/broadcast (specific filters first)
+    dp.include_router(callback_router)             # remaining callbacks (shrinks during Phase 2)
     dp.include_router(reply_kb_router)      # reply keyboard text (admin + subscriber)
     dp.include_router(message_router)       # FSM + catch-all text (admin)
 

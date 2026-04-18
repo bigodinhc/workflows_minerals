@@ -21,6 +21,8 @@ from bot.routers._helpers import (
     run_pipeline_and_archive,
 )
 import redis_queries
+from dispatch import process_approval_async, process_test_send_async
+from execution.curation import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +138,6 @@ async def on_draft_action(query: CallbackQuery, callback_data: DraftAction):
             query,
             f"✅ *Aprovado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC — envio em andamento",
         )
-        from dispatch import process_approval_async
         asyncio.create_task(
             process_approval_async(chat_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
         )
@@ -152,7 +153,6 @@ async def on_draft_action(query: CallbackQuery, callback_data: DraftAction):
             query,
             f"🧪 *Teste em andamento* — {datetime.now(timezone.utc).strftime('%H:%M')} UTC",
         )
-        from dispatch import process_test_send_async
         asyncio.create_task(
             process_test_send_async(chat_id, draft_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
         )
@@ -167,7 +167,6 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
     action = callback_data.action
 
     if action == "archive":
-        from execution.curation import redis_client
         date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         try:
             archived = await asyncio.to_thread(redis_client.archive, item_id, date, chat_id=chat_id)
@@ -186,7 +185,6 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
         )
 
     elif action == "reject":
-        from execution.curation import redis_client
         snapshot_title = ""
         try:
             item = redis_client.get_staging(item_id)
@@ -220,7 +218,6 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
         )
 
     elif action == "pipeline":
-        from execution.curation import redis_client
         try:
             item = await asyncio.to_thread(redis_client.get_staging, item_id)
         except Exception as exc:
@@ -251,8 +248,6 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
         asyncio.create_task(run_pipeline_and_archive(chat_id, raw_text, progress.message_id, item_id))
 
     elif action == "send_raw":
-        from execution.curation import redis_client
-        from dispatch import process_approval_async
         try:
             item = await asyncio.to_thread(redis_client.get_staging, item_id)
         except Exception as exc:
@@ -309,7 +304,6 @@ async def on_broadcast_confirm(query: CallbackQuery, callback_data: BroadcastCon
             query,
             f"📲 *Enviando para WhatsApp*\n🕒 {datetime.now(timezone.utc).strftime('%H:%M')} UTC",
         )
-        from dispatch import process_approval_async
         asyncio.create_task(
             process_approval_async(chat_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
         )

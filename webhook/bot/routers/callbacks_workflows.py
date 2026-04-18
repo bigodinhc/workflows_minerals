@@ -14,6 +14,10 @@ from bot.callback_data import WorkflowRun, WorkflowList
 from bot.config import get_bot
 from bot.keyboards import build_main_menu_keyboard
 from bot.middlewares.auth import RoleMiddleware
+from workflow_trigger import (
+    trigger_workflow, find_triggered_run, poll_and_update,
+    _workflow_name_by_id, render_workflow_list,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +29,6 @@ callbacks_workflows_router.callback_query.middleware(RoleMiddleware(allowed_role
 
 @callbacks_workflows_router.callback_query(WorkflowRun.filter())
 async def on_workflow_run(query: CallbackQuery, callback_data: WorkflowRun):
-    from workflow_trigger import trigger_workflow, find_triggered_run, poll_and_update, _workflow_name_by_id
     chat_id = query.message.chat.id
     message_id = query.message.message_id
     workflow_id = callback_data.workflow_id
@@ -76,7 +79,6 @@ async def on_workflow_list(query: CallbackQuery, callback_data: WorkflowList):
     bot = get_bot()
 
     if callback_data.action == "list":
-        from workflow_trigger import render_workflow_list
         text, markup = await render_workflow_list()
         await bot.edit_message_text(
             text, chat_id=query.message.chat.id,

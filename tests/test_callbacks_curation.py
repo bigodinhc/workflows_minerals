@@ -114,7 +114,7 @@ async def test_draft_action_approve_happy_path_dispatches_send(
     )
     drafts_update = mocker.patch("bot.routers.callbacks_curation.drafts_update")
     mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
-    mocker.patch("dispatch.process_approval_async", new=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.process_approval_async", new=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
     await on_draft_action(query, DraftAction(action="approve", draft_id="approved1"))
@@ -173,7 +173,7 @@ async def test_draft_action_test_approve_dispatches_test_send(
         return_value={"message": "hi", "status": "pending"},
     )
     mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
-    mocker.patch("dispatch.process_test_send_async", new=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.process_test_send_async", new=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
     await on_draft_action(query, DraftAction(action="test_approve", draft_id="t1"))
@@ -259,7 +259,7 @@ async def test_curate_action_send_raw_archives_and_dispatches(
         new=AsyncMock(side_effect=[item, None]),
     )
     mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
-    mocker.patch("dispatch.process_approval_async", new=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.process_approval_async", new=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
     await on_curate_action(query, CurateAction(action="send_raw", item_id="item2"), state)
@@ -283,7 +283,7 @@ async def test_broadcast_confirm_send_happy_path_dispatches(
     )
     drafts_update = mocker.patch("bot.routers.callbacks_curation.drafts_update")
     mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
-    mocker.patch("dispatch.process_approval_async", new=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.process_approval_async", new=AsyncMock())
     create_task = mocker.patch("asyncio.create_task")
 
     await on_broadcast_confirm(query, BroadcastConfirm(action="send", draft_id="bcast_1"))

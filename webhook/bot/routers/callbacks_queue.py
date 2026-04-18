@@ -15,6 +15,8 @@ from bot.callback_data import QueuePage, QueueOpen
 from bot.config import get_bot
 from bot.middlewares.auth import RoleMiddleware
 import query_handlers
+from execution.curation import redis_client as curation_redis
+from execution.curation import telegram_poster
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +43,6 @@ async def on_queue_page(query: CallbackQuery, callback_data: QueuePage):
 
 @callbacks_queue_router.callback_query(QueueOpen.filter())
 async def on_queue_open(query: CallbackQuery, callback_data: QueueOpen):
-    from execution.curation import redis_client as curation_redis
-    from execution.curation import telegram_poster
     chat_id = query.message.chat.id
     try:
         item = curation_redis.get_staging(callback_data.item_id)

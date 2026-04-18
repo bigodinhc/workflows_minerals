@@ -11,10 +11,10 @@ from bot.routers.callbacks_workflows import on_workflow_run, on_workflow_list, o
 @pytest.mark.asyncio
 async def test_workflow_run_happy_path_edits_and_tracks(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100, message_id=200)
-    mocker.patch("workflow_trigger._workflow_name_by_id", return_value="daily_report")
-    mocker.patch("workflow_trigger.trigger_workflow", new=AsyncMock(return_value=(True, None)))
-    mocker.patch("workflow_trigger.find_triggered_run", new=AsyncMock(return_value="run_42"))
-    mocker.patch("workflow_trigger.poll_and_update", new=AsyncMock())
+    mocker.patch("bot.routers.callbacks_workflows._workflow_name_by_id", return_value="daily_report")
+    mocker.patch("bot.routers.callbacks_workflows.trigger_workflow", new=AsyncMock(return_value=(True, None)))
+    mocker.patch("bot.routers.callbacks_workflows.find_triggered_run", new=AsyncMock(return_value="run_42"))
+    mocker.patch("bot.routers.callbacks_workflows.poll_and_update", new=AsyncMock())
     bot = AsyncMock()
     bot.edit_message_text = AsyncMock()
     mocker.patch("bot.routers.callbacks_workflows.get_bot", return_value=bot)
@@ -30,9 +30,9 @@ async def test_workflow_run_happy_path_edits_and_tracks(mock_callback_query, moc
 @pytest.mark.asyncio
 async def test_workflow_run_trigger_failure_shows_error_with_retry(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100, message_id=200)
-    mocker.patch("workflow_trigger._workflow_name_by_id", return_value="failing_wf")
+    mocker.patch("bot.routers.callbacks_workflows._workflow_name_by_id", return_value="failing_wf")
     mocker.patch(
-        "workflow_trigger.trigger_workflow",
+        "bot.routers.callbacks_workflows.trigger_workflow",
         new=AsyncMock(return_value=(False, "api rate limit")),
     )
     bot = AsyncMock()
@@ -49,10 +49,10 @@ async def test_workflow_run_trigger_failure_shows_error_with_retry(mock_callback
 @pytest.mark.asyncio
 async def test_workflow_run_no_run_id_shows_warning(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100, message_id=200)
-    mocker.patch("workflow_trigger._workflow_name_by_id", return_value="wf")
-    mocker.patch("workflow_trigger.trigger_workflow", new=AsyncMock(return_value=(True, None)))
-    mocker.patch("workflow_trigger.find_triggered_run", new=AsyncMock(return_value=None))
-    mocker.patch("workflow_trigger.poll_and_update", new=AsyncMock())
+    mocker.patch("bot.routers.callbacks_workflows._workflow_name_by_id", return_value="wf")
+    mocker.patch("bot.routers.callbacks_workflows.trigger_workflow", new=AsyncMock(return_value=(True, None)))
+    mocker.patch("bot.routers.callbacks_workflows.find_triggered_run", new=AsyncMock(return_value=None))
+    mocker.patch("bot.routers.callbacks_workflows.poll_and_update", new=AsyncMock())
     bot = AsyncMock()
     bot.edit_message_text = AsyncMock()
     mocker.patch("bot.routers.callbacks_workflows.get_bot", return_value=bot)
@@ -81,7 +81,7 @@ async def test_workflow_run_no_run_id_shows_warning(mock_callback_query, mocker)
 async def test_workflow_list_action_list_renders(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100, message_id=200)
     mocker.patch(
-        "workflow_trigger.render_workflow_list",
+        "bot.routers.callbacks_workflows.render_workflow_list",
         new=AsyncMock(return_value=("workflows text", {"inline_keyboard": []})),
     )
     bot = AsyncMock()

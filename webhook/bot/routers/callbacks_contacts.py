@@ -23,6 +23,7 @@ callbacks_contacts_router.callback_query.middleware(RoleMiddleware(allowed_roles
 
 @callbacks_contacts_router.callback_query(ContactToggle.filter())
 async def on_contact_toggle(query: CallbackQuery, callback_data: ContactToggle):
+    # cyclic: bot.routers.commands imports from us (via callbacks_contacts_router)
     from bot.routers.commands import _render_list_view
     try:
         sheets = SheetsClient()
@@ -42,6 +43,7 @@ async def on_contact_toggle(query: CallbackQuery, callback_data: ContactToggle):
 
 @callbacks_contacts_router.callback_query(ContactPage.filter())
 async def on_contact_page(query: CallbackQuery, callback_data: ContactPage):
+    # cyclic: bot.routers.commands imports from us (via callbacks_contacts_router)
     from bot.routers.commands import _render_list_view
     await query.answer("")
     search = callback_data.search if callback_data.search else None

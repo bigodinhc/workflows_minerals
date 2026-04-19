@@ -4,10 +4,12 @@
 Scheduled daily via .github/workflows/platts_reports.yml.
 """
 import argparse
+import asyncio
 import json
 import os
 import sys
 import traceback
+import uuid
 
 from dotenv import load_dotenv
 
@@ -20,6 +22,116 @@ from execution.integrations.apify_client import ApifyClient
 
 ACTOR_ID = os.getenv("APIFY_PLATTS_REPORTS_ACTOR_ID", "bigodeio05/platts-scrap-reports")
 WORKFLOW_NAME = "platts_reports"
+
+
+def _run_apify_sync(client: ApifyClient, run_input: dict):
+    """Blocking helper: run actor and fetch items. Runs inside asyncio.to_thread."""
+    dataset_id = client.run_actor(ACTOR_ID, run_input, memory_mbytes=4096, timeout_secs=900)
+    items = client.get_dataset_items(dataset_id)
+    return dataset_id, items
+
+
+async def _run_with_progress(args, chat_id: int, run_input: dict) -> int:
+    """Async reports body instrumented with ProgressReporter step() calls."""
+    from aiogram import Bot
+    from execution.core.progress_reporter import ProgressReporter
+
+    bot = Bot(token=os.environ["TELEGRAM_BOT_TOKEN"])
+    sb = None
+    try:
+        from supabase import create_client
+        sb = create_client(
+            os.environ["SUPABASE_URL"],
+            os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+        )
+    except Exception as exc:
+        print(f"WARNING: supabase_init_failed in platts_reports: {exc}", file=sys.stderr)
+
+    # Send initial placeholder card
+    initial = await bot.send_message(chat_id, "📊 Platts Reports\n⏳ starting...")
+
+    reporter = ProgressReporter(
+        bot=bot,
+        chat_id=chat_id,
+        workflow=WORKFLOW_NAME,
+        run_id=str(uuid.uuid4()),
+        supabase_client=sb,
+    )
+    reporter._message_id = initial.message_id
+    reporter._pending_card_state = []
+    reporter._last_edit_at = None
+
+    try:
+        # ── PHASE 1: trigger Apify actor ──────────────────────────────────────
+        await reporter.step("Actor started", f"{ACTOR_ID} triggered")
+
+        dataset_id, items = await asyncio.to_thread(_run_apify_sync, ApifyClient(), run_input)
+
+        # ── PHASE 2: dataset received ─────────────────────────────────────────
+        await reporter.step("Dataset received", f"{len(items)} item(s) from actor")
+
+        if not items:
+            state_store.record_empty(WORKFLOW_NAME, "actor returned no items")
+            await reporter.step("Empty result", "actor returned no items", level="warning")
+            await reporter.finish()
+            return 0
+
+        summary = items[0]
+        print(json.dumps(summary, indent=2, default=str))
+
+        downloaded = summary.get("downloaded", [])
+        skipped = summary.get("skipped", [])
+        errors = summary.get("errors", [])
+        downloaded_count = len(downloaded)
+        skipped_count = len(skipped)
+        errors_count = len(errors)
+
+        # ── PHASE 3: PDFs downloaded ──────────────────────────────────────────
+        await reporter.step(
+            "PDFs downloaded",
+            f"{downloaded_count} downloaded, {skipped_count} skipped, {errors_count} errors",
+        )
+
+        # ── PHASE 4: Supabase / storage result ───────────────────────────────
+        # The actor handles upload internally; we report the outcome.
+        uploaded_count = len([r for r in downloaded if r.get("supabaseUrl") or r.get("storagePath")])
+        await reporter.step(
+            "Uploaded to Supabase",
+            f"{uploaded_count} objects stored (of {downloaded_count} downloaded)",
+        )
+
+        summary_for_state = {
+            "type": summary.get("type"),
+            "downloaded_count": downloaded_count,
+            "skipped_count": skipped_count,
+            "errors_count": errors_count,
+        }
+
+        if summary.get("type") == "error":
+            state_store.record_failure(WORKFLOW_NAME, summary_for_state, 0)
+            await reporter.step(
+                "Actor reported error",
+                summary.get("message", "")[:200],
+                level="error",
+            )
+            return 1
+
+        state_store.record_success(WORKFLOW_NAME, summary_for_state, 0)
+
+        await reporter.finish(
+            message=f"✅ Done — {downloaded_count} reports downloaded, {uploaded_count} uploaded"
+        )
+        return 0
+
+    except Exception as exc:
+        await reporter.step(
+            f"Failed: {type(exc).__name__}",
+            str(exc)[:200],
+            level="error",
+        )
+        raise
+    finally:
+        await bot.session.close()
 
 
 def main() -> int:
@@ -35,6 +147,16 @@ def main() -> int:
         print("ERROR: PLATTS_USERNAME and PLATTS_PASSWORD required", file=sys.stderr)
         return 2
 
+    chat_id_raw = os.getenv("TELEGRAM_CHAT_ID", "0")
+    try:
+        chat_id = int(chat_id_raw)
+    except ValueError:
+        print(f"ERROR: TELEGRAM_CHAT_ID not a valid integer: {chat_id_raw!r}", file=sys.stderr)
+        return 2
+    if not chat_id:
+        print("ERROR: TELEGRAM_CHAT_ID not set.", file=sys.stderr)
+        return 2
+
     run_input = {
         "username": username,
         "password": password,
@@ -47,36 +169,15 @@ def main() -> int:
         ),
     }
 
-    print(f"Triggering actor {ACTOR_ID} (dryRun={args.dry_run})")
-    client = ApifyClient()
     try:
-        dataset_id = client.run_actor(ACTOR_ID, run_input, memory_mbytes=4096, timeout_secs=900)
-        items = client.get_dataset_items(dataset_id)
+        return asyncio.run(_run_with_progress(args, chat_id, run_input))
     except Exception as e:
-        print(f"Actor run failed: {e}", file=sys.stderr)
-        traceback.print_exc()
+        print(
+            f"Workflow failed ({type(e).__name__}): {e}\n{traceback.format_exc()}",
+            file=sys.stderr,
+        )
         state_store.record_crash(WORKFLOW_NAME, f"{type(e).__name__}: {str(e)}"[:200])
         return 1
-
-    if not items:
-        print("Actor returned no dataset items")
-        state_store.record_empty(WORKFLOW_NAME, "actor returned no items")
-        return 0
-
-    summary = items[0]
-    print(json.dumps(summary, indent=2, default=str))
-
-    summary_for_state = {
-        "type": summary.get("type"),
-        "downloaded_count": len(summary.get("downloaded", [])),
-        "skipped_count": len(summary.get("skipped", [])),
-        "errors_count": len(summary.get("errors", [])),
-    }
-    if summary.get("type") == "error":
-        state_store.record_failure(WORKFLOW_NAME, summary_for_state, 0)
-        return 1
-    state_store.record_success(WORKFLOW_NAME, summary_for_state, 0)
-    return 0
 
 
 if __name__ == "__main__":

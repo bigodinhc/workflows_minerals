@@ -115,6 +115,22 @@ def create_app() -> web.Application:
 
 
 def main():
+    # ── Sentry (no-op if SENTRY_DSN not set) ──
+    _sentry_dsn = os.getenv("SENTRY_DSN", "")
+    if _sentry_dsn:
+        import sentry_sdk
+        from sentry_sdk.integrations.aiohttp import AioHttpIntegration
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            environment=os.getenv("RAILWAY_ENVIRONMENT", "dev"),
+            traces_sample_rate=0.1,
+            integrations=[AioHttpIntegration()],
+        )
+        _sentry_logger = logging.getLogger(__name__)
+        _sentry_logger.info("sentry_initialized env=%s", os.getenv("RAILWAY_ENVIRONMENT", "dev"))
+    else:
+        logging.getLogger(__name__).warning("SENTRY_DSN not set — Sentry disabled")
+
     app = create_app()
     web.run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
 

@@ -43,6 +43,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
+          # Observability (Phase 3)
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
           DRY=""
           FORCE=""

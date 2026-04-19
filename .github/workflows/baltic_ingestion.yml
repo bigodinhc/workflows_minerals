@@ -53,6 +53,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
 
+          # Observability (Phase 3)
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then

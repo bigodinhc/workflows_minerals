@@ -57,6 +57,11 @@ jobs:
           UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
           UAZAPI_URL: "https://mineralstrading.uazapi.com"
 
+          # Observability (Phase 3)
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
         run: |
           CMD="python -m execution.scripts.platts_ingestion"
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then

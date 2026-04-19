@@ -17,7 +17,7 @@ This file tracks work that was explicitly deferred out of the Backend Hardening 
 | # | Action | Status |
 |---|---|---|
 | 1 | Apply `supabase/migrations/20260418_event_log.sql` to Supabase dev + prod | ✅ applied 2026-04-19 |
-| 2 | Apply `supabase/migrations/20260419_event_log_rls.sql` (RLS enable follow-up) to Supabase dev + prod | pending |
+| 2 | Apply `supabase/migrations/20260419_event_log_rls.sql` (RLS enable follow-up) to Supabase dev + prod | ✅ applied 2026-04-19 |
 | 3 | Set `SENTRY_DSN` in Railway environment for webhook service + each cron script service | ✅ done |
 | 4 | Set `SENTRY_DSN` in local `.env` for dev validation | ✅ done |
 | 5 | Sentry smoke test (send test events, verify dashboard receives them) | ✅ done 2026-04-19 |

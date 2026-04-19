@@ -15,7 +15,9 @@ from datetime import datetime, timedelta
 
 import aiohttp
 from aiohttp import web
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+import metrics  # noqa: F401 — side-effect: registers counters at module load
 from bot.config import ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, UAZAPI_TOKEN, UAZAPI_URL
 from bot.routers._helpers import drafts_set
 import contact_admin
@@ -38,6 +40,15 @@ async def health(request: web.Request) -> web.Response:
         "anthropic_key_set": bool(ANTHROPIC_API_KEY),
         "anthropic_key_prefix": ANTHROPIC_API_KEY[:10] + "..." if ANTHROPIC_API_KEY else "NONE",
     })
+
+
+@routes.get("/metrics")
+async def metrics_endpoint(request: web.Request) -> web.Response:
+    """Prometheus scrape endpoint. Unauthenticated — counters are aggregate and non-sensitive."""
+    return web.Response(
+        body=generate_latest(),
+        headers={"Content-Type": CONTENT_TYPE_LATEST},
+    )
 
 
 @routes.get("/test-ai")

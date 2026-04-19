@@ -4,6 +4,7 @@ Orchestrates the daily price report collection and dissemination.
 Unified Workflow: LSEG Fetch -> Format -> Send Uazapi
 """
 
+import asyncio
 import os
 import sys
 import argparse
@@ -163,7 +164,7 @@ def main():
             on_progress=progress.on_dispatch_tick,
         )
 
-        progress.finish(report, message=message)
+        asyncio.run(progress.finish(report, message=message))
 
         logger.info(
             f"Daily report broadcast complete. Sent: {report.success_count}, "

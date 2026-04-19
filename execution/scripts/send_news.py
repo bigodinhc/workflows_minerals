@@ -1,5 +1,6 @@
 
 #!/usr/bin/env python3
+import asyncio
 import sys
 import os
 import argparse
@@ -93,7 +94,7 @@ def main():
             msg,
             on_progress=progress.on_dispatch_tick,
         )
-        progress.finish(report, message=msg)
+        asyncio.run(progress.finish(report, message=msg))
         logger.info(
             f"News broadcast complete. Sent: {report.success_count}, "
             f"Failed: {report.failure_count}"

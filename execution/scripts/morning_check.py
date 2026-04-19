@@ -5,6 +5,7 @@ Checks for daily Platts data, formats a hybrid message (Bold + Text),
 sends via WhatsApp, and ensures single execution per day via Control Sheet.
 """
 
+import asyncio
 import os
 import sys
 import argparse
@@ -282,7 +283,7 @@ def main():
             on_progress=progress.on_dispatch_tick,
         )
 
-        progress.finish(report, message=message)
+        asyncio.run(progress.finish(report, message=message))
 
         logger.info(
             f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"

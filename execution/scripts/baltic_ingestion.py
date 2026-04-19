@@ -10,6 +10,7 @@ Automates:
 5. Send WhatsApp Report
 """
 
+import asyncio
 import os
 import sys
 import argparse
@@ -309,7 +310,7 @@ def main():
             message,
             on_progress=progress.on_dispatch_tick,
         )
-        progress.finish(report, message=message)
+        asyncio.run(progress.finish(report, message=message))
         logger.info(
             f"Baltic broadcast complete. Sent: {report.success_count}, "
             f"Failed: {report.failure_count}"

@@ -1,6 +1,12 @@
 """Tests for execution.core.progress_reporter module."""
+import asyncio
 from unittest.mock import MagicMock
 from execution.core.progress_reporter import ProgressReporter
+
+
+def _finish(reporter, *args, **kwargs):
+    """Sync wrapper for reporter.finish() (now an async method)."""
+    asyncio.run(reporter.finish(*args, **kwargs))
 
 
 def test_start_stores_message_id_from_telegram():
@@ -288,7 +294,7 @@ def test_finish_edits_with_success_emoji_for_all_success():
         DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
     ]
     report = _make_report("test", results)
-    reporter.finish(report)
+    _finish(reporter, report)
 
     fake_client.edit_message_text.assert_called_once()
     kwargs = fake_client.edit_message_text.call_args.kwargs
@@ -315,7 +321,7 @@ def test_finish_edits_with_total_failure_emoji():
         for i in range(10)
     ]
     report = _make_report("test", results)
-    reporter.finish(report)
+    _finish(reporter, report)
 
     kwargs = fake_client.edit_message_text.call_args.kwargs
     assert "🚨" in kwargs["new_text"]
@@ -338,7 +344,7 @@ def test_finish_swallows_exceptions():
     ]
     report = _make_report("test", results)
     # Must not raise
-    reporter.finish(report)
+    _finish(reporter, report)
 
 
 def test_finish_noop_when_disabled():
@@ -356,7 +362,7 @@ def test_finish_noop_when_disabled():
         DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
     ]
     report = _make_report("test", results)
-    reporter.finish(report)
+    _finish(reporter, report)
 
     fake_client.edit_message_text.assert_not_called()
 
@@ -424,7 +430,7 @@ def test_full_lifecycle_start_dispatch_finish(monkeypatch):
         for i in range(100)
     ]
     report = _make_report("morning_check", results)
-    reporter.finish(report)
+    _finish(reporter, report)
 
     # 1 sendMessage (start) + at least 10 edits (10% steps + final) + 1 finish edit
     assert fake_client.send_message.call_count == 1
@@ -466,7 +472,7 @@ def test_finish_with_message_preview_includes_message():
         DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
     ]
     report = _make_report("test", results)
-    reporter.finish(report, message="Iron ore price: $100.50")
+    _finish(reporter, report, message="Iron ore price: $100.50")
 
     kwargs = fake_client.edit_message_text.call_args.kwargs
     assert "Iron ore price: $100.50" in kwargs["new_text"]
@@ -489,7 +495,7 @@ def test_finish_without_message_has_no_preview_section():
         DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)
     ]
     report = _make_report("test", results)
-    reporter.finish(report)  # no message passed
+    _finish(reporter, report)  # no message passed
 
     kwargs = fake_client.edit_message_text.call_args.kwargs
     assert "Mensagem enviada" not in kwargs["new_text"]
@@ -513,7 +519,7 @@ def test_finish_truncates_long_message_to_fit_telegram_limit():
     report = _make_report("test", results)
     long_message = "X" * 10000  # well above Telegram's 4096 limit
 
-    reporter.finish(report, message=long_message)
+    _finish(reporter, report, message=long_message)
 
     kwargs = fake_client.edit_message_text.call_args.kwargs
     # Must stay under Telegram limit
@@ -637,7 +643,7 @@ def test_finish_records_success_when_any_delivery_ok(monkeypatch):
 
     results = [DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)]
     report = _make_report("morning_check", results)
-    reporter.finish(report)
+    _finish(reporter, report)
 
     assert any(c[0] == "morning_check" for c in calls)
     assert not any(isinstance(c, tuple) and c[0] == "FAIL" for c in calls)
@@ -668,7 +674,7 @@ def test_finish_records_failure_when_all_deliveries_failed(monkeypatch):
         for i in range(3)
     ]
     report = _make_report("test", results)
-    reporter.finish(report)
+    _finish(reporter, report)
     assert calls == ["test"]
 
 
@@ -712,5 +718,5 @@ def test_finish_state_store_errors_swallowed(monkeypatch):
     results = [DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=0)]
     report = _make_report("test", results)
     # Must not raise
-    reporter.finish(report)
+    _finish(reporter, report)
     reporter.finish_empty("x")

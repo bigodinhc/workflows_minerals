@@ -121,6 +121,83 @@ Candidates for a future hardening or UX milestone, not currently planned:
 
 ---
 
+## Visual dashboards — Grafana Cloud (deferred)
+
+### Status
+
+- `/metrics` endpoint is live at `https://web-production-0d909.up.railway.app/metrics` and exposes Phase 3 counters (`whatsapp_messages_total`, `telegram_edit_failures_total`, `progress_card_edits_total`) + histograms + default Python process metrics.
+- No external dashboard is wired yet. Monitoring today is: read `/metrics` with curl or browser; query `event_log` in Supabase for timeline; Sentry for exceptions.
+- Grafana Cloud setup was explored during wrap-up on 2026-04-19 and deferred in favor of shipping the core milestone.
+
+### Why it's worth doing later
+
+- Counter values are meaningless without trend lines. A gauge alone doesn't tell you if the WhatsApp failure rate is abnormal — you need "X per minute over the last 24h" compared to baseline.
+- `rate(whatsapp_messages_total{status="duplicate"}[1h])` + a simple threshold alert catches retry-storm or idempotency misconfiguration before users notice.
+- Ties together metrics + logs + traces visually; reduces MTTR on production incidents.
+
+### Setup options (in order of effort)
+
+**Option A — Grafana Cloud "Hosted scrape job" (preferred if supported in free tier UI):**
+1. Create account at https://grafana.com/auth/sign-up/create-user (free tier: 10k series, 14d retention).
+2. Stack region: `sa-east-1` (São Paulo) for lower Railway↔Grafana latency.
+3. In Grafana Cloud UI: **Connections → Add new connection → Prometheus → Hosted scrape**.
+4. Scrape target: `https://web-production-0d909.up.railway.app/metrics`, interval `30s`.
+5. Build 4 starter panels:
+   - `rate(whatsapp_messages_total{status="success"}[5m])` — success rate
+   - `rate(whatsapp_messages_total{status="duplicate"}[1h])` — dup rate (alert if > 0.5/min sustained)
+   - `sum by (reason) (rate(telegram_edit_failures_total[5m]))` — edit failures by reason
+   - `histogram_quantile(0.95, sum by (le) (rate(whatsapp_duration_seconds_bucket[5m])))` — p95 latency
+
+Effort: ~20 minutes if the hosted-scrape option is present in the free-tier UI.
+
+**Option B — Grafana Alloy as a Railway service:**
+
+If the hosted-scrape option is missing in free tier, run Grafana Alloy (the new unified agent that replaced Grafana Agent) as a small additional Railway service in the same project. Alloy scrapes `/metrics` on an interval and pushes via `prometheus.remote_write` to Grafana Cloud.
+
+Minimal `config.alloy`:
+```alloy
+prometheus.scrape "webhook" {
+  targets = [{
+    __address__ = "web-production-0d909.up.railway.app",
+    __scheme__  = "https",
+  }]
+  metrics_path = "/metrics"
+  forward_to   = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "30s"
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = "https://prometheus-prod-XX-prod-sa-east-1.grafana.net/api/prom/push"
+    basic_auth {
+      username = sys.env("GRAFANA_USER_ID")
+      password = sys.env("GRAFANA_API_TOKEN")
+    }
+  }
+}
+```
+
+Railway secrets: `GRAFANA_USER_ID`, `GRAFANA_API_TOKEN`. Docker image: `grafana/alloy:latest`.
+
+Effort: ~30-45 minutes including the Railway service setup and Alloy config testing.
+
+**Option C — Railway native observability integration (if available):**
+
+Some Railway plans expose a one-click "export metrics to Grafana Cloud" button in **Settings → Observability**. Worth checking the current Railway UI before committing to Option B — it eliminates the need for a separate agent service.
+
+### Prerequisite before shipping
+
+- `/metrics` today is **unauthenticated**. If Grafana Cloud scrapes it, the URL is only exposed to the Grafana egress IPs, but the endpoint itself remains globally scrape-able. Before making the URL more public, add simple auth (a shared-secret header token or IP allowlist) — see CONCERNS §Security section for scope; low urgency today.
+
+### Decision to defer
+
+- Current observability (Sentry + `/metrics` curl + `event_log` SQL + live Telegram card) covers the operational cases needed today. Grafana would upgrade "I can see it" to "I can trend it and alert on it" — real value once traffic scales beyond what one operator can eyeball in Sentry + Supabase daily.
+- Tracked here so we pick it up when either (a) traffic/incidents justify the setup, or (b) we want a visible story for stakeholders.
+
+---
+
 ## Log
 
 - 2026-04-19 — File created after Backend Hardening v1 merged to main (`d2e8d3a`). All 3 phases shipped. Sentry smoke test passed. `event_log` migration applied. RLS follow-up migration pending.
+- 2026-04-19 — RLS migration applied to dev + prod (`19cb726`). `aiogram` + `aiohttp` added to root `requirements.txt` (`3a0e8c3`) to unblock cron scripts. Cron workflow YAMLs updated to pass `SENTRY_DSN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (`4354d09`). First real `platts_ingestion` run wrote 4 rows to `event_log` and produced live Telegram card — all 4 observability layers verified working end-to-end in production.
+- 2026-04-19 — Added "Visual dashboards — Grafana Cloud" section documenting deferred dashboard setup with three ingress paths (hosted scrape, Alloy agent, Railway native) and decision log.

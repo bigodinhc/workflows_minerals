@@ -5,9 +5,11 @@ Replaces rationale_ingestion.py and market_news_ingestion.py.
 Scheduled 3x/day (9h, 12h, 15h BRT) via Railway cron.
 """
 import argparse
+import asyncio
 import os
 import sys
 import traceback
+import uuid
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -61,6 +63,141 @@ def _flatten_dataset(items: list) -> list:
     return flat
 
 
+async def _run_with_progress(args, logger, chat_id: int, today_br: str, date_iso: str, run_input: dict) -> None:
+    """Async ingestion body instrumented with ProgressReporter step() calls."""
+    from aiogram import Bot
+    from execution.core.progress_reporter import ProgressReporter
+
+    bot = Bot(token=os.environ["TELEGRAM_BOT_TOKEN"])
+    sb = None
+    try:
+        from supabase import create_client
+        sb = create_client(
+            os.environ["SUPABASE_URL"],
+            os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+        )
+    except Exception as exc:
+        logger.warning("supabase_init_failed in platts_ingestion: %s", exc)
+
+    # Send initial placeholder card
+    initial = await bot.send_message(chat_id, "📡 Platts Ingestion\n⏳ starting...")
+
+    reporter = ProgressReporter(
+        bot=bot,
+        chat_id=chat_id,
+        workflow=WORKFLOW_NAME,
+        run_id=str(uuid.uuid4()),
+        supabase_client=sb,
+    )
+    reporter._message_id = initial.message_id
+    reporter._pending_card_state = []
+    reporter._last_edit_at = None
+
+    try:
+        # ── PHASE 1: trigger Apify actor (or dry-run mock) ────────────────────
+        await reporter.step("Actor started", "platts-scrap-full-news triggered")
+
+        if args.dry_run:
+            logger.info("[DRY RUN] Would run Apify with input: " + str(run_input))
+            items = [{
+                "type": "success",
+                "topNews": [{
+                    "title": "DryRun Top",
+                    "fullText": "Test body with prices $104.80/dmt CFR.",
+                    "publishDate": today_br,
+                    "source": "Top News - Ferrous Metals",
+                    "author": "Test Author",
+                    "tabName": "",
+                }],
+                "rmw": [{
+                    "tabName": "CFR North China Iron Ore 65% Fe Rationale",
+                    "articles": [{
+                        "title": "DryRun Rationale",
+                        "fullText": "Platts assessed the 65% Fe index at $123.35/dmt CFR North China.",
+                        "gridDateTime": today_br,
+                        "source": "rmw.CFR North China Iron Ore 65% Fe Rationale",
+                        "tabName": "CFR North China Iron Ore 65% Fe Rationale",
+                    }],
+                }],
+                "summary": {"totalArticles": 2},
+            }]
+        else:
+            logger.info(f"Running Apify Actor: {ACTOR_ID}")
+            client = ApifyClient()
+            dataset_id, items = await asyncio.to_thread(
+                _run_apify_sync, client, run_input,
+            )
+
+        # ── PHASE 2: flatten dataset ───────────────────────────────────────────
+        articles = _flatten_dataset(items)
+        logger.info(f"Flattened to {len(articles)} articles.")
+        await reporter.step("Dataset fetched", f"{len(articles)} articles after flatten")
+
+        if not articles:
+            logger.warning("No articles after flatten.")
+            state_store.record_empty(WORKFLOW_NAME, "scrape vazio")
+            await reporter.step("Empty result", "no articles — nothing to stage", level="warning")
+            await reporter.finish()
+            return
+
+        # ── PHASE 3: route (dedup + stage) ────────────────────────────────────
+        counters, staged = await asyncio.to_thread(
+            router.route_items,
+            items=articles,
+            today_date=date_iso,
+            today_br=today_br,
+            logger=logger,
+        )
+        logger.info(f"Route summary: {counters}")
+
+        new_count = counters.get("staged", 0)
+        dup_count = counters.get("dedup_skipped", 0) + counters.get("dup", 0)
+        await reporter.step("Dedup applied", f"{new_count} new, {dup_count} duplicates")
+
+        staged_count = counters.get("staged", 0)
+        await reporter.step("Staged in Redis", f"{staged_count} items")
+
+        # ── PHASE 4: send ingestion digest ────────────────────────────────────
+        preview_base_url = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+        if staged_count > 0:
+            try:
+                from webhook.digest import format_ingestion_digest
+                from execution.integrations.telegram_client import TelegramClient
+                digest_out = format_ingestion_digest(counters, staged)
+                if digest_out is not None:
+                    text, markup = digest_out
+                    await asyncio.to_thread(
+                        TelegramClient().send_message,
+                        text,
+                        chat_id,
+                        markup,
+                    )
+                    logger.info(f"Digest sent to chat {chat_id}")
+            except Exception as exc:
+                logger.warning(f"Digest send failed: {exc}")
+
+        state_store.record_success(WORKFLOW_NAME, counters, 0)
+
+        await reporter.finish(message=f"✅ Done — {staged_count} staged")
+
+    except Exception as exc:
+        await reporter.step(
+            f"Failed: {type(exc).__name__}",
+            str(exc)[:200],
+            level="error",
+        )
+        raise
+    finally:
+        await bot.session.close()
+
+
+def _run_apify_sync(client: ApifyClient, run_input: dict):
+    """Blocking helper: run actor and fetch items. Runs inside asyncio.to_thread."""
+    dataset_id = client.run_actor(ACTOR_ID, run_input, memory_mbytes=8192)
+    items = client.get_dataset_items(dataset_id)
+    return dataset_id, items
+
+
 def main():
     init_sentry(__name__)
     logger = WorkflowLogger("PlattsIngestion")
@@ -112,68 +249,7 @@ def main():
             run_input["dateFormat"] = "BR"
             run_input["dateFilter"] = "all"
 
-        if args.dry_run:
-            logger.info("[DRY RUN] Would run Apify with input: " + str(run_input))
-            items = [{
-                "type": "success",
-                "topNews": [{
-                    "title": "DryRun Top",
-                    "fullText": "Test body with prices $104.80/dmt CFR.",
-                    "publishDate": today_br,
-                    "source": "Top News - Ferrous Metals",
-                    "author": "Test Author",
-                    "tabName": "",
-                }],
-                "rmw": [{
-                    "tabName": "CFR North China Iron Ore 65% Fe Rationale",
-                    "articles": [{
-                        "title": "DryRun Rationale",
-                        "fullText": "Platts assessed the 65% Fe index at $123.35/dmt CFR North China.",
-                        "gridDateTime": today_br,
-                        "source": "rmw.CFR North China Iron Ore 65% Fe Rationale",
-                        "tabName": "CFR North China Iron Ore 65% Fe Rationale",
-                    }],
-                }],
-                "summary": {"totalArticles": 2},
-            }]
-        else:
-            logger.info(f"Running Apify Actor: {ACTOR_ID}")
-            client = ApifyClient()
-            dataset_id = client.run_actor(ACTOR_ID, run_input, memory_mbytes=8192)
-            items = client.get_dataset_items(dataset_id)
-
-        articles = _flatten_dataset(items)
-        logger.info(f"Flattened to {len(articles)} articles.")
-
-        if not articles:
-            logger.warning("No articles after flatten.")
-            state_store.record_empty(WORKFLOW_NAME, "scrape vazio")
-            return
-
-        counters, staged = router.route_items(
-            items=articles,
-            today_date=date_iso,
-            today_br=today_br,
-            logger=logger,
-        )
-        logger.info(f"Route summary: {counters}")
-
-        # v1.1: send single ingestion digest if any new items were staged
-        if counters.get("staged", 0) > 0:
-            try:
-                from webhook.digest import format_ingestion_digest
-                from execution.integrations.telegram_client import TelegramClient
-                digest_out = format_ingestion_digest(counters, staged)
-                if digest_out is not None:
-                    text, markup = digest_out
-                    TelegramClient().send_message(
-                        text=text, chat_id=chat_id, reply_markup=markup,
-                    )
-                    logger.info(f"Digest sent to chat {chat_id}")
-            except Exception as exc:
-                logger.warning(f"Digest send failed: {exc}")
-
-        state_store.record_success(WORKFLOW_NAME, counters, 0)
+        asyncio.run(_run_with_progress(args, logger, chat_id, today_br, date_iso, run_input))
 
     except Exception as e:
         logger.critical(

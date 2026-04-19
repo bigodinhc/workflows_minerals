@@ -9,3 +9,5 @@ redis>=5.0,<6.0
 pyyaml>=6.0,<7.0
 croniter>=2.0,<3.0
 supabase>=2.0.0,<3.0
+sentry-sdk[aiohttp]>=2.0.0,<3.0.0
+prometheus-client>=0.20.0,<1.0.0

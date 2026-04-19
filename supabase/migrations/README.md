@@ -25,4 +25,5 @@ supabase db push --project-ref <PROJECT_REF>
 
 | File | Applied to dev | Applied to prod | Notes |
 |---|---|---|---|
-| `20260418_event_log.sql` | pending | pending | Phase 3 — event_log table for ProgressReporter observability |
+| `20260418_event_log.sql` | ✅ 2026-04-19 | ✅ 2026-04-19 | Phase 3 — event_log table for ProgressReporter observability |
+| `20260419_event_log_rls.sql` | pending | pending | Phase 3 follow-up — enable RLS on event_log (service-role writes continue; no anon reads) |

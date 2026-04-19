@@ -1,6 +1,9 @@
 # Codebase Concerns
 
 **Analysis Date:** 2026-04-17
+**Last status update:** 2026-04-19 (post Backend Hardening v1 milestone)
+
+> **⚠️ Read first:** Many of the concerns below were addressed by the **Backend Hardening v1** milestone (Phases 1-3, tags `phase1-safety-net-complete`, `phase2-router-split-complete`, `phase3-observability-complete`). Items resolved or mitigated are marked **[✅ RESOLVED: …]** inline below. Items explicitly deferred track in `docs/superpowers/followups/2026-04-19-backend-hardening-v1-followups.md`.
 
 ## Security
 
@@ -75,7 +78,11 @@ data = safe_parse_webapp_init_data(TELEGRAM_BOT_TOKEN, init_data)
 
 ## Technical Debt & Fragile Areas
 
-### Catch-All Message Handler Recently Fixed But Pattern Remains Risky
+### Catch-All Message Handler Recently Fixed But Pattern Remains Risky [✅ RESOLVED: Phase 1 + Phase 2]
+
+*Regression guard test `test_message_router_has_no_catchall_text_handler_without_state_filter` in `tests/test_messages_fsm_isolation.py` now fails loudly if any non-state-filtered handler is added to `message_router`. Phase 2 also migrated reply handlers cleanly to `reply_kb_router`.*
+
+
 
 **Issue:** Recent commits (2cab598, a6214a0, 17135d8) show repeated bugs with catch-all text handlers intercepting FSM state messages.
 
@@ -96,7 +103,11 @@ data = safe_parse_webapp_init_data(TELEGRAM_BOT_TOKEN, init_data)
 
 ---
 
-### God File: callbacks.py (601 lines)
+### God File: callbacks.py (601 lines) [✅ RESOLVED: Phase 2]
+
+*`callbacks.py` DELETED (commit `a6e4567`). Split into 6 domain routers: `callbacks_curation.py`, `callbacks_reports.py`, `callbacks_queue.py`, `callbacks_menu.py`, `callbacks_contacts.py`, `callbacks_workflows.py`. Largest file now 309 lines.*
+
+
 
 **Issue:** Single router with 601 lines handling all callback logic (reports, queues, contacts, workflows, approvals).
 
@@ -115,7 +126,11 @@ Each <200 lines, easier to test.
 
 ---
 
-### Inline Imports Shadow Module Scope
+### Inline Imports Shadow Module Scope [✅ RESOLVED: Phase 2 Task 9]
+
+*Most inline imports hoisted to module top in the 6 new router files (commit `5c73d2d`). Only `bot.routers.commands._render_list_view` in `callbacks_contacts.py` remains inline, documented with a `# cyclic:` comment — genuinely circular.*
+
+
 
 **Issue:** Many functions import modules inside function bodies, creating hidden dependencies and making tracing harder.
 
@@ -130,7 +145,11 @@ Each <200 lines, easier to test.
 
 ---
 
-### Silent Exception Swallowing in edit_message_text Calls
+### Silent Exception Swallowing in edit_message_text Calls [✅ RESOLVED: Phase 3 Task 6]
+
+*5 sites in `webhook/dispatch.py` and `callbacks_curation.py:_finalize_card` replaced with typed `TelegramBadRequest` handling + `edit_failures` Prometheus counter (commit `7f68c4f`). `not_modified` silently counted; `bad_request`/`flood`/`unexpected` logged with context.*
+
+
 
 **Issue:** Many handlers catch all exceptions on edit calls and silently pass.
 
@@ -254,7 +273,11 @@ client.expire(key, _SEEN_TTL_SECONDS)  # Only on SEEN items
 
 ## Reliability
 
-### No Idempotency Token on WhatsApp Send (Webhook Handler)
+### No Idempotency Token on WhatsApp Send (Webhook Handler) [✅ RESOLVED: Phase 3 Task 2]
+
+*Both send paths now idempotent: async `send_whatsapp` (commit `3558da4`) and sync broadcast `send_fn` via `DeliveryReporter` (commit `35e1318`). Key: `sha1(phone|draft_id|message)` with `SET NX EX 86400` (24h). Duplicates return `{"status": "duplicate", "skipped": True}` and count as success in delivery reports.*
+
+
 
 **Issue:** `send_whatsapp()` has no idempotency check. If webhook is called twice, message sends twice.
 
@@ -311,7 +334,11 @@ return {"workflow_runs": []}  # Silent failure
 
 ---
 
-### Silently Dropped Errors in Approval Processing
+### Silently Dropped Errors in Approval Processing [✅ RESOLVED: Phase 3 Task 6]
+
+*Same fix as "Silent Exception Swallowing" above — `on_progress_sync` inner function and all `process_approval_async` edit points now have typed handling with `edit_failures` counter.*
+
+
 
 **Issue:** Multiple try/except blocks in `process_approval_async()` silence errors, continuing with incomplete data.
 
@@ -454,7 +481,11 @@ reports = sb.table("platts_reports").select(...).eq("report_type", ...).execute(
 
 ## Observability
 
-### No Central Error Tracking (Sentry/Similar)
+### No Central Error Tracking (Sentry/Similar) [✅ RESOLVED: Phase 3 Tasks 3 + 4]
+
+*Sentry integrated in `webhook/bot/main.py` (commit `22eea5b`) and via `execution/core/sentry_init.py` helper in `platts_ingestion`, `platts_reports`, `baltic_ingestion` (commit `95b8491`). Smoke test passed 2026-04-19. `SENTRY_DSN` set in Railway + `.env`.*
+
+
 
 **Issue:** Errors logged to stdout only. No aggregation, alerting, or error trending.
 
@@ -471,7 +502,11 @@ reports = sb.table("platts_reports").select(...).eq("report_type", ...).execute(
 
 ---
 
-### Missing Metrics on WhatsApp Delivery
+### Missing Metrics on WhatsApp Delivery [✅ RESOLVED: Phase 3 Task 5]
+
+*`webhook/metrics.py` added with counters `whatsapp_messages_total{status}`, `telegram_edit_failures_total{reason}`, `progress_card_edits_total` + histogram `whatsapp_duration_seconds` (commit `989b9c0`). `/metrics` endpoint scraped by Prometheus/Railway.*
+
+
 
 **Issue:** `process_approval_async()` logs success/failure text but no metrics (Prometheus counters).
 
@@ -555,7 +590,11 @@ async def get_news(request: web.Request) -> web.Response:
 
 ## Fragile Areas Requiring Careful Modification
 
-### FSM State Handlers (Airframe-Level Fragility)
+### FSM State Handlers (Airframe-Level Fragility) [✅ RESOLVED: Phase 1 + Phase 2]
+
+*Regression guard test introspects `message_router.message.handlers` and fails if any handler lacks a `StateFilter` — guards against the exact bug class fixed in commits `2cab598`/`a6214a0`/`17135d8` returning. Phase 2 reply handler consolidation ensured only 5 FSM state handlers remain on `message_router`, all with explicit state filters.*
+
+
 
 **Area:** Entire FSM router system in `webhook/bot/routers/messages.py`
 
@@ -669,7 +708,11 @@ Insert on approve/reject/adjust.
 
 ## Test Coverage Gaps
 
-### Callback Router Not Tested (601-line File)
+### Callback Router Not Tested (601-line File) [✅ RESOLVED: Phase 1]
+
+*53 characterization tests added (commits `bf8a43e` → `85cc85b`) covering draft approve/reject/adjust, curate archive/reject/pipeline/send_raw, broadcast confirm, report navigation, queue pagination, contact toggle, workflow triggers, menu switchboard + FSM isolation regression guard. These tests stayed green through Phase 2 split and Phase 3 observability changes — validating the safety-net design.*
+
+
 
 **What's Not Tested:** 
 - Draft adjust/reject/approve flow

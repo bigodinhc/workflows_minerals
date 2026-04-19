@@ -15,6 +15,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from execution.core import state_store
+from execution.core.sentry_init import init_sentry
 from execution.integrations.apify_client import ApifyClient
 
 ACTOR_ID = os.getenv("APIFY_PLATTS_REPORTS_ACTOR_ID", "bigodeio05/platts-scrap-reports")
@@ -22,6 +23,7 @@ WORKFLOW_NAME = "platts_reports"
 
 
 def main() -> int:
+    init_sentry(__name__)
     parser = argparse.ArgumentParser(description="Trigger Platts Reports actor")
     parser.add_argument("--dry-run", action="store_true", help="Pass dryRun=true to the actor")
     parser.add_argument("--force-redownload", action="store_true")

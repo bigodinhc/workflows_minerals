@@ -23,6 +23,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 from execution.core.logger import WorkflowLogger
 from execution.core.progress_reporter import ProgressReporter
+from execution.core.sentry_init import init_sentry
 from execution.integrations.baltic_client import BalticClient
 from execution.integrations.claude_client import ClaudeClient
 from execution.integrations.sheets_client import SheetsClient
@@ -182,6 +183,7 @@ def ingest_to_ironmarket(data):
         return False, str(e)
 
 def main():
+    init_sentry(__name__)
     logger = WorkflowLogger("BalticIngestion")
 
     progress = ProgressReporter(

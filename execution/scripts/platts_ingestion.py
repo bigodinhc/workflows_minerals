@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from execution.core import state_store
 from execution.core.logger import WorkflowLogger
+from execution.core.sentry_init import init_sentry
 from execution.curation import router
 from execution.integrations.apify_client import ApifyClient
 
@@ -61,6 +62,7 @@ def _flatten_dataset(items: list) -> list:
 
 
 def main():
+    init_sentry(__name__)
     logger = WorkflowLogger("PlattsIngestion")
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Skip Apify, use mock data")

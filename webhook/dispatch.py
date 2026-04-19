@@ -16,8 +16,10 @@ import aiohttp
 import requests
 import redis as _redis_sync
 from redis import asyncio as redis_async
+from aiogram.exceptions import TelegramBadRequest
 
 from bot.config import get_bot, UAZAPI_URL, UAZAPI_TOKEN, GOOGLE_CREDENTIALS_JSON, SHEET_ID
+from metrics import edit_failures
 from bot.keyboards import build_approval_keyboard
 from execution.core.delivery_reporter import DeliveryReporter, build_contact_from_row
 from execution.integrations.sheets_client import SheetsClient
@@ -165,8 +167,19 @@ async def process_approval_async(chat_id, draft_message, draft_id, uazapi_token=
                 f"⏳ Enviando para {len(delivery_contacts)} contatos...\n0/{len(delivery_contacts)}",
                 chat_id=chat_id, message_id=progress_msg_id,
             )
-        except Exception:
-            pass
+        except TelegramBadRequest as e:
+            msg = str(e).lower()
+            if "message is not modified" in msg:
+                edit_failures.labels(reason="not_modified").inc()
+            elif "flood" in msg:
+                edit_failures.labels(reason="flood").inc()
+                logger.warning("telegram_flood_control", extra={"error": str(e)})
+            else:
+                edit_failures.labels(reason="bad_request").inc()
+                logger.warning("edit_failed", extra={"error": str(e)})
+        except Exception as e:
+            edit_failures.labels(reason="unexpected").inc()
+            logger.warning("edit_unexpected", exc_info=e)
 
         # DeliveryReporter is sync — use sync send_fn + to_thread
         def send_fn(phone, text):
@@ -211,8 +224,11 @@ async def process_approval_async(chat_id, draft_message, draft_id, uazapi_token=
                         loop,
                     )
                     future.result(timeout=5)
-                except Exception:
-                    pass  # ignore "message not modified" — don't crash delivery
+                except Exception as e:
+                    # Runs in worker thread — can't use TelegramBadRequest async handling here.
+                    # Counter increments are thread-safe; logger is too.
+                    edit_failures.labels(reason="unexpected").inc()
+                    logger.warning("progress_edit_failed", extra={"error": str(e)})
 
         reporter = DeliveryReporter(
             workflow="webhook_approval",
@@ -230,8 +246,19 @@ async def process_approval_async(chat_id, draft_message, draft_id, uazapi_token=
                 "✔️ Envio finalizado — veja resumo detalhado abaixo.",
                 chat_id=chat_id, message_id=progress_msg_id,
             )
-        except Exception:
-            pass
+        except TelegramBadRequest as e:
+            msg = str(e).lower()
+            if "message is not modified" in msg:
+                edit_failures.labels(reason="not_modified").inc()
+            elif "flood" in msg:
+                edit_failures.labels(reason="flood").inc()
+                logger.warning("telegram_flood_control", extra={"error": str(e)})
+            else:
+                edit_failures.labels(reason="bad_request").inc()
+                logger.warning("edit_failed", extra={"error": str(e)})
+        except Exception as e:
+            edit_failures.labels(reason="unexpected").inc()
+            logger.warning("edit_unexpected", exc_info=e)
 
         logger.info(
             f"Approval complete: {report.success_count} sent, {report.failure_count} failed"
@@ -242,7 +269,17 @@ async def process_approval_async(chat_id, draft_message, draft_id, uazapi_token=
         error_text = f"❌ ERRO NO ENVIO\n\n{str(e)}"
         try:
             await bot.edit_message_text(error_text, chat_id=chat_id, message_id=progress_msg_id)
-        except Exception:
+        except TelegramBadRequest as edit_err:
+            msg = str(edit_err).lower()
+            if "message is not modified" in msg:
+                edit_failures.labels(reason="not_modified").inc()
+            else:
+                edit_failures.labels(reason="bad_request").inc()
+                logger.warning("edit_failed", extra={"error": str(edit_err)})
+                await bot.send_message(chat_id, error_text)
+        except Exception as edit_err:
+            edit_failures.labels(reason="unexpected").inc()
+            logger.warning("edit_unexpected", exc_info=edit_err)
             await bot.send_message(chat_id, error_text)
 
 

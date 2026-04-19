@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timezone
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
@@ -23,6 +24,7 @@ from bot.routers._helpers import (
 import redis_queries
 from dispatch import process_approval_async, process_test_send_async
 from execution.curation import redis_client
+from metrics import edit_failures
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,21 @@ async def _finalize_card(query: CallbackQuery, status_text: str):
             status_text, chat_id=query.message.chat.id,
             message_id=message_id, reply_markup=None,
         )
-    except Exception:
+    except TelegramBadRequest as e:
+        msg = str(e).lower()
+        if "message is not modified" in msg:
+            edit_failures.labels(reason="not_modified").inc()
+            # Expected no-op; do not fall back to plain message
+        elif "flood" in msg:
+            edit_failures.labels(reason="flood").inc()
+            logger.warning("finalize_card_flood", extra={"chat_id": query.message.chat.id})
+        else:
+            edit_failures.labels(reason="bad_request").inc()
+            plain = status_text.replace("*", "").replace("`", "").replace("_", "")
+            await bot.send_message(query.message.chat.id, plain)
+    except Exception as e:
+        edit_failures.labels(reason="unexpected").inc()
+        logger.warning("finalize_card_unexpected", exc_info=e)
         plain = status_text.replace("*", "").replace("`", "").replace("_", "")
         await bot.send_message(query.message.chat.id, plain)
 

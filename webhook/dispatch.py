@@ -14,6 +14,7 @@ import os
 
 import aiohttp
 import requests
+import redis as _redis_sync
 from redis import asyncio as redis_async
 
 from bot.config import get_bot, UAZAPI_URL, UAZAPI_TOKEN, GOOGLE_CREDENTIALS_JSON, SHEET_ID
@@ -27,6 +28,22 @@ logger = logging.getLogger(__name__)
 # ── Redis async client (lazy singleton) ──
 
 _redis_async_client = None
+
+
+# ── Redis sync client (lazy singleton — used by broadcast send_fn) ──
+
+_redis_sync_client = None
+
+
+def _get_redis_sync():
+    """Lazy sync redis client. Uses REDIS_URL env var."""
+    global _redis_sync_client
+    if _redis_sync_client is None:
+        url = os.getenv("REDIS_URL", "")
+        if not url:
+            raise RuntimeError("REDIS_URL not configured")
+        _redis_sync_client = _redis_sync.from_url(url, decode_responses=True)
+    return _redis_sync_client
 
 
 async def _get_redis_async():
@@ -133,7 +150,7 @@ async def send_whatsapp(phone, message, draft_id: str = "", token=None, url=None
 
 # ── Async processing ──
 
-async def process_approval_async(chat_id, draft_message, uazapi_token=None, uazapi_url=None):
+async def process_approval_async(chat_id, draft_message, draft_id, uazapi_token=None, uazapi_url=None):
     """Process WhatsApp sending with progress updates via DeliveryReporter."""
     bot = get_bot()
     progress = await bot.send_message(chat_id, "⏳ Iniciando envio para WhatsApp...")
@@ -155,6 +172,21 @@ async def process_approval_async(chat_id, draft_message, uazapi_token=None, uaza
         def send_fn(phone, text):
             use_token = uazapi_token or UAZAPI_TOKEN
             use_url_val = uazapi_url or UAZAPI_URL
+
+            # Idempotency: SET NX EX 86400 — same 24h window as send_whatsapp
+            try:
+                r = _get_redis_sync()
+                key = _idempotency_key(phone, draft_id, text)
+                marked = r.set(key, "1", ex=86400, nx=True)
+                if marked is None:
+                    logger.info(
+                        "whatsapp_idempotency_hit_broadcast",
+                        extra={"phone_last4": phone[-4:], "draft_id": draft_id},
+                    )
+                    return {"status": "duplicate", "skipped": True}
+            except Exception as exc:
+                logger.warning("whatsapp_idempotency_check_failed_broadcast", exc_info=exc)
+
             headers_req = {"token": use_token, "Content-Type": "application/json"}
             payload_req = {"number": str(phone), "text": text}
             response = requests.post(

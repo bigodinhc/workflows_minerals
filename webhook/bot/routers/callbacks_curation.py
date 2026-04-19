@@ -139,7 +139,7 @@ async def on_draft_action(query: CallbackQuery, callback_data: DraftAction):
             f"✅ *Aprovado* em {datetime.now(timezone.utc).strftime('%H:%M')} UTC — envio em andamento",
         )
         asyncio.create_task(
-            process_approval_async(chat_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
+            process_approval_async(chat_id, draft["message"], draft_id, draft.get("uazapi_token"), draft.get("uazapi_url"))
         )
 
     elif action == "test_approve":
@@ -276,7 +276,7 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
         )
         # Build a simple message with title + text
         message = f"*{title}*\n\n{raw_text}" if title else raw_text
-        asyncio.create_task(process_approval_async(chat_id, message))
+        asyncio.create_task(process_approval_async(chat_id, message, item_id))
 
 
 # ── Broadcast confirm/cancel ──
@@ -305,5 +305,5 @@ async def on_broadcast_confirm(query: CallbackQuery, callback_data: BroadcastCon
             f"📲 *Enviando para WhatsApp*\n🕒 {datetime.now(timezone.utc).strftime('%H:%M')} UTC",
         )
         asyncio.create_task(
-            process_approval_async(chat_id, draft["message"], draft.get("uazapi_token"), draft.get("uazapi_url"))
+            process_approval_async(chat_id, draft["message"], draft_id, draft.get("uazapi_token"), draft.get("uazapi_url"))
         )

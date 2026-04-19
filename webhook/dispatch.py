@@ -7,11 +7,14 @@ and Aiogram bot for Telegram messages.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import os
 
 import aiohttp
 import requests
+from redis import asyncio as redis_async
 
 from bot.config import get_bot, UAZAPI_URL, UAZAPI_TOKEN, GOOGLE_CREDENTIALS_JSON, SHEET_ID
 from bot.keyboards import build_approval_keyboard
@@ -19,6 +22,28 @@ from execution.core.delivery_reporter import DeliveryReporter, build_contact_fro
 from execution.integrations.sheets_client import SheetsClient
 
 logger = logging.getLogger(__name__)
+
+
+# ── Redis async client (lazy singleton) ──
+
+_redis_async_client = None
+
+
+async def _get_redis_async():
+    """Lazy async redis client. Uses REDIS_URL env var."""
+    global _redis_async_client
+    if _redis_async_client is None:
+        url = os.getenv("REDIS_URL", "")
+        if not url:
+            raise RuntimeError("REDIS_URL not configured")
+        _redis_async_client = redis_async.from_url(url, decode_responses=True)
+    return _redis_async_client
+
+
+def _idempotency_key(phone: str, draft_id: str, message: str) -> str:
+    """sha1(phone|draft_id|message) → 'whatsapp:sent:<digest>'."""
+    digest = hashlib.sha1(f"{phone}|{draft_id}|{message}".encode()).hexdigest()
+    return f"whatsapp:sent:{digest}"
 
 
 # ── Google Sheets (contacts) — sync, wrapped in to_thread ──
@@ -62,8 +87,29 @@ async def get_contacts():
 
 # ── WhatsApp sending ──
 
-async def send_whatsapp(phone, message, token=None, url=None):
-    """Send WhatsApp message via Uazapi (async)."""
+async def send_whatsapp(phone, message, draft_id: str = "", token=None, url=None):
+    """Send WhatsApp message via Uazapi (async).
+
+    Idempotency: if the same (phone, draft_id, message) triple has been sent
+    within the last 24 hours, the UAZAPI call is skipped and
+    {"status": "duplicate", "skipped": True} is returned.
+    """
+    # Idempotency: SET NX EX 86400 — atomic check-and-mark, 24h window
+    if draft_id:
+        try:
+            redis_client = await _get_redis_async()
+            key = _idempotency_key(phone, draft_id, message)
+            marked = await redis_client.set(key, "1", ex=86400, nx=True)
+            if marked is None:
+                logger.info(
+                    "whatsapp_idempotency_hit",
+                    extra={"phone_last4": phone[-4:], "draft_id": draft_id},
+                )
+                return {"status": "duplicate", "skipped": True}
+        except Exception as exc:
+            # Redis down? Don't block sends — but log loudly.
+            logger.warning("whatsapp_idempotency_check_failed", exc_info=exc)
+
     use_token = token or UAZAPI_TOKEN
     use_url = url or UAZAPI_URL
     headers = {"token": use_token, "Content-Type": "application/json"}
@@ -79,10 +125,10 @@ async def send_whatsapp(phone, message, token=None, url=None):
                 if resp.status != 200:
                     body = await resp.text()
                     logger.error(f"WhatsApp {phone}: HTTP {resp.status} - {body[:200]}")
-                return resp.status == 200
+                return {"status": "ok", "http_status": resp.status, "ok": resp.status == 200}
     except Exception as e:
         logger.error(f"WhatsApp send error for {phone}: {e}")
-        return False
+        return {"status": "error", "ok": False}
 
 
 # ── Async processing ──
@@ -186,7 +232,10 @@ async def process_test_send_async(chat_id, draft_id, draft_message, uazapi_token
 
         phone = str(phone).replace("whatsapp:", "").strip()
 
-        if await send_whatsapp(phone, draft_message, token=uazapi_token, url=uazapi_url):
+        result = await send_whatsapp(
+            phone, draft_message, draft_id=draft_id, token=uazapi_token, url=uazapi_url
+        )
+        if result.get("ok") or result.get("status") == "duplicate":
             await bot.send_message(
                 chat_id,
                 f"🧪 *TESTE OK*\n\n"

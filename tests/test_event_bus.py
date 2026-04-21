@@ -1,6 +1,7 @@
 """Tests for execution.core.event_bus module."""
 import json
 import os
+import sys
 import pytest
 
 
@@ -131,3 +132,47 @@ def test_supabase_sink_disabled_when_env_missing(monkeypatch, capsys):
 
     # Verify stdout still fires
     assert "cron_started" in capsys.readouterr().out
+
+
+def test_sentry_sink_adds_breadcrumb_per_emit(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    breadcrumbs_added = []
+
+    fake_sentry = type(sys)("sentry_sdk")
+    fake_sentry.add_breadcrumb = lambda **kwargs: breadcrumbs_added.append(kwargs)
+    fake_sentry.capture_exception = lambda exc: None
+
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "sentry_sdk", fake_sentry)
+
+    from execution.core.event_bus import EventBus
+
+    bus = EventBus(workflow="wf_z")
+    bus.emit("step", label="working", detail={"n": 1}, level="info")
+    bus.emit("cron_crashed", label="BOOM", level="error")
+
+    assert len(breadcrumbs_added) == 2
+    first = breadcrumbs_added[0]
+    assert first["category"] == "wf_z"
+    assert first["level"] == "info"
+    assert first["message"] == "working"
+    assert first["data"] == {"n": 1}
+
+    second = breadcrumbs_added[1]
+    assert second["level"] == "error"
+    assert second["message"] == "BOOM"
+
+
+def test_sentry_sink_graceful_when_sdk_missing(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    # Force sentry_sdk import to fail
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "sentry_sdk", None)
+
+    from execution.core.event_bus import EventBus
+
+    bus = EventBus(workflow="t")
+    bus.emit("step", label="no-sentry")  # must not raise

@@ -67,6 +67,7 @@ class EventBus:
         supabase = _get_supabase_client()
         if supabase is not None:
             sinks.append(_SupabaseSink(supabase))
+        sinks.append(_SentrySink())  # always-on; internally no-ops if sdk absent
         return sinks
 
     def emit(
@@ -116,3 +117,22 @@ class _SupabaseSink:
         # Strip the 'ts' from the row; let Supabase use its NOW() default.
         row = {k: v for k, v in event_dict.items() if k != "ts"}
         self._client.table("event_log").insert(row).execute()
+
+
+class _SentrySink:
+    """Adds a Sentry breadcrumb per event for crash context. No capture here —
+    capture_exception lives in the @with_event_bus decorator."""
+
+    def emit(self, event_dict: dict) -> None:
+        try:
+            import sentry_sdk
+        except Exception:
+            return  # sentry_sdk absent or shimmed to None
+        if sentry_sdk is None:
+            return
+        sentry_sdk.add_breadcrumb(
+            category=event_dict.get("workflow") or "event_bus",
+            level=event_dict.get("level", "info"),
+            message=event_dict.get("label") or event_dict.get("event", ""),
+            data=event_dict.get("detail") or {},
+        )

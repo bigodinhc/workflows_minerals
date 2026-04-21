@@ -315,7 +315,7 @@ class DeliveryReporter:
         dashboard_base_url: str = "https://workflows-minerals.vercel.app",
         gh_run_id: Optional[str] = None,
         circuit_breaker_threshold: int = _CIRCUIT_BREAKER_THRESHOLD,
-        fatal_categories: frozenset = _FATAL_CATEGORIES,
+        fatal_categories: "frozenset[SendErrorCategory]" = _FATAL_CATEGORIES,
     ):
         self.workflow = workflow
         self.send_fn = send_fn

@@ -46,6 +46,16 @@ def _get_supabase_client():
         return None
 
 
+def _build_telegram_client():
+    """Factory so tests can monkeypatch. Returns a TelegramClient or None on failure."""
+    try:
+        from execution.integrations.telegram_client import TelegramClient
+        return TelegramClient()
+    except Exception as exc:
+        logger.warning("telegram client init failed: %s", exc)
+        return None
+
+
 class EventBus:
     """Emit structured events to multiple sinks. Never raises."""
 
@@ -68,6 +78,10 @@ class EventBus:
         if supabase is not None:
             sinks.append(_SupabaseSink(supabase))
         sinks.append(_SentrySink())  # always-on; internally no-ops if sdk absent
+        chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if chat_id and token:
+            sinks.append(_MainChatSink(chat_id=chat_id))
         return sinks
 
     def emit(
@@ -136,3 +150,52 @@ class _SentrySink:
             message=event_dict.get("label") or event_dict.get("event", ""),
             data=event_dict.get("detail") or {},
         )
+
+
+_ALERT_EVENTS = frozenset({"cron_crashed", "cron_missed"})
+
+
+class _MainChatSink:
+    """Sends a distinct Telegram message to the operator's main chat for errors
+    and specific alert events. Skips info-level so the primary chat stays clean."""
+
+    def __init__(self, chat_id: str):
+        self._chat_id = chat_id
+
+    def _should_alert(self, event_dict: dict) -> bool:
+        if event_dict.get("level") in ("warn", "error"):
+            return True
+        if event_dict.get("event") in _ALERT_EVENTS:
+            return True
+        return False
+
+    def emit(self, event_dict: dict) -> None:
+        if not self._should_alert(event_dict):
+            return
+        client = _build_telegram_client()
+        if client is None:
+            return
+        text = self._format(event_dict)
+        client.send_message(text=text, chat_id=self._chat_id)
+
+    @staticmethod
+    def _format(event_dict: dict) -> str:
+        workflow = (event_dict.get("workflow") or "?").upper().replace("_", " ")
+        event = event_dict.get("event", "")
+        label = event_dict.get("label") or ""
+        run_id = event_dict.get("run_id", "")
+        if event == "cron_crashed":
+            emoji = "🚨"
+            title = f"{workflow} — CRASH"
+        elif event == "cron_missed":
+            emoji = "⏰"
+            title = f"{workflow} — NÃO RODOU"
+        else:
+            emoji = "⚠️"
+            title = f"{workflow} — {event}"
+        lines = [f"{emoji} {title}"]
+        if label:
+            lines.append(label)
+        if run_id:
+            lines.append(f"run_id: {run_id}")
+        return "\n".join(lines)

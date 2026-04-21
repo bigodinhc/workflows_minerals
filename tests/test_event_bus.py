@@ -176,3 +176,65 @@ def test_sentry_sink_graceful_when_sdk_missing(monkeypatch):
 
     bus = EventBus(workflow="t")
     bus.emit("step", label="no-sentry")  # must not raise
+
+
+def test_main_chat_sink_sends_on_error(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake_token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
+
+    sent_messages = []
+
+    class FakeTelegramClient:
+        def send_message(self, text, chat_id=None, **kwargs):
+            sent_messages.append({"text": text, "chat_id": chat_id})
+            return 999
+
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
+
+    bus = eb.EventBus(workflow="morning_check")
+    bus.emit("cron_crashed", label="TypeError: boom", level="error")
+
+    assert len(sent_messages) == 1
+    msg = sent_messages[0]
+    assert msg["chat_id"] == "12345"
+    assert "morning_check" in msg["text"].lower() or "MORNING CHECK" in msg["text"]
+    assert "CRASH" in msg["text"] or "crash" in msg["text"].lower()
+    assert "TypeError: boom" in msg["text"]
+
+
+def test_main_chat_sink_skips_info_events(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake_token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
+
+    sent_messages = []
+
+    class FakeTelegramClient:
+        def send_message(self, text, chat_id=None, **kwargs):
+            sent_messages.append({"text": text, "chat_id": chat_id})
+            return 1
+
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
+
+    bus = eb.EventBus(workflow="t")
+    bus.emit("step", label="doing thing", level="info")
+    bus.emit("cron_started")  # default level info
+
+    assert sent_messages == []
+
+
+def test_main_chat_sink_disabled_when_env_missing(monkeypatch, capsys):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    from execution.core.event_bus import EventBus
+
+    bus = EventBus(workflow="t")
+    bus.emit("cron_crashed", level="error")  # would want to alert, but env missing
+
+    # Stdout still fires
+    assert "cron_crashed" in capsys.readouterr().out

@@ -792,7 +792,7 @@ def test_circuit_breaker_requires_same_category_streak():
 
 
 def test_dispatch_tags_sentry_with_error_category(monkeypatch):
-    """Each failure should set Sentry tag 'send.error_category' with category value."""
+    """Each failure should set Sentry tag 'send.category' with category value."""
     from execution.core.delivery_reporter import DeliveryReporter
 
     captured_tags = []
@@ -820,8 +820,8 @@ def test_dispatch_tags_sentry_with_error_category(monkeypatch):
     reporter.dispatch(contacts, message="hi")
 
     # Tag must be set AND exception captured
-    tag_entries = [t for t in captured_tags if t[0] == "send.error_category"]
-    assert ("send.error_category", "whatsapp_disconnected") in tag_entries
+    tag_entries = [t for t in captured_tags if t[0] == "send.category"]
+    assert ("send.category", "whatsapp_disconnected") in tag_entries
     assert any(t[0] == "__captured__" for t in captured_tags)
 
 

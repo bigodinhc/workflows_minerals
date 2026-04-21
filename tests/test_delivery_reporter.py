@@ -226,16 +226,16 @@ def test_telegram_message_all_success():
 
 
 def test_telegram_message_with_failures():
+    from execution.core.delivery_reporter import SendErrorCategory
     results = [
         DeliveryResult(contact=Contact(name="A", phone="111"), success=True, error=None, duration_ms=100),
-        DeliveryResult(contact=Contact(name="Carlos", phone="222"), success=False, error="timeout", duration_ms=30000),
+        DeliveryResult(contact=Contact(name="Carlos", phone="222"), success=False, error="timeout",
+                       duration_ms=30000, category=SendErrorCategory.TIMEOUT),
     ]
     report = _make_report("test", results)
     msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
     assert "⚠️" in msg
-    assert "Carlos" in msg
-    assert "222" in msg
-    assert "timeout" in msg
+    assert "1× Timeout" in msg  # was: "Carlos" / "222" / "timeout"
 
 
 def test_telegram_message_total_failure():
@@ -249,14 +249,95 @@ def test_telegram_message_total_failure():
     assert "FALHA TOTAL" in msg
 
 
-def test_telegram_message_truncates_long_failure_list():
+def test_telegram_message_shows_sample_contacts_per_category_when_few():
+    """For categories with ≤3 failures, show the contact names inline."""
+    from execution.core.delivery_reporter import DeliveryResult, SendErrorCategory
     results = [
-        DeliveryResult(contact=Contact(name=f"U{i}", phone=str(i)), success=False, error="boom", duration_ms=100)
-        for i in range(50)
+        DeliveryResult(contact=Contact(name="Ana", phone="1"), success=False, error="timeout",
+                       duration_ms=100, category=SendErrorCategory.TIMEOUT),
+        DeliveryResult(contact=Contact(name="Bruno", phone="2"), success=False, error="timeout",
+                       duration_ms=100, category=SendErrorCategory.TIMEOUT),
     ]
     report = _make_report("test", results)
     msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
-    assert "...e mais 35" in msg
+    assert "Ana" in msg
+    assert "Bruno" in msg
+
+
+def test_telegram_message_groups_homogeneous_failures():
+    """74 identical WhatsApp-disconnected failures → one grouped line + action hint."""
+    from execution.core.delivery_reporter import (
+        DeliveryReport, DeliveryResult, SendErrorCategory, _format_telegram_message,
+    )
+    results = [
+        DeliveryResult(
+            contact=Contact(name=f"U{i}", phone=str(i)),
+            success=False,
+            error="HTTP 503: WhatsApp disconnected",
+            duration_ms=100,
+            category=SendErrorCategory.WHATSAPP_DISCONNECTED,
+        )
+        for i in range(74)
+    ]
+    report = _make_report("daily_report", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+
+    assert "74× WhatsApp desconectado" in msg
+    assert "Reconecte QR" in msg
+    # Must NOT list every individual contact
+    assert "U0 " not in msg and "U73 " not in msg
+
+
+def test_telegram_message_groups_heterogeneous_failures():
+    """Mix of categories → one line per category, sorted by count descending."""
+    from execution.core.delivery_reporter import (
+        DeliveryReport, DeliveryResult, SendErrorCategory, _format_telegram_message,
+    )
+    results = []
+    for i in range(40):
+        results.append(DeliveryResult(
+            contact=Contact(name=f"N{i}", phone=str(i)), success=False,
+            error="HTTP 400: number not registered", duration_ms=100,
+            category=SendErrorCategory.INVALID_NUMBER,
+        ))
+    for i in range(20):
+        results.append(DeliveryResult(
+            contact=Contact(name=f"R{i}", phone=str(100+i)), success=False,
+            error="HTTP 429: rate limited", duration_ms=100,
+            category=SendErrorCategory.RATE_LIMIT,
+        ))
+    for i in range(14):
+        results.append(DeliveryResult(
+            contact=Contact(name=f"T{i}", phone=str(200+i)), success=False,
+            error="timeout", duration_ms=100,
+            category=SendErrorCategory.TIMEOUT,
+        ))
+
+    report = _make_report("daily_report", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+
+    assert "40× Número inválido" in msg
+    assert "20× Rate limit" in msg
+    assert "14× Timeout" in msg
+    # 40 must appear before 20 (sorted descending)
+    assert msg.index("40×") < msg.index("20×") < msg.index("14×")
+
+
+def test_telegram_message_partial_failure_still_groups():
+    """Even with some successes, failures still grouped by category."""
+    from execution.core.delivery_reporter import (
+        DeliveryResult, SendErrorCategory, _format_telegram_message,
+    )
+    results = [
+        DeliveryResult(contact=Contact(name="OK", phone="1"), success=True, error=None, duration_ms=100),
+        DeliveryResult(contact=Contact(name="F1", phone="2"), success=False, error="timeout",
+                       duration_ms=100, category=SendErrorCategory.TIMEOUT),
+        DeliveryResult(contact=Contact(name="F2", phone="3"), success=False, error="timeout",
+                       duration_ms=100, category=SendErrorCategory.TIMEOUT),
+    ]
+    report = _make_report("test", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+    assert "2× Timeout" in msg
 
 
 def test_telegram_message_includes_run_id_link():

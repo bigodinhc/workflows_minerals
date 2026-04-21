@@ -154,15 +154,53 @@ def _categorize_error(exc: Exception) -> str:
     return str(exc)[:200]
 
 
-_MAX_FAILURES_LISTED = 15
+# Human-readable PT labels per category (shown in the grouped summary)
+_CATEGORY_LABEL = {
+    SendErrorCategory.WHATSAPP_DISCONNECTED: "WhatsApp desconectado",
+    SendErrorCategory.RATE_LIMIT: "Rate limit",
+    SendErrorCategory.INVALID_NUMBER: "Número inválido",
+    SendErrorCategory.UPSTREAM_5XX: "Erro UazAPI (5xx)",
+    SendErrorCategory.AUTH: "Falha de autenticação",
+    SendErrorCategory.TIMEOUT: "Timeout",
+    SendErrorCategory.NETWORK: "Erro de rede",
+    SendErrorCategory.UNKNOWN: "Erro não categorizado",
+}
+
+# Action hint per category. None means no hint (transient, no operator action).
+_CATEGORY_HINT = {
+    SendErrorCategory.WHATSAPP_DISCONNECTED: "Reconecte QR em mineralstrading.uazapi.com",
+    SendErrorCategory.AUTH: "Verifique UAZAPI_TOKEN no secrets do GitHub",
+    SendErrorCategory.INVALID_NUMBER: "Revise a planilha de contatos",
+    SendErrorCategory.UPSTREAM_5XX: "Verifique status do UazAPI",
+    SendErrorCategory.RATE_LIMIT: None,
+    SendErrorCategory.TIMEOUT: None,
+    SendErrorCategory.NETWORK: None,
+    SendErrorCategory.UNKNOWN: "Veja logs do GitHub Actions",
+}
+
+# Per-category how many sample contact names to show inline (0 = none, show count only)
+_CATEGORY_SAMPLE_LIMIT = 3
+
+
+def _group_failures_by_category(failures: list) -> list:
+    """Return list of (category, results) tuples sorted by count descending."""
+    from collections import defaultdict
+    buckets: dict = defaultdict(list)
+    for f in failures:
+        buckets[f.category].append(f)
+    return sorted(buckets.items(), key=lambda kv: -len(kv[1]))
 
 
 def _format_telegram_message(
-    report: DeliveryReport,
+    report: "DeliveryReport",
     dashboard_base_url: str,
     gh_run_id: Optional[str],
 ) -> str:
-    """Build Telegram-ready text summary of a DeliveryReport."""
+    """Build Telegram-ready text summary of a DeliveryReport.
+
+    Failures are grouped by SendErrorCategory. Each group shows count,
+    PT-BR label, optional action hint, and up to 3 sample contact names.
+    """
     failure_pct = (report.failure_count / report.total * 100) if report.total else 0
 
     if report.failure_count == 0:
@@ -190,22 +228,18 @@ def _format_telegram_message(
 
     if report.failure_count == 0:
         lines.append("Todos os contatos receberam.")
-    elif failure_pct > 50 and report.success_count == 0 and report.failure_count <= _MAX_FAILURES_LISTED:
-        lines.append("Todos os envios falharam. Verifique:")
-        lines.append("• Token UAZAPI")
-        lines.append("• Status do servico UazAPI")
-        lines.append("• Logs do GitHub Actions")
-        first_err = report.failures[0].error if report.failures else "unknown"
-        lines.append("")
-        lines.append(f"Primeira falha: {first_err}")
     else:
-        lines.append("❌ FALHAS:")
-        listed = report.failures[:_MAX_FAILURES_LISTED]
-        for f in listed:
-            lines.append(f"• {f.contact.name} ({f.contact.phone}) — {f.error}")
-        remaining = len(report.failures) - len(listed)
-        if remaining > 0:
-            lines.append(f"...e mais {remaining} falhas")
+        lines.append("❌ FALHAS POR TIPO:")
+        for category, failures in _group_failures_by_category(report.failures):
+            label = _CATEGORY_LABEL.get(category, category.value)
+            hint = _CATEGORY_HINT.get(category)
+            count = len(failures)
+            lines.append(f"• {count}× {label}")
+            if count <= _CATEGORY_SAMPLE_LIMIT:
+                names = ", ".join(f.contact.name for f in failures)
+                lines.append(f"  ({names})")
+            if hint:
+                lines.append(f"  → AÇÃO: {hint}")
 
     link = (
         f"{dashboard_base_url}/?run_id={gh_run_id}"

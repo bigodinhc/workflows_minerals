@@ -10,6 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.integrations.sheets_client import SheetsClient
 from execution.integrations.uazapi_client import UazapiClient
+from execution.core.event_bus import with_event_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 from execution.core.progress_reporter import ProgressReporter
@@ -18,6 +19,7 @@ from execution.core.progress_reporter import ProgressReporter
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
 SHEET_NAME = "Página1"
 
+@with_event_bus("market_news")
 def main():
     logger = WorkflowLogger("SendNews")
     parser = argparse.ArgumentParser()

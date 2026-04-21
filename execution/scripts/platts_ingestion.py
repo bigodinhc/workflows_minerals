@@ -18,6 +18,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from execution.core import state_store
+from execution.core.event_bus import with_event_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.sentry_init import init_sentry
 from execution.curation import router
@@ -198,8 +199,8 @@ def _run_apify_sync(client: ApifyClient, run_input: dict):
     return dataset_id, items
 
 
+@with_event_bus("platts_ingestion")
 def main():
-    init_sentry(__name__)
     logger = WorkflowLogger("PlattsIngestion")
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Skip Apify, use mock data")

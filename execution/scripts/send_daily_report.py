@@ -13,6 +13,7 @@ from datetime import datetime
 # Adjust path to allow imports from root
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
+from execution.core.event_bus import with_event_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 from execution.core.progress_reporter import ProgressReporter
@@ -85,6 +86,7 @@ def format_price_message(prices):
     return "\n".join(lines)
 
 
+@with_event_bus("daily_report")
 def main():
     logger = WorkflowLogger("DailyReport")
 

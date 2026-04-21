@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from execution.core.event_bus import with_event_bus
 from execution.curation.id_gen import generate_id
 
 
@@ -78,6 +79,7 @@ def rebuild(client, dry_run: bool = True) -> dict:
     return result
 
 
+@with_event_bus("rebuild_dedup")
 def main():
     parser = argparse.ArgumentParser(description="Rebuild global platts:seen from archives")
     parser.add_argument("--execute", action="store_true", help="Apply changes (default is dry-run)")

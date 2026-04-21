@@ -23,6 +23,7 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
+from execution.core.event_bus import with_event_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.sentry_init import init_sentry
 from execution.integrations.baltic_client import BalticClient
@@ -376,9 +377,8 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
         await bot.session.close()
 
 
+@with_event_bus("baltic_ingestion")
 def main():
-    init_sentry(__name__)
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Skip sending and saving state")
     args = parser.parse_args()

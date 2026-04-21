@@ -6,9 +6,13 @@
 
 Source: final `superpowers:code-reviewer` audit after all 7 tasks completed.
 
-## Priority 1 — Circuit-breaker skipped-bucket outranks the real cause
+## Priority 1 — Circuit-breaker skipped-bucket outranks the real cause — **✅ SHIPPED 2026-04-20 (commit `75cc710`)**
 
-**Scenario:** 5 real `WHATSAPP_DISCONNECTED` + 15 skipped contacts (UNKNOWN, `error="skipped_due_to_circuit_break"`). Current sort-desc-by-count renders:
+Resolved via Option A: new `SendErrorCategory.SKIPPED_CIRCUIT_BREAK` enum value, filtered from main grouping, rendered as trailing footnote `"ℹ️ N contatos pulados pelo circuit breaker"`. Real cause + action hint now always appears at the top. 3 new tests + 1 updated test.
+
+---
+
+**Original scenario (for history):** 5 real `WHATSAPP_DISCONNECTED` + 15 skipped contacts (UNKNOWN, `error="skipped_due_to_circuit_break"`). Current sort-desc-by-count renders:
 
 ```
 • 15× Erro não categorizado → AÇÃO: Veja logs do GitHub Actions

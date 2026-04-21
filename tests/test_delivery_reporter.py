@@ -546,3 +546,35 @@ def test_classify_error_http_error_without_response_is_unknown():
     exc = requests.HTTPError("no response attached")
     category, _ = classify_error(exc)
     assert category == SendErrorCategory.UNKNOWN
+
+
+def test_delivery_result_has_category_field():
+    from execution.core.delivery_reporter import DeliveryResult, SendErrorCategory
+    c = Contact(name="X", phone="1")
+    r = DeliveryResult(
+        contact=c,
+        success=False,
+        error="HTTP 503: WhatsApp disconnected",
+        duration_ms=100,
+        category=SendErrorCategory.WHATSAPP_DISCONNECTED,
+    )
+    assert r.category == SendErrorCategory.WHATSAPP_DISCONNECTED
+
+
+def test_delivery_result_category_defaults_to_unknown():
+    from execution.core.delivery_reporter import DeliveryResult, SendErrorCategory
+    c = Contact(name="X", phone="1")
+    r = DeliveryResult(contact=c, success=True, error=None, duration_ms=100)
+    assert r.category == SendErrorCategory.UNKNOWN
+
+
+def test_dispatch_populates_category_on_http_failure():
+    from execution.core.delivery_reporter import DeliveryReporter, SendErrorCategory
+
+    def send_fn(phone, text):
+        raise _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+
+    reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name="A", phone="1")]
+    report = reporter.dispatch(contacts, message="hi")
+    assert report.failures[0].category == SendErrorCategory.WHATSAPP_DISCONNECTED

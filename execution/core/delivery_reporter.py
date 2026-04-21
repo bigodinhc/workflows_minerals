@@ -24,6 +24,11 @@ class DeliveryResult:
     success: bool
     error: Optional[str]
     duration_ms: int
+    category: "SendErrorCategory" = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.category is None:
+            self.category = SendErrorCategory.UNKNOWN
 
 
 @dataclass
@@ -289,11 +294,13 @@ class DeliveryReporter:
             t0 = time.monotonic()
             success = False
             error: Optional[str] = None
+            category: SendErrorCategory = SendErrorCategory.UNKNOWN
             try:
                 self.send_fn(contact.phone, message)
                 success = True
             except Exception as exc:
-                error = _categorize_error(exc)
+                category, _reason = classify_error(exc)
+                error = _categorize_error(exc)  # keep legacy string for stdout JSON + dashboard compat
             duration_ms = int((time.monotonic() - t0) * 1000)
 
             result = DeliveryResult(
@@ -301,6 +308,7 @@ class DeliveryReporter:
                 success=success,
                 error=error,
                 duration_ms=duration_ms,
+                category=category,
             )
             results.append(result)
 

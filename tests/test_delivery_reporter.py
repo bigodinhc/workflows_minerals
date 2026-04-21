@@ -659,3 +659,77 @@ def test_dispatch_populates_category_on_http_failure():
     contacts = [Contact(name="A", phone="1")]
     report = reporter.dispatch(contacts, message="hi")
     assert report.failures[0].category == SendErrorCategory.WHATSAPP_DISCONNECTED
+
+
+def test_circuit_breaker_trips_after_5_disconnected():
+    """5 consecutive WhatsApp-disconnected failures → remaining contacts skipped."""
+    from execution.core.delivery_reporter import DeliveryReporter, SendErrorCategory
+
+    call_count = {"n": 0}
+    def send_fn(phone, text):
+        call_count["n"] += 1
+        raise _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+
+    reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name=f"U{i}", phone=str(i)) for i in range(20)]
+    report = reporter.dispatch(contacts, message="hi")
+
+    # Circuit should trip after 5, remaining 15 are skipped
+    assert call_count["n"] == 5
+    assert report.failure_count == 20  # all 20 are counted as failures
+    skipped = [r for r in report.results if r.category == SendErrorCategory.UNKNOWN and r.error == "skipped_due_to_circuit_break"]
+    assert len(skipped) == 15
+
+
+def test_circuit_breaker_does_not_trip_on_transient_timeout():
+    """5 consecutive timeouts → continues (timeout is transient, not fatal)."""
+    from execution.core.delivery_reporter import DeliveryReporter
+
+    call_count = {"n": 0}
+    def send_fn(phone, text):
+        call_count["n"] += 1
+        raise requests.Timeout("read timed out")
+
+    reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name=f"U{i}", phone=str(i)) for i in range(10)]
+    report = reporter.dispatch(contacts, message="hi")
+
+    assert call_count["n"] == 10  # every contact attempted
+
+
+def test_circuit_breaker_resets_on_success():
+    """4 disconnected, 1 success, 4 more disconnected → circuit does NOT trip
+    because success resets the streak. All 9 attempted."""
+    from execution.core.delivery_reporter import DeliveryReporter
+
+    call_count = {"n": 0}
+    def send_fn(phone, text):
+        call_count["n"] += 1
+        if call_count["n"] == 5:
+            return  # success on 5th
+        raise _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+
+    reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name=f"U{i}", phone=str(i)) for i in range(9)]
+    report = reporter.dispatch(contacts, message="hi")
+
+    assert call_count["n"] == 9
+
+
+def test_circuit_breaker_requires_same_category_streak():
+    """4 disconnected + 1 auth + 1 disconnected → different-category break resets streak.
+    All 6 attempted."""
+    from execution.core.delivery_reporter import DeliveryReporter
+
+    call_count = {"n": 0}
+    def send_fn(phone, text):
+        call_count["n"] += 1
+        if call_count["n"] == 5:
+            raise _mock_http_error(401, '{"error":"invalid token"}')
+        raise _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+
+    reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name=f"U{i}", phone=str(i)) for i in range(6)]
+    report = reporter.dispatch(contacts, message="hi")
+
+    assert call_count["n"] == 6

@@ -178,6 +178,16 @@ _CATEGORY_HINT = {
     SendErrorCategory.UNKNOWN: "Veja logs do GitHub Actions",
 }
 
+# Categories considered "fatal" — N consecutive failures in the same one triggers abort.
+# Transient categories (timeout, network) do NOT trip the breaker.
+_FATAL_CATEGORIES = frozenset({
+    SendErrorCategory.WHATSAPP_DISCONNECTED,
+    SendErrorCategory.AUTH,
+    SendErrorCategory.UPSTREAM_5XX,
+})
+
+_CIRCUIT_BREAKER_THRESHOLD = 5
+
 # Per-category how many sample contact names to show inline (0 = none, show count only)
 _CATEGORY_SAMPLE_LIMIT = 3
 
@@ -304,6 +314,8 @@ class DeliveryReporter:
         telegram_chat_id: Optional[str] = None,
         dashboard_base_url: str = "https://workflows-minerals.vercel.app",
         gh_run_id: Optional[str] = None,
+        circuit_breaker_threshold: int = _CIRCUIT_BREAKER_THRESHOLD,
+        fatal_categories: frozenset = _FATAL_CATEGORIES,
     ):
         self.workflow = workflow
         self.send_fn = send_fn
@@ -311,6 +323,8 @@ class DeliveryReporter:
         self.telegram_chat_id = telegram_chat_id
         self.dashboard_base_url = dashboard_base_url
         self.gh_run_id = gh_run_id
+        self.circuit_breaker_threshold = circuit_breaker_threshold
+        self.fatal_categories = fatal_categories
 
     def dispatch(
         self,
@@ -318,13 +332,39 @@ class DeliveryReporter:
         message: str,
         on_progress: Optional[Callable[[int, int, DeliveryResult], None]] = None,
     ) -> DeliveryReport:
-        """Send `message` to each contact. Never raises on send failure."""
+        """Send `message` to each contact. Never raises on send failure.
+
+        Circuit breaker: when `circuit_breaker_threshold` consecutive failures
+        all share the same category AND that category is in `fatal_categories`,
+        the remaining contacts are skipped and marked with error
+        'skipped_due_to_circuit_break'.
+        """
         started_at = datetime.now().astimezone()
         results: list = []
         contacts_list = list(contacts)
         total = len(contacts_list)
 
+        streak_category: Optional[SendErrorCategory] = None
+        streak_count = 0
+        circuit_tripped = False
+
         for i, contact in enumerate(contacts_list):
+            if circuit_tripped:
+                result = DeliveryResult(
+                    contact=contact,
+                    success=False,
+                    error="skipped_due_to_circuit_break",
+                    duration_ms=0,
+                    category=SendErrorCategory.UNKNOWN,
+                )
+                results.append(result)
+                if on_progress is not None:
+                    try:
+                        on_progress(i + 1, total, result)
+                    except Exception:
+                        pass
+                continue
+
             t0 = time.monotonic()
             success = False
             error: Optional[str] = None
@@ -345,6 +385,22 @@ class DeliveryReporter:
                 category=category,
             )
             results.append(result)
+
+            # Circuit breaker bookkeeping
+            if success:
+                streak_category = None
+                streak_count = 0
+            else:
+                if category == streak_category:
+                    streak_count += 1
+                else:
+                    streak_category = category
+                    streak_count = 1
+                if (
+                    streak_count >= self.circuit_breaker_threshold
+                    and streak_category in self.fatal_categories
+                ):
+                    circuit_tripped = True
 
             if on_progress is not None:
                 try:

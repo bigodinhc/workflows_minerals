@@ -329,9 +329,12 @@ class ProgressReporter:
             print(f"[WARN] ProgressReporter.finish_empty edit failed: {exc}")
 
     def fail(self, exception: Exception) -> None:
-        """Edit message with crash marker and record to state store.
-        Called from outer try/except in script main(). Never raises."""
+        """Edit message with crash marker, push a distinct alert message,
+        and record to state store. Called from outer try/except in script
+        main(). Never raises."""
         exc_text = str(exception)[:200]
+
+        # 1. Edit the existing card (as before)
         if not self._disabled and self._message_id is not None:
             text = self._header("🚨", f"CRASH: {exc_text}")
             try:
@@ -343,6 +346,16 @@ class ProgressReporter:
                 )
             except Exception as e:
                 print(f"[WARN] ProgressReporter.fail telegram edit failed: {e}")
+
+        # 2. Push a distinct alert message so the operator gets notified
+        try:
+            client = self._get_client()
+            alert_text = f"🚨 CRASH {self.workflow}: {exc_text[:120]}"
+            client.send_message(text=alert_text, chat_id=self.chat_id)
+        except Exception as e:
+            print(f"[WARN] ProgressReporter.fail alert send failed: {e}")
+
+        # 3. Record crash to state store (as before)
         try:
             from execution.core import state_store
             state_store.record_crash(self.workflow, exc_text)

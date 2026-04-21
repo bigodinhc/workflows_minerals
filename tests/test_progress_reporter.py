@@ -720,3 +720,45 @@ def test_finish_state_store_errors_swallowed(monkeypatch):
     # Must not raise
     _finish(reporter, report)
     reporter.finish_empty("x")
+
+
+def test_progress_fail_edits_card_and_sends_new_alert_message():
+    """fail() must both edit the progress card AND push a distinct alert
+    message so the operator gets a notification even if they scrolled past."""
+    from execution.core.progress_reporter import ProgressReporter
+
+    sent_messages = []
+    edited_messages = []
+
+    class FakeTelegramClient:
+        def send_message(self, text, chat_id=None, **kwargs):
+            sent_messages.append({"text": text, "chat_id": chat_id})
+            return 123
+
+        def edit_message_text(self, chat_id, message_id, new_text, **kwargs):
+            edited_messages.append({"chat_id": chat_id, "message_id": message_id, "new_text": new_text})
+
+    reporter = ProgressReporter(
+        workflow="morning_check",
+        chat_id="98765",
+        telegram_client=FakeTelegramClient(),
+    )
+    reporter.start(phase_text="running")  # opens card, sets message_id
+    assert len(sent_messages) == 1  # the initial card
+
+    try:
+        raise RuntimeError("deliberate crash")
+    except RuntimeError as exc:
+        reporter.fail(exc)
+
+    # Card was edited with CRASH marker
+    assert len(edited_messages) == 1
+    assert "CRASH" in edited_messages[0]["new_text"]
+
+    # AND a NEW message was sent (2 total sends now: initial card + alert)
+    assert len(sent_messages) == 2
+    alert = sent_messages[1]
+    assert alert["chat_id"] == "98765"
+    assert "CRASH" in alert["text"] or "crash" in alert["text"].lower()
+    assert "morning_check" in alert["text"].lower()
+    assert "deliberate crash" in alert["text"]

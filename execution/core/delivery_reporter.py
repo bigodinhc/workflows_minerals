@@ -52,7 +52,71 @@ class DeliveryReport:
 
 
 import time
+from enum import Enum
 from typing import Callable, Iterable
+
+
+class SendErrorCategory(Enum):
+    """Categories of send failures. Used for alert grouping, action hints,
+    circuit breaker decisions, and Sentry tagging."""
+    WHATSAPP_DISCONNECTED = "whatsapp_disconnected"
+    RATE_LIMIT = "rate_limit"
+    INVALID_NUMBER = "invalid_number"
+    UPSTREAM_5XX = "upstream_5xx"
+    AUTH = "auth"
+    TIMEOUT = "timeout"
+    NETWORK = "network"
+    UNKNOWN = "unknown"
+
+
+def classify_error(exc: Exception) -> tuple["SendErrorCategory", str]:
+    """Classify an exception raised by a WhatsApp send into (category, reason).
+
+    The reason is a short, human-readable string suitable for the Telegram alert.
+    The category drives action hints, grouping, and circuit breaker behavior.
+    """
+    import requests as _rq
+    import json as _json
+
+    if isinstance(exc, _rq.Timeout):
+        return SendErrorCategory.TIMEOUT, "timeout"
+
+    if isinstance(exc, _rq.ConnectionError):
+        return SendErrorCategory.NETWORK, str(exc)[:120]
+
+    if isinstance(exc, _rq.HTTPError) and exc.response is not None:
+        status = exc.response.status_code
+        body = exc.response.text or ""
+
+        # Try to extract a human-readable reason from the JSON body
+        reason_str = ""
+        try:
+            parsed = _json.loads(body)
+            if isinstance(parsed, dict):
+                raw_error = parsed.get("error")
+                # UazAPI returns {"error": true, "message": "..."} — prefer message
+                candidate = parsed.get("message") if isinstance(raw_error, bool) else raw_error
+                reason_str = str(candidate or parsed.get("message") or "")[:120]
+        except (ValueError, TypeError):
+            reason_str = body[:100]
+
+        reason_lower = reason_str.lower()
+
+        # Category decision tree
+        if status == 401 or status == 403:
+            return SendErrorCategory.AUTH, reason_str or f"HTTP {status}"
+        if status == 429 or "rate" in reason_lower and "limit" in reason_lower:
+            return SendErrorCategory.RATE_LIMIT, reason_str or f"HTTP {status}"
+        if "disconnected" in reason_lower or "not connected" in reason_lower:
+            return SendErrorCategory.WHATSAPP_DISCONNECTED, reason_str
+        if status == 400 and ("not registered" in reason_lower or "invalid number" in reason_lower or "not on whatsapp" in reason_lower):
+            return SendErrorCategory.INVALID_NUMBER, reason_str
+        if 500 <= status < 600:
+            return SendErrorCategory.UPSTREAM_5XX, reason_str or f"HTTP {status}"
+
+        return SendErrorCategory.UNKNOWN, reason_str or f"HTTP {status}"
+
+    return SendErrorCategory.UNKNOWN, str(exc)[:200]
 
 
 def _categorize_error(exc: Exception) -> str:

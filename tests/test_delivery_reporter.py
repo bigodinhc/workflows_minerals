@@ -459,3 +459,81 @@ def test_categorize_error_uses_error_field_when_it_is_a_string():
     exc = _mock_http_error(429, '{"error":"rate limited"}')
     result = _categorize_error(exc)
     assert "rate limited" in result
+
+
+def test_send_error_category_is_enum():
+    from execution.core.delivery_reporter import SendErrorCategory
+    assert SendErrorCategory.WHATSAPP_DISCONNECTED.value == "whatsapp_disconnected"
+    assert SendErrorCategory.RATE_LIMIT.value == "rate_limit"
+    assert SendErrorCategory.INVALID_NUMBER.value == "invalid_number"
+    assert SendErrorCategory.UPSTREAM_5XX.value == "upstream_5xx"
+    assert SendErrorCategory.AUTH.value == "auth"
+    assert SendErrorCategory.TIMEOUT.value == "timeout"
+    assert SendErrorCategory.NETWORK.value == "network"
+    assert SendErrorCategory.UNKNOWN.value == "unknown"
+
+
+def test_classify_error_whatsapp_disconnected():
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+
+    exc = _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+    category, reason = classify_error(exc)
+    assert category == SendErrorCategory.WHATSAPP_DISCONNECTED
+    assert "WhatsApp disconnected" in reason
+
+
+def test_classify_error_rate_limit_429():
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+
+    exc = _mock_http_error(429, '{"error":"rate limited"}')
+    category, _ = classify_error(exc)
+    assert category == SendErrorCategory.RATE_LIMIT
+
+
+def test_classify_error_invalid_number_400():
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+
+    exc = _mock_http_error(400, '{"error":"number not registered on whatsapp"}')
+    category, _ = classify_error(exc)
+    assert category == SendErrorCategory.INVALID_NUMBER
+
+
+def test_classify_error_auth_401():
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+
+    exc = _mock_http_error(401, '{"error":"invalid token"}')
+    category, _ = classify_error(exc)
+    assert category == SendErrorCategory.AUTH
+
+
+def test_classify_error_generic_upstream_500():
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+
+    exc = _mock_http_error(500, '{"error":"internal server error"}')
+    category, _ = classify_error(exc)
+    assert category == SendErrorCategory.UPSTREAM_5XX
+
+
+def test_classify_error_timeout():
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+
+    exc = requests.Timeout("read timed out")
+    category, reason = classify_error(exc)
+    assert category == SendErrorCategory.TIMEOUT
+    assert "timeout" in reason.lower()
+
+
+def test_classify_error_connection_error_is_network():
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+
+    exc = requests.ConnectionError("connection refused")
+    category, _ = classify_error(exc)
+    assert category == SendErrorCategory.NETWORK
+
+
+def test_classify_error_unknown_exception():
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+
+    category, reason = classify_error(ValueError("weird"))
+    assert category == SendErrorCategory.UNKNOWN
+    assert "weird" in reason

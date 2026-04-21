@@ -70,7 +70,13 @@ def _categorize_error(exc: Exception) -> str:
         try:
             parsed = _json.loads(body)
             if isinstance(parsed, dict):
-                reason = parsed.get("error") or parsed.get("message")
+                # UazAPI returns {"error": true, "message": "..."} — boolean 'error'
+                # is not a useful reason. Prefer 'message' when 'error' is a bool.
+                raw_error = parsed.get("error")
+                if isinstance(raw_error, bool):
+                    reason = parsed.get("message")
+                else:
+                    reason = raw_error or parsed.get("message")
                 if reason:
                     return f"HTTP {status}: {str(reason)[:120]}"
         except (ValueError, TypeError):

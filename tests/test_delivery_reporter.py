@@ -429,3 +429,33 @@ def test_build_contact_returns_none_when_no_phone():
 def test_build_contact_returns_none_when_phone_empty():
     row = {"ProfileName": "Ghost", "From": ""}
     assert build_contact_from_row(row) is None
+
+
+def _mock_http_error(status: int, body: str) -> requests.HTTPError:
+    """Build a requests.HTTPError with a fake response for testing _categorize_error."""
+    response = MagicMock(spec=requests.Response)
+    response.status_code = status
+    response.text = body
+    exc = requests.HTTPError(f"{status} Server Error", response=response)
+    return exc
+
+
+def test_categorize_error_prefers_message_over_boolean_error_field():
+    """UazAPI returns {"error": true, "message": "WhatsApp disconnected"}.
+    Must use 'message', not stringify the boolean 'error' to 'True'.
+    """
+    from execution.core.delivery_reporter import _categorize_error
+
+    exc = _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+    result = _categorize_error(exc)
+    assert "WhatsApp disconnected" in result
+    assert "True" not in result
+
+
+def test_categorize_error_uses_error_field_when_it_is_a_string():
+    """Some upstreams return {"error": "rate limited"} — string, not bool. Keep using it."""
+    from execution.core.delivery_reporter import _categorize_error
+
+    exc = _mock_http_error(429, '{"error":"rate limited"}')
+    result = _categorize_error(exc)
+    assert "rate limited" in result

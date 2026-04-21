@@ -238,3 +238,23 @@ def test_main_chat_sink_disabled_when_env_missing(monkeypatch, capsys):
 
     # Stdout still fires
     assert "cron_crashed" in capsys.readouterr().out
+
+
+def test_emit_continues_when_one_sink_raises(monkeypatch, capsys):
+    monkeypatch.setenv("SUPABASE_URL", "https://fake")
+    monkeypatch.setenv("SUPABASE_KEY", "fake")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    class ExplodingSupabaseClient:
+        def table(self, name):
+            raise RuntimeError("supabase is down")
+
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "_get_supabase_client", lambda: ExplodingSupabaseClient())
+
+    bus = eb.EventBus(workflow="wf", run_id="rX")
+    bus.emit("cron_started")  # must not raise
+    # Stdout sink (runs before Supabase) still fires
+    out = capsys.readouterr().out
+    assert "cron_started" in out
+    assert "rX" in out

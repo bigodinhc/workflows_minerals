@@ -537,3 +537,12 @@ def test_classify_error_unknown_exception():
     category, reason = classify_error(ValueError("weird"))
     assert category == SendErrorCategory.UNKNOWN
     assert "weird" in reason
+
+
+def test_classify_error_http_error_without_response_is_unknown():
+    """HTTPError with no attached response (pre-flight failures) falls to UNKNOWN,
+    not UPSTREAM_5XX — Task 5 circuit breaker relies on this not being fatal."""
+    from execution.core.delivery_reporter import classify_error, SendErrorCategory
+    exc = requests.HTTPError("no response attached")
+    category, _ = classify_error(exc)
+    assert category == SendErrorCategory.UNKNOWN

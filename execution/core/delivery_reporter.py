@@ -105,7 +105,7 @@ def classify_error(exc: Exception) -> tuple["SendErrorCategory", str]:
         # Category decision tree
         if status == 401 or status == 403:
             return SendErrorCategory.AUTH, reason_str or f"HTTP {status}"
-        if status == 429 or "rate" in reason_lower and "limit" in reason_lower:
+        if status == 429 or ("rate" in reason_lower and "limit" in reason_lower):
             return SendErrorCategory.RATE_LIMIT, reason_str or f"HTTP {status}"
         if "disconnected" in reason_lower or "not connected" in reason_lower:
             return SendErrorCategory.WHATSAPP_DISCONNECTED, reason_str

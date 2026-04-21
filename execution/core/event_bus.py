@@ -31,6 +31,21 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _get_supabase_client():
+    """Return a supabase-py Client, or None if credentials/library missing.
+    Extracted to module scope so tests can monkeypatch."""
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
+    if not url or not key:
+        return None
+    try:
+        from supabase import create_client
+        return create_client(url, key)
+    except Exception as exc:
+        logger.warning("supabase client init failed: %s", exc)
+        return None
+
+
 class EventBus:
     """Emit structured events to multiple sinks. Never raises."""
 
@@ -48,7 +63,11 @@ class EventBus:
         self._sinks = self._build_sinks()
 
     def _build_sinks(self) -> list:
-        return [_StdoutSink()]
+        sinks: list = [_StdoutSink()]
+        supabase = _get_supabase_client()
+        if supabase is not None:
+            sinks.append(_SupabaseSink(supabase))
+        return sinks
 
     def emit(
         self,
@@ -85,3 +104,15 @@ class _StdoutSink:
     def emit(self, event_dict: dict) -> None:
         sys.stdout.write(json.dumps(event_dict, ensure_ascii=False) + "\n")
         sys.stdout.flush()
+
+
+class _SupabaseSink:
+    """Persists each event to the event_log table. Best-effort."""
+
+    def __init__(self, client):
+        self._client = client
+
+    def emit(self, event_dict: dict) -> None:
+        # Strip the 'ts' from the row; let Supabase use its NOW() default.
+        row = {k: v for k, v in event_dict.items() if k != "ts"}
+        self._client.table("event_log").insert(row).execute()

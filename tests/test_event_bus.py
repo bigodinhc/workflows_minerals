@@ -81,3 +81,53 @@ def test_emit_coerces_invalid_level_to_info(monkeypatch, capsys):
 
     out = capsys.readouterr().out.strip()
     assert json.loads(out)["level"] == "info"
+
+
+def test_supabase_sink_inserts_row_when_enabled(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://fake.supabase.co")
+    monkeypatch.setenv("SUPABASE_KEY", "fake_key")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    inserted_rows = []
+
+    class FakeSupabaseClient:
+        def table(self, name):
+            assert name == "event_log"
+            return self
+
+        def insert(self, row):
+            inserted_rows.append(row)
+            return self
+
+        def execute(self):
+            return None
+
+    from execution.core import event_bus as eb
+
+    monkeypatch.setattr(eb, "_get_supabase_client", lambda: FakeSupabaseClient())
+
+    bus = eb.EventBus(workflow="wf_y", run_id="r2")
+    bus.emit("cron_started")
+
+    assert len(inserted_rows) == 1
+    row = inserted_rows[0]
+    assert row["workflow"] == "wf_y"
+    assert row["run_id"] == "r2"
+    assert row["event"] == "cron_started"
+    assert row["level"] == "info"
+    # The stdout payload includes 'ts' as ISO; Supabase row either uses its own default
+    # or passes through. Either way, the 'ts' key presence is OK.
+
+
+def test_supabase_sink_disabled_when_env_missing(monkeypatch, capsys):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    from execution.core.event_bus import EventBus
+
+    bus = EventBus(workflow="t")
+    bus.emit("cron_started")  # should not raise, should not try Supabase
+
+    # Verify stdout still fires
+    assert "cron_started" in capsys.readouterr().out

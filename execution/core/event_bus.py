@@ -1,0 +1,87 @@
+"""
+Event bus: single-point emitter for structured workflow events.
+
+Fan-outs to multiple sinks (stdout, Supabase event_log, Sentry breadcrumbs,
+main-chat Telegram for errors). Every sink is never-raise — failures are
+logged to stderr/logger and swallowed so workflows are never broken by
+telemetry.
+
+Phase 1 (this module): stdout + Supabase + Sentry + main-chat sinks.
+Phase 2 (later): _EventsChannelSink for firehose.
+"""
+import json
+import logging
+import os
+import secrets
+import sys
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+_VALID_LEVELS = frozenset({"info", "warn", "error"})
+
+
+def _generate_run_id() -> str:
+    """8-char hex, good enough for log grepping and far-from-collision."""
+    return secrets.token_hex(4)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class EventBus:
+    """Emit structured events to multiple sinks. Never raises."""
+
+    def __init__(
+        self,
+        workflow: str,
+        run_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        parent_run_id: Optional[str] = None,
+    ):
+        self.workflow = workflow
+        self.run_id = run_id or _generate_run_id()
+        self.trace_id = trace_id or os.getenv("TRACE_ID") or self.run_id
+        self.parent_run_id = parent_run_id or os.getenv("PARENT_RUN_ID")
+        self._sinks = self._build_sinks()
+
+    def _build_sinks(self) -> list:
+        return [_StdoutSink()]
+
+    def emit(
+        self,
+        event: str,
+        label: str = "",
+        detail: Optional[dict] = None,
+        level: str = "info",
+    ) -> None:
+        """Fan-out to all sinks. Never raises."""
+        if level not in _VALID_LEVELS:
+            level = "info"
+        event_dict = {
+            "ts": _now_iso(),
+            "workflow": self.workflow,
+            "run_id": self.run_id,
+            "trace_id": self.trace_id,
+            "parent_run_id": self.parent_run_id,
+            "level": level,
+            "event": event,
+            "label": label or None,
+            "detail": detail or None,
+        }
+        for sink in self._sinks:
+            try:
+                sink.emit(event_dict)
+            except Exception as exc:
+                # Never let sink failure propagate
+                logger.warning("event_bus sink %s failed: %s", type(sink).__name__, exc)
+
+
+class _StdoutSink:
+    """Always-on sink: one JSON line per event to stdout. Surfaces in GH Actions logs."""
+
+    def emit(self, event_dict: dict) -> None:
+        sys.stdout.write(json.dumps(event_dict, ensure_ascii=False) + "\n")
+        sys.stdout.flush()

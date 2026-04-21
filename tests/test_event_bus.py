@@ -258,3 +258,82 @@ def test_emit_continues_when_one_sink_raises(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "cron_started" in out
     assert "rX" in out
+
+
+def test_with_event_bus_emits_started_and_finished(monkeypatch, capsys):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    from execution.core.event_bus import with_event_bus
+
+    calls = []
+
+    @with_event_bus("test_wf")
+    def main():
+        calls.append("inside main")
+        return "ok"
+
+    result = main()
+    assert result == "ok"
+    assert calls == ["inside main"]
+
+    out_lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    events = [e["event"] for e in out_lines]
+    assert events == ["cron_started", "cron_finished"]
+    assert all(e["workflow"] == "test_wf" for e in out_lines)
+    # Both lifecycle events share the same run_id
+    assert out_lines[0]["run_id"] == out_lines[1]["run_id"]
+
+
+def test_with_event_bus_catches_exception_and_re_raises(monkeypatch, capsys):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    captures = []
+    fake_sentry = type(sys)("sentry_sdk")
+    fake_sentry.add_breadcrumb = lambda **kw: None
+    fake_sentry.capture_exception = lambda exc: captures.append(str(exc)[:50])
+
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "sentry_sdk", fake_sentry)
+
+    from execution.core.event_bus import with_event_bus
+
+    @with_event_bus("test_wf")
+    def broken_main():
+        raise ValueError("synthetic boom")
+
+    with pytest.raises(ValueError, match="synthetic boom"):
+        broken_main()
+
+    out_lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    events = [e["event"] for e in out_lines]
+    assert events == ["cron_started", "cron_crashed"]
+    crashed = out_lines[1]
+    assert crashed["level"] == "error"
+    assert "ValueError" in (crashed["label"] or "")
+    assert "synthetic boom" in (crashed["label"] or "")
+
+    # Sentry captured the exception
+    assert len(captures) == 1
+    assert "synthetic boom" in captures[0]
+
+
+def test_with_event_bus_calls_init_sentry(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    calls = []
+    from execution.core import sentry_init as si_module
+    monkeypatch.setattr(si_module, "init_sentry", lambda name: calls.append(name) or True)
+
+    from execution.core.event_bus import with_event_bus
+
+    @with_event_bus("baltic_ingestion")
+    def main():
+        return None
+
+    main()
+    # init_sentry called once with the workflow-derived script name
+    assert len(calls) == 1
+    assert "baltic_ingestion" in calls[0]

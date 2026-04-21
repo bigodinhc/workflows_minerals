@@ -9,6 +9,7 @@ telemetry.
 Phase 1 (this module): stdout + Supabase + Sentry + main-chat sinks.
 Phase 2 (later): _EventsChannelSink for firehose.
 """
+import functools
 import json
 import logging
 import os
@@ -199,3 +200,51 @@ class _MainChatSink:
         if run_id:
             lines.append(f"run_id: {run_id}")
         return "\n".join(lines)
+
+
+def with_event_bus(workflow: str):
+    """Decorator that wraps a script's main() to emit lifecycle events and
+    capture uncaught exceptions to Sentry.
+
+    Usage:
+        @with_event_bus("morning_check")
+        def main():
+            ...
+
+    Emits cron_started on entry, cron_finished on clean exit, cron_crashed on
+    exception. Calls init_sentry(workflow) as first action. Re-raises the
+    original exception so GH Actions marks the run as failed.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Auto-init Sentry (idempotent; safe even if script already calls it)
+            try:
+                from execution.core.sentry_init import init_sentry
+                init_sentry(f"cron.{workflow}")
+            except Exception as exc:
+                logger.warning("init_sentry failed in decorator: %s", exc)
+
+            bus = EventBus(workflow=workflow)
+            bus.emit("cron_started")
+            try:
+                result = func(*args, **kwargs)
+            except BaseException as exc:
+                bus.emit(
+                    "cron_crashed",
+                    label=f"{type(exc).__name__}: {str(exc)[:100]}",
+                    detail={"exc_type": type(exc).__name__, "exc_str": str(exc)[:500]},
+                    level="error",
+                )
+                # Capture WITH the last breadcrumbs already on the Sentry scope
+                try:
+                    import sentry_sdk
+                    if sentry_sdk is not None:
+                        sentry_sdk.capture_exception(exc)
+                except Exception:
+                    pass
+                raise
+            bus.emit("cron_finished")
+            return result
+        return wrapper
+    return decorator

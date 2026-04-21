@@ -75,6 +75,30 @@ class SendErrorCategory(Enum):
     SKIPPED_CIRCUIT_BREAK = "skipped_circuit_break"
 
 
+def _extract_http_reason(exc: Exception) -> str:
+    """Extract a human-readable reason from a requests.HTTPError's JSON body.
+
+    Handles UazAPI-style bodies: {"error": bool, "message": str} or {"error": str}.
+    Returns the reason truncated to 120 chars, or empty string if the body is
+    not JSON, is not a dict, or has no usable message/error field. Callers decide
+    their own fallback (category decision tree vs. legacy error string).
+    Returns "" if exc has no `.response` attribute (defensive).
+    """
+    import json as _json
+    response = getattr(exc, "response", None)
+    body = (getattr(response, "text", None) or "") if response is not None else ""
+    try:
+        parsed = _json.loads(body)
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    raw_error = parsed.get("error")
+    candidate = parsed.get("message") if isinstance(raw_error, bool) else raw_error
+    reason = str(candidate or parsed.get("message") or "")[:120]
+    return reason
+
+
 def classify_error(exc: Exception) -> tuple["SendErrorCategory", str]:
     """Classify an exception raised by a WhatsApp send into (category, reason).
 
@@ -82,7 +106,6 @@ def classify_error(exc: Exception) -> tuple["SendErrorCategory", str]:
     The category drives action hints, grouping, and circuit breaker behavior.
     """
     import requests as _rq
-    import json as _json
 
     if isinstance(exc, _rq.Timeout):
         return SendErrorCategory.TIMEOUT, "timeout"
@@ -92,20 +115,9 @@ def classify_error(exc: Exception) -> tuple["SendErrorCategory", str]:
 
     if isinstance(exc, _rq.HTTPError) and exc.response is not None:
         status = exc.response.status_code
-        body = exc.response.text or ""
-
-        # Try to extract a human-readable reason from the JSON body
-        reason_str = ""
-        try:
-            parsed = _json.loads(body)
-            if isinstance(parsed, dict):
-                raw_error = parsed.get("error")
-                # UazAPI returns {"error": true, "message": "..."} — prefer message
-                candidate = parsed.get("message") if isinstance(raw_error, bool) else raw_error
-                reason_str = str(candidate or parsed.get("message") or "")[:120]
-        except (ValueError, TypeError):
-            reason_str = body[:100]
-
+        # Helper caps structured reasons at 120 chars; raw-body fallback uses
+        # 100 chars to stay consistent with _categorize_error's legacy fallback.
+        reason_str = _extract_http_reason(exc) or (exc.response.text or "")[:100]
         reason_lower = reason_str.lower()
 
         # Category decision tree
@@ -125,32 +137,25 @@ def classify_error(exc: Exception) -> tuple["SendErrorCategory", str]:
     return SendErrorCategory.UNKNOWN, str(exc)[:200]
 
 
-def _categorize_error(exc: Exception) -> str:
-    """Convert exception into short error category string.
-    For HTTP errors, tries to extract 'error' or 'message' field from JSON
-    bodies (UazAPI style) before falling back to truncated raw body.
+def _categorize_error(exc: Exception, reason: Optional[str] = None) -> str:
+    """Convert exception into short error category string (legacy format for
+    dashboard JSON compat): "timeout", "HTTP N: <reason>", or str(exc)[:200].
+
+    When `reason` is provided (pre-extracted by classify_error), skips the
+    JSON re-parse. When not provided, extracts independently via
+    `_extract_http_reason`. Falls back to truncated raw body when no structured
+    reason is available, preserving historical dashboard behavior.
     """
     import requests as _rq
-    import json as _json
     if isinstance(exc, _rq.Timeout):
         return "timeout"
     if isinstance(exc, _rq.HTTPError) and exc.response is not None:
         status = exc.response.status_code
+        if reason is None:
+            reason = _extract_http_reason(exc)
+        if reason:
+            return f"HTTP {status}: {reason}"
         body = exc.response.text or ""
-        try:
-            parsed = _json.loads(body)
-            if isinstance(parsed, dict):
-                # UazAPI returns {"error": true, "message": "..."} — boolean 'error'
-                # is not a useful reason. Prefer 'message' when 'error' is a bool.
-                raw_error = parsed.get("error")
-                if isinstance(raw_error, bool):
-                    reason = parsed.get("message")
-                else:
-                    reason = raw_error or parsed.get("message")
-                if reason:
-                    return f"HTTP {status}: {str(reason)[:120]}"
-        except (ValueError, TypeError):
-            pass
         return f"HTTP {status}: {body[:100]}"
     return str(exc)[:200]
 
@@ -392,8 +397,8 @@ class DeliveryReporter:
                 self.send_fn(contact.phone, message)
                 success = True
             except Exception as exc:
-                category, _reason = classify_error(exc)
-                error = _categorize_error(exc)  # keep legacy string for stdout JSON + dashboard compat
+                category, reason = classify_error(exc)
+                error = _categorize_error(exc, reason)  # single JSON parse; legacy string for dashboard JSON
                 self._capture_sentry(exc, category)
             duration_ms = int((time.monotonic() - t0) * 1000)
 

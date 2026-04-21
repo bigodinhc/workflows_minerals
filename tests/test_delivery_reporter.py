@@ -521,6 +521,60 @@ def _mock_http_error(status: int, body: str) -> requests.HTTPError:
     return exc
 
 
+def test_extract_http_reason_prefers_message_when_error_is_bool():
+    """UazAPI-style {"error": true, "message": "..."} — must return message."""
+    from execution.core.delivery_reporter import _extract_http_reason
+
+    exc = _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+    assert _extract_http_reason(exc) == "WhatsApp disconnected"
+
+
+def test_extract_http_reason_uses_error_field_when_string():
+    """{"error": "rate limited"} — string error is the reason."""
+    from execution.core.delivery_reporter import _extract_http_reason
+
+    exc = _mock_http_error(429, '{"error":"rate limited"}')
+    assert _extract_http_reason(exc) == "rate limited"
+
+
+def test_extract_http_reason_returns_empty_for_non_json_body():
+    """Body like 'Internal Server Error' is not JSON — helper returns empty, callers handle fallback."""
+    from execution.core.delivery_reporter import _extract_http_reason
+
+    exc = _mock_http_error(500, "Internal Server Error")
+    assert _extract_http_reason(exc) == ""
+
+
+def test_extract_http_reason_returns_empty_when_no_usable_field():
+    """JSON dict with only {"error": true} and no 'message' → empty (no usable reason)."""
+    from execution.core.delivery_reporter import _extract_http_reason
+
+    exc = _mock_http_error(503, '{"error":true}')
+    assert _extract_http_reason(exc) == ""
+
+
+def test_extract_http_reason_truncates_to_120_chars():
+    """Helper caps reason at 120 chars — invariant from docstring."""
+    from execution.core.delivery_reporter import _extract_http_reason
+
+    long_message = "x" * 200
+    exc = _mock_http_error(500, '{"error":true,"message":"' + long_message + '"}')
+    result = _extract_http_reason(exc)
+    assert len(result) == 120
+    assert result == "x" * 120
+
+
+def test_extract_http_reason_handles_none_text():
+    """Helper must handle exc.response.text is None (not just empty string)."""
+    from execution.core.delivery_reporter import _extract_http_reason
+
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 500
+    response.text = None
+    exc = requests.HTTPError("500", response=response)
+    assert _extract_http_reason(exc) == ""
+
+
 def test_categorize_error_prefers_message_over_boolean_error_field():
     """UazAPI returns {"error": true, "message": "WhatsApp disconnected"}.
     Must use 'message', not stringify the boolean 'error' to 'True'.

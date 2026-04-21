@@ -7,7 +7,62 @@ Telegram summary notification at end of dispatch.
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from enum import Enum
+from typing import Callable, Iterable, Optional
+
+
+class SendErrorCategory(Enum):
+    """Categories of send failures. Used for alert grouping, action hints,
+    circuit breaker decisions, and Sentry tagging."""
+    WHATSAPP_DISCONNECTED = "whatsapp_disconnected"
+    RATE_LIMIT = "rate_limit"
+    INVALID_NUMBER = "invalid_number"
+    UPSTREAM_5XX = "upstream_5xx"
+    AUTH = "auth"
+    TIMEOUT = "timeout"
+    NETWORK = "network"
+    UNKNOWN = "unknown"
+    SKIPPED_CIRCUIT_BREAK = "skipped_circuit_break"
+
+
+# Human-readable PT labels per category (shown in the grouped summary)
+_CATEGORY_LABEL = {
+    SendErrorCategory.WHATSAPP_DISCONNECTED: "WhatsApp desconectado",
+    SendErrorCategory.RATE_LIMIT: "Rate limit",
+    SendErrorCategory.INVALID_NUMBER: "Número inválido",
+    SendErrorCategory.UPSTREAM_5XX: "Erro UazAPI (5xx)",
+    SendErrorCategory.AUTH: "Falha de autenticação",
+    SendErrorCategory.TIMEOUT: "Timeout",
+    SendErrorCategory.NETWORK: "Erro de rede",
+    SendErrorCategory.UNKNOWN: "Erro não categorizado",
+    SendErrorCategory.SKIPPED_CIRCUIT_BREAK: "Pulados pelo circuit breaker",
+}
+
+# Action hint per category. None means no hint (transient, no operator action).
+_CATEGORY_HINT = {
+    SendErrorCategory.WHATSAPP_DISCONNECTED: "Reconecte QR em mineralstrading.uazapi.com",
+    SendErrorCategory.AUTH: "Verifique UAZAPI_TOKEN no secrets do GitHub",
+    SendErrorCategory.INVALID_NUMBER: "Revise a planilha de contatos",
+    SendErrorCategory.UPSTREAM_5XX: "Verifique status do UazAPI",
+    SendErrorCategory.RATE_LIMIT: None,
+    SendErrorCategory.TIMEOUT: None,
+    SendErrorCategory.NETWORK: None,
+    SendErrorCategory.UNKNOWN: "Veja logs do GitHub Actions",
+    SendErrorCategory.SKIPPED_CIRCUIT_BREAK: None,
+}
+
+# Categories considered "fatal" — N consecutive failures in the same one triggers abort.
+# Transient categories (timeout, network) do NOT trip the breaker.
+_FATAL_CATEGORIES = frozenset({
+    SendErrorCategory.WHATSAPP_DISCONNECTED,
+    SendErrorCategory.AUTH,
+    SendErrorCategory.UPSTREAM_5XX,
+})
+
+_CIRCUIT_BREAKER_THRESHOLD = 5
+
+# Per-category how many sample contact names to show inline (0 = none, show count only)
+_CATEGORY_SAMPLE_LIMIT = 3
 
 
 @dataclass
@@ -24,11 +79,7 @@ class DeliveryResult:
     success: bool
     error: Optional[str]
     duration_ms: int
-    category: "SendErrorCategory" = None  # type: ignore[assignment]
-
-    def __post_init__(self):
-        if self.category is None:
-            self.category = SendErrorCategory.UNKNOWN
+    category: SendErrorCategory = SendErrorCategory.UNKNOWN
 
 
 @dataclass
@@ -56,25 +107,6 @@ class DeliveryReport:
         return [r for r in self.results if not r.success]
 
 
-import time
-from enum import Enum
-from typing import Callable, Iterable
-
-
-class SendErrorCategory(Enum):
-    """Categories of send failures. Used for alert grouping, action hints,
-    circuit breaker decisions, and Sentry tagging."""
-    WHATSAPP_DISCONNECTED = "whatsapp_disconnected"
-    RATE_LIMIT = "rate_limit"
-    INVALID_NUMBER = "invalid_number"
-    UPSTREAM_5XX = "upstream_5xx"
-    AUTH = "auth"
-    TIMEOUT = "timeout"
-    NETWORK = "network"
-    UNKNOWN = "unknown"
-    SKIPPED_CIRCUIT_BREAK = "skipped_circuit_break"
-
-
 def _extract_http_reason(exc: Exception) -> str:
     """Extract a human-readable reason from a requests.HTTPError's JSON body.
 
@@ -99,7 +131,7 @@ def _extract_http_reason(exc: Exception) -> str:
     return reason
 
 
-def classify_error(exc: Exception) -> tuple["SendErrorCategory", str]:
+def classify_error(exc: Exception) -> tuple[SendErrorCategory, str]:
     """Classify an exception raised by a WhatsApp send into (category, reason).
 
     The reason is a short, human-readable string suitable for the Telegram alert.
@@ -160,46 +192,6 @@ def _categorize_error(exc: Exception, reason: Optional[str] = None) -> str:
     return str(exc)[:200]
 
 
-# Human-readable PT labels per category (shown in the grouped summary)
-_CATEGORY_LABEL = {
-    SendErrorCategory.WHATSAPP_DISCONNECTED: "WhatsApp desconectado",
-    SendErrorCategory.RATE_LIMIT: "Rate limit",
-    SendErrorCategory.INVALID_NUMBER: "Número inválido",
-    SendErrorCategory.UPSTREAM_5XX: "Erro UazAPI (5xx)",
-    SendErrorCategory.AUTH: "Falha de autenticação",
-    SendErrorCategory.TIMEOUT: "Timeout",
-    SendErrorCategory.NETWORK: "Erro de rede",
-    SendErrorCategory.UNKNOWN: "Erro não categorizado",
-    SendErrorCategory.SKIPPED_CIRCUIT_BREAK: "Pulados pelo circuit breaker",
-}
-
-# Action hint per category. None means no hint (transient, no operator action).
-_CATEGORY_HINT = {
-    SendErrorCategory.WHATSAPP_DISCONNECTED: "Reconecte QR em mineralstrading.uazapi.com",
-    SendErrorCategory.AUTH: "Verifique UAZAPI_TOKEN no secrets do GitHub",
-    SendErrorCategory.INVALID_NUMBER: "Revise a planilha de contatos",
-    SendErrorCategory.UPSTREAM_5XX: "Verifique status do UazAPI",
-    SendErrorCategory.RATE_LIMIT: None,
-    SendErrorCategory.TIMEOUT: None,
-    SendErrorCategory.NETWORK: None,
-    SendErrorCategory.UNKNOWN: "Veja logs do GitHub Actions",
-    SendErrorCategory.SKIPPED_CIRCUIT_BREAK: None,
-}
-
-# Categories considered "fatal" — N consecutive failures in the same one triggers abort.
-# Transient categories (timeout, network) do NOT trip the breaker.
-_FATAL_CATEGORIES = frozenset({
-    SendErrorCategory.WHATSAPP_DISCONNECTED,
-    SendErrorCategory.AUTH,
-    SendErrorCategory.UPSTREAM_5XX,
-})
-
-_CIRCUIT_BREAKER_THRESHOLD = 5
-
-# Per-category how many sample contact names to show inline (0 = none, show count only)
-_CATEGORY_SAMPLE_LIMIT = 3
-
-
 def _group_failures_by_category(failures: list) -> list:
     """Return list of (category, results) tuples sorted by count descending.
 
@@ -216,7 +208,7 @@ def _group_failures_by_category(failures: list) -> list:
 
 
 def _format_telegram_message(
-    report: "DeliveryReport",
+    report: DeliveryReport,
     dashboard_base_url: str,
     gh_run_id: Optional[str],
 ) -> str:
@@ -339,7 +331,7 @@ class DeliveryReporter:
         dashboard_base_url: str = "https://workflows-minerals.vercel.app",
         gh_run_id: Optional[str] = None,
         circuit_breaker_threshold: int = _CIRCUIT_BREAKER_THRESHOLD,
-        fatal_categories: "frozenset[SendErrorCategory]" = _FATAL_CATEGORIES,
+        fatal_categories: frozenset[SendErrorCategory] = _FATAL_CATEGORIES,
     ):
         self.workflow = workflow
         self.send_fn = send_fn
@@ -363,6 +355,7 @@ class DeliveryReporter:
         the remaining contacts are skipped and marked with error
         'skipped_due_to_circuit_break'.
         """
+        import time
         started_at = datetime.now().astimezone()
         results: list = []
         contacts_list = list(contacts)
@@ -490,7 +483,7 @@ class DeliveryReporter:
         except Exception as exc:
             print(f"[WARN] Failed to send Telegram summary: {exc}")
 
-    def _capture_sentry(self, exc: Exception, category: "SendErrorCategory") -> None:
+    def _capture_sentry(self, exc: Exception, category: SendErrorCategory) -> None:
         """Capture exception to Sentry with category as a searchable tag.
         Silent no-op if sentry_sdk is not importable or not initialized.
         """

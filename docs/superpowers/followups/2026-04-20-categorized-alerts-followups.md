@@ -31,7 +31,15 @@ Operator sees the wrong action hint first, and "Erro não categorizado" is misle
 
 ---
 
-## Priority 2 — Collapse `_categorize_error` + `classify_error` duplicated JSON parsing
+## Priority 2 — Collapse `_categorize_error` + `classify_error` duplicated JSON parsing — **✅ SHIPPED 2026-04-21 (commit `681fda9`)**
+
+Resolved via shared `_extract_http_reason(exc) -> str` helper. Both `classify_error` and `_categorize_error` now delegate JSON body parsing to it; `dispatch` threads the already-extracted reason from the first call into the second, so each exception triggers exactly one JSON parse. Helper has a defensive `getattr` guard for exceptions without `.response`. 6 new unit tests cover the contract (extraction, truncation at 120 chars, empty-string fallbacks, None-text handling).
+
+Post-review fixes also landed in the same commit: guard for missing `.response`, inline comment documenting the 120 vs. 100-char cap asymmetry, and 2 edge-case tests.
+
+---
+
+**Original drift concern (for history):**
 
 `DeliveryReporter.dispatch` currently runs both on every exception:
 
@@ -48,7 +56,15 @@ Drift risk: a future tweak to one's JSON extraction logic that forgets the other
 
 ---
 
-## Priority 3 — Module structure: imports scattered, "7 tasks bolted together" seam
+## Priority 3 — Module structure: imports scattered, "7 tasks bolted together" seam — **✅ SHIPPED 2026-04-21 (commit `e650f89`)**
+
+Resolved via full module reorder: single import block at top → `SendErrorCategory` enum → constants → dataclasses → classifiers → helpers → `DeliveryReporter` class. All four quoted forward-references (`"SendErrorCategory"` in DeliveryResult/fatal_categories/_capture_sentry/classify_error return + `"DeliveryReport"` in _format_telegram_message) are now plain annotations. `__post_init__` coercion and `# type: ignore[assignment]` hack removed. `import time` moved inside `dispatch()` for consistency with the file's deferred-import pattern.
+
+Behavior preserved — all 70 tests still pass.
+
+---
+
+**Original concern (for history):**
 
 `execution/core/delivery_reporter.py` has imports at lines 8-10, then dataclasses, then another import block at line 59-61 (enum + typing). The second import block is a visible seam from the task-by-task construction.
 
@@ -60,7 +76,13 @@ Unlocks removing the `"SendErrorCategory"` string forward-reference in `Delivery
 
 ---
 
-## Priority 4 — Sentry tag namespace asymmetry
+## Priority 4 — Sentry tag namespace asymmetry — **✅ SHIPPED 2026-04-21 (commit `57ce0fc`)**
+
+Resolved via rename `send.error_category` → `send.category`. The `workflow` tag stays unprefixed (may become a first-class Sentry dimension across other products). Renamed before any alert rules or dashboards depend on the old name. 3 test references updated.
+
+---
+
+**Original concern (for history):**
 
 Currently: `send.error_category` (prefixed) + `workflow` (unprefixed). Sentry treats both as tags but consistency helps discoverability.
 

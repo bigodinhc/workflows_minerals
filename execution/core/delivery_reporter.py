@@ -72,6 +72,7 @@ class SendErrorCategory(Enum):
     TIMEOUT = "timeout"
     NETWORK = "network"
     UNKNOWN = "unknown"
+    SKIPPED_CIRCUIT_BREAK = "skipped_circuit_break"
 
 
 def classify_error(exc: Exception) -> tuple["SendErrorCategory", str]:
@@ -164,6 +165,7 @@ _CATEGORY_LABEL = {
     SendErrorCategory.TIMEOUT: "Timeout",
     SendErrorCategory.NETWORK: "Erro de rede",
     SendErrorCategory.UNKNOWN: "Erro não categorizado",
+    SendErrorCategory.SKIPPED_CIRCUIT_BREAK: "Pulados pelo circuit breaker",
 }
 
 # Action hint per category. None means no hint (transient, no operator action).
@@ -176,6 +178,7 @@ _CATEGORY_HINT = {
     SendErrorCategory.TIMEOUT: None,
     SendErrorCategory.NETWORK: None,
     SendErrorCategory.UNKNOWN: "Veja logs do GitHub Actions",
+    SendErrorCategory.SKIPPED_CIRCUIT_BREAK: None,
 }
 
 # Categories considered "fatal" — N consecutive failures in the same one triggers abort.
@@ -193,10 +196,16 @@ _CATEGORY_SAMPLE_LIMIT = 3
 
 
 def _group_failures_by_category(failures: list) -> list:
-    """Return list of (category, results) tuples sorted by count descending."""
+    """Return list of (category, results) tuples sorted by count descending.
+
+    Skipped-by-circuit-breaker entries are excluded — they render as a
+    separate trailing footnote, not as a competing bucket.
+    """
     from collections import defaultdict
     buckets: dict = defaultdict(list)
     for f in failures:
+        if f.category == SendErrorCategory.SKIPPED_CIRCUIT_BREAK:
+            continue
         buckets[f.category].append(f)
     return sorted(buckets.items(), key=lambda kv: -len(kv[1]))
 
@@ -250,6 +259,16 @@ def _format_telegram_message(
                 lines.append(f"  ({names})")
             if hint:
                 lines.append(f"  → AÇÃO: {hint}")
+
+        # Trailing footnote: circuit breaker skipped contacts, shown after the
+        # real failure categories so the actionable cause stays at the top.
+        skipped_count = sum(
+            1 for f in report.failures
+            if f.category == SendErrorCategory.SKIPPED_CIRCUIT_BREAK
+        )
+        if skipped_count > 0:
+            lines.append("")
+            lines.append(f"ℹ️ {skipped_count} contatos pulados pelo circuit breaker")
 
     link = (
         f"{dashboard_base_url}/?run_id={gh_run_id}"
@@ -355,7 +374,7 @@ class DeliveryReporter:
                     success=False,
                     error="skipped_due_to_circuit_break",
                     duration_ms=0,
-                    category=SendErrorCategory.UNKNOWN,
+                    category=SendErrorCategory.SKIPPED_CIRCUIT_BREAK,
                 )
                 results.append(result)
                 if on_progress is not None:

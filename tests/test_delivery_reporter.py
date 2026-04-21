@@ -677,8 +677,10 @@ def test_circuit_breaker_trips_after_5_disconnected():
     # Circuit should trip after 5, remaining 15 are skipped
     assert call_count["n"] == 5
     assert report.failure_count == 20  # all 20 are counted as failures
-    skipped = [r for r in report.results if r.category == SendErrorCategory.UNKNOWN and r.error == "skipped_due_to_circuit_break"]
+    skipped = [r for r in report.results if r.category == SendErrorCategory.SKIPPED_CIRCUIT_BREAK]
     assert len(skipped) == 15
+    # Every skipped result uses the sentinel error string
+    assert all(r.error == "skipped_due_to_circuit_break" for r in skipped)
 
 
 def test_circuit_breaker_does_not_trip_on_transient_timeout():
@@ -809,3 +811,54 @@ def test_dispatch_silent_when_sentry_sdk_unavailable(monkeypatch):
     # Should complete without raising
     report = reporter.dispatch([Contact(name="U", phone="1")], message="hi")
     assert report.failure_count == 1
+
+
+def test_telegram_message_renders_real_cause_before_skipped():
+    """Circuit-breaker scenario: 5 real failures + 15 skipped.
+    Real cause and its action hint must render BEFORE the skipped footnote."""
+    from execution.core.delivery_reporter import (
+        DeliveryResult, SendErrorCategory, _format_telegram_message,
+    )
+    results = [
+        DeliveryResult(contact=Contact(name=f"U{i}", phone=str(i)), success=False,
+                       error="HTTP 503: WhatsApp disconnected", duration_ms=100,
+                       category=SendErrorCategory.WHATSAPP_DISCONNECTED)
+        for i in range(5)
+    ] + [
+        DeliveryResult(contact=Contact(name=f"S{i}", phone=str(100+i)), success=False,
+                       error="skipped_due_to_circuit_break", duration_ms=0,
+                       category=SendErrorCategory.SKIPPED_CIRCUIT_BREAK)
+        for i in range(15)
+    ]
+    report = _make_report("daily_report", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+
+    assert "5× WhatsApp desconectado" in msg
+    assert "Reconecte QR" in msg
+    assert "15 contatos pulados" in msg
+    # Real cause + action hint must appear BEFORE the skipped footnote
+    assert msg.index("5× WhatsApp desconectado") < msg.index("15 contatos pulados")
+    # Skipped bucket must NOT render with "Erro não categorizado" label
+    assert "Erro não categorizado" not in msg
+
+
+def test_telegram_message_omits_skipped_footnote_when_no_circuit_break():
+    """Normal run (no circuit breaker trip) → no trailing footnote line."""
+    from execution.core.delivery_reporter import (
+        DeliveryResult, SendErrorCategory, _format_telegram_message,
+    )
+    results = [
+        DeliveryResult(contact=Contact(name="A", phone="1"), success=True, error=None, duration_ms=100),
+        DeliveryResult(contact=Contact(name="B", phone="2"), success=False, error="timeout",
+                       duration_ms=100, category=SendErrorCategory.TIMEOUT),
+    ]
+    report = _make_report("test", results)
+    msg = _format_telegram_message(report, dashboard_base_url="https://dash", gh_run_id=None)
+    assert "pulados pelo circuit breaker" not in msg
+
+
+def test_skipped_circuit_break_category_has_no_action_hint():
+    """Skipped bucket should NOT carry its own action hint — the real category
+    already surfaces the hint."""
+    from execution.core.delivery_reporter import SendErrorCategory, _CATEGORY_HINT
+    assert _CATEGORY_HINT.get(SendErrorCategory.SKIPPED_CIRCUIT_BREAK) is None

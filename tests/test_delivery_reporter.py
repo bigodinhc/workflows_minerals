@@ -747,12 +747,12 @@ def test_dispatch_tags_sentry_with_error_category(monkeypatch):
 
     from contextlib import contextmanager
     @contextmanager
-    def _fake_push_scope():
+    def _fake_new_scope():
         yield _FakeScope()
 
     import sys
     fake_sentry = type(sys)("sentry_sdk")
-    fake_sentry.push_scope = _fake_push_scope
+    fake_sentry.new_scope = _fake_new_scope
     fake_sentry.capture_exception = lambda exc: captured_tags.append(("__captured__", str(exc)[:30]))
     monkeypatch.setitem(sys.modules, "sentry_sdk", fake_sentry)
 
@@ -779,11 +779,11 @@ def test_dispatch_does_not_tag_sentry_on_success(monkeypatch):
             captured.append((key, value))
     from contextlib import contextmanager
     @contextmanager
-    def _fake_push_scope():
+    def _fake_new_scope():
         yield _FakeScope()
     import sys
     fake_sentry = type(sys)("sentry_sdk")
-    fake_sentry.push_scope = _fake_push_scope
+    fake_sentry.new_scope = _fake_new_scope
     fake_sentry.capture_exception = lambda exc: captured.append(("__captured__", "x"))
     monkeypatch.setitem(sys.modules, "sentry_sdk", fake_sentry)
 
@@ -791,3 +791,21 @@ def test_dispatch_does_not_tag_sentry_on_success(monkeypatch):
     reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
     reporter.dispatch([Contact(name="U", phone="1")], message="hi")
     assert captured == []
+
+
+def test_dispatch_silent_when_sentry_sdk_unavailable(monkeypatch):
+    """Contract: _capture_sentry must be a silent no-op when sentry_sdk import fails.
+    Dispatch must not raise even though every failure would try to 'capture'."""
+    import sys
+    from execution.core.delivery_reporter import DeliveryReporter
+
+    # Force import to fail by mapping sys.modules["sentry_sdk"] to None
+    monkeypatch.setitem(sys.modules, "sentry_sdk", None)
+
+    def send_fn(phone, text):
+        raise _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+
+    reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
+    # Should complete without raising
+    report = reporter.dispatch([Contact(name="U", phone="1")], message="hi")
+    assert report.failure_count == 1

@@ -472,7 +472,7 @@ class DeliveryReporter:
         """
         try:
             import sentry_sdk
-            with sentry_sdk.push_scope() as scope:
+            with sentry_sdk.new_scope() as scope:
                 scope.set_tag("send.error_category", category.value)
                 scope.set_tag("workflow", self.workflow)
                 sentry_sdk.capture_exception(exc)

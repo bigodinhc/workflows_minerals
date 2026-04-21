@@ -733,3 +733,61 @@ def test_circuit_breaker_requires_same_category_streak():
     report = reporter.dispatch(contacts, message="hi")
 
     assert call_count["n"] == 6
+
+
+def test_dispatch_tags_sentry_with_error_category(monkeypatch):
+    """Each failure should set Sentry tag 'send.error_category' with category value."""
+    from execution.core.delivery_reporter import DeliveryReporter
+
+    captured_tags = []
+
+    class _FakeScope:
+        def set_tag(self, key, value):
+            captured_tags.append((key, value))
+
+    from contextlib import contextmanager
+    @contextmanager
+    def _fake_push_scope():
+        yield _FakeScope()
+
+    import sys
+    fake_sentry = type(sys)("sentry_sdk")
+    fake_sentry.push_scope = _fake_push_scope
+    fake_sentry.capture_exception = lambda exc: captured_tags.append(("__captured__", str(exc)[:30]))
+    monkeypatch.setitem(sys.modules, "sentry_sdk", fake_sentry)
+
+    def send_fn(phone, text):
+        raise _mock_http_error(503, '{"error":true,"message":"WhatsApp disconnected"}')
+
+    reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name="U", phone="1")]
+    reporter.dispatch(contacts, message="hi")
+
+    # Tag must be set AND exception captured
+    tag_entries = [t for t in captured_tags if t[0] == "send.error_category"]
+    assert ("send.error_category", "whatsapp_disconnected") in tag_entries
+    assert any(t[0] == "__captured__" for t in captured_tags)
+
+
+def test_dispatch_does_not_tag_sentry_on_success(monkeypatch):
+    """Successful sends must not push Sentry tags or capture."""
+    from execution.core.delivery_reporter import DeliveryReporter
+
+    captured = []
+    class _FakeScope:
+        def set_tag(self, key, value):
+            captured.append((key, value))
+    from contextlib import contextmanager
+    @contextmanager
+    def _fake_push_scope():
+        yield _FakeScope()
+    import sys
+    fake_sentry = type(sys)("sentry_sdk")
+    fake_sentry.push_scope = _fake_push_scope
+    fake_sentry.capture_exception = lambda exc: captured.append(("__captured__", "x"))
+    monkeypatch.setitem(sys.modules, "sentry_sdk", fake_sentry)
+
+    send_fn = MagicMock()  # no raise → success
+    reporter = DeliveryReporter(workflow="t", send_fn=send_fn, notify_telegram=False)
+    reporter.dispatch([Contact(name="U", phone="1")], message="hi")
+    assert captured == []

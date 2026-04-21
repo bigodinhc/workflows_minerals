@@ -375,6 +375,7 @@ class DeliveryReporter:
             except Exception as exc:
                 category, _reason = classify_error(exc)
                 error = _categorize_error(exc)  # keep legacy string for stdout JSON + dashboard compat
+                self._capture_sentry(exc, category)
             duration_ms = int((time.monotonic() - t0) * 1000)
 
             result = DeliveryResult(
@@ -464,3 +465,16 @@ class DeliveryReporter:
             )
         except Exception as exc:
             print(f"[WARN] Failed to send Telegram summary: {exc}")
+
+    def _capture_sentry(self, exc: Exception, category: "SendErrorCategory") -> None:
+        """Capture exception to Sentry with category as a searchable tag.
+        Silent no-op if sentry_sdk is not importable or not initialized.
+        """
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("send.error_category", category.value)
+                scope.set_tag("workflow", self.workflow)
+                sentry_sdk.capture_exception(exc)
+        except Exception:
+            pass  # never let telemetry failures break dispatch

@@ -14,10 +14,9 @@ import re
 import sys
 from typing import Optional
 
+import phonenumbers
 from execution.integrations.sheets_client import SheetsClient
-from execution.integrations.contacts_repo import (
-    ContactsRepo, normalize_phone, InvalidPhoneError,
-)
+from execution.integrations.contacts_repo import ContactsRepo, InvalidPhoneError
 
 
 SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
@@ -38,21 +37,40 @@ def _pick_phone_raw(row: dict) -> Optional[str]:
 
 
 def _normalize_for_migration(phone_raw: str) -> str:
-    """Migration-only normalizer.
+    """Migration-only normalizer — LOOSER than normalize_phone.
 
-    1. Strip 'whatsapp:' prefix and '@s.whatsapp.net' suffix.
-    2. If cleaned digits are 10 or 11 (BR local format without DDI), prepend '55'.
-    3. Fall through to phonenumbers-based normalize_phone for final validation.
+    Accepts historical BR phones that libphonenumber's strict is_valid_number
+    rejects (e.g., pre-2012 12-digit mobiles without the mandatory 9 prefix),
+    because they are already working in production via uazapi.
 
-    This BR fallback lives ONLY in the migration script. The /add flow enforces
-    explicit DDI via normalize_phone directly.
+    Rules:
+      1. Strip 'whatsapp:' prefix and '@s.whatsapp.net' suffix.
+      2. If cleaned digits are 10 or 11 (BR local format without DDI), prepend '55'.
+      3. Parse with phonenumbers; accept if is_possible_number (length + country
+         code sanity), NOT is_valid_number (which also checks number range).
+      4. Return E.164 without '+'.
+
+    The /add flow in the bot uses the strict normalize_phone instead, so new
+    contacts are forced into the modern format.
     """
     s = str(phone_raw).strip()
     s = s.replace("whatsapp:", "").replace("@s.whatsapp.net", "")
     digits_only = re.sub(r"\D", "", s)
     if len(digits_only) in (10, 11):
         digits_only = "55" + digits_only
-    return normalize_phone(digits_only)
+    if not digits_only:
+        raise InvalidPhoneError("phone empty after cleaning")
+
+    try:
+        parsed = phonenumbers.parse("+" + digits_only, None)
+    except phonenumbers.NumberParseException as e:
+        raise InvalidPhoneError(f"could not parse phone: {e}") from e
+
+    if not phonenumbers.is_possible_number(parsed):
+        raise InvalidPhoneError("phone length or country code is not possible")
+
+    e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+    return e164.lstrip("+")
 
 
 def _row_to_payload(row: dict) -> Optional[dict]:

@@ -155,3 +155,26 @@ def test_main_real_run_calls_upsert():
     call_kwargs = fake_repo.client.table.return_value.upsert.call_args.kwargs
     assert call_kwargs.get("on_conflict") == "phone_uazapi"
     assert call_kwargs.get("ignore_duplicates") is True
+
+
+# ── Relaxed validation for historical BR phones ──
+
+def test_normalize_migration_accepts_br_12_digit_pre2012_mobile():
+    """12-digit BR mobile (pre-2012, no leading 9 after DDD) must be accepted."""
+    # Example from the real sheet:
+    assert _normalize_for_migration("553791000123") == "553791000123"
+
+
+def test_normalize_migration_accepts_br_12_digit_via_evolution_api_format():
+    """Same 12-digit number coming from Evolution-api column raw."""
+    assert _normalize_for_migration("553798721100") == "553798721100"
+
+
+def test_normalize_migration_still_rejects_true_garbage():
+    with pytest.raises(InvalidPhoneError):
+        _normalize_for_migration("abc")
+
+
+def test_normalize_migration_still_rejects_empty():
+    with pytest.raises(InvalidPhoneError):
+        _normalize_for_migration("")

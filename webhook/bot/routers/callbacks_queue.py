@@ -43,10 +43,16 @@ def _current_mode(chat_id: int) -> tuple[str, set[str]]:
     return "normal", set()
 
 
-async def _rerender(query: CallbackQuery, page: int = 1) -> None:
-    """Re-render the /queue message in place, honoring current mode."""
+async def _rerender(query: CallbackQuery, page: int | None = None) -> None:
+    """Re-render the /queue message in place, honoring current mode.
+
+    If page is None and the user is in select mode, reads the stored page
+    from queue_selection. Otherwise defaults to 1.
+    """
     chat_id = query.message.chat.id
     mode, selected = _current_mode(chat_id)
+    if page is None:
+        page = queue_selection.get_page(chat_id) if mode == "select" else 1
     try:
         body, markup = query_handlers.format_queue_page(
             page=page, mode=mode, selected=selected,
@@ -71,7 +77,14 @@ async def _rerender(query: CallbackQuery, page: int = 1) -> None:
 
 @callbacks_queue_router.callback_query(QueuePage.filter())
 async def on_queue_page(query: CallbackQuery, callback_data: QueuePage):
+    chat_id = query.message.chat.id
     await query.answer("")
+    # If in select mode, remember which page the user navigated to.
+    if queue_selection.is_select_mode(chat_id):
+        try:
+            queue_selection.set_page(chat_id, callback_data.page)
+        except Exception as exc:
+            logger.error(f"queue_page set_page error: {exc}")
     await _rerender(query, page=callback_data.page)
 
 
@@ -127,7 +140,7 @@ async def on_queue_sel_toggle(query: CallbackQuery, callback_data: QueueSelToggl
         await query.answer("⚠️ Redis indisponível")
         return
     await query.answer("")
-    await _rerender(query, page=1)
+    await _rerender(query)
 
 
 @callbacks_queue_router.callback_query(QueueSelAll.filter())
@@ -145,7 +158,7 @@ async def on_queue_sel_all(query: CallbackQuery, callback_data: QueueSelAll):
     ids = [i["id"] for i in items if i.get("id")]
     queue_selection.select_all(chat_id, ids)
     await query.answer(f"{len(ids)} selecionados")
-    await _rerender(query, page=1)
+    await _rerender(query)
 
 
 @callbacks_queue_router.callback_query(QueueSelNone.filter())
@@ -156,7 +169,7 @@ async def on_queue_sel_none(query: CallbackQuery, callback_data: QueueSelNone):
         return
     queue_selection.clear(chat_id)
     await query.answer("Seleção limpa")
-    await _rerender(query, page=1)
+    await _rerender(query)
 
 
 # ── Bulk action flow ──
@@ -260,4 +273,4 @@ async def on_queue_bulk_confirm(query: CallbackQuery, callback_data: QueueBulkCo
 @callbacks_queue_router.callback_query(QueueBulkCancel.filter())
 async def on_queue_bulk_cancel(query: CallbackQuery, callback_data: QueueBulkCancel):
     await query.answer("Cancelado")
-    await _rerender(query, page=1)
+    await _rerender(query)

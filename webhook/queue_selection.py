@@ -1,13 +1,14 @@
 """Per-chat select-mode state for /queue bulk actions.
 
 Uses the same Redis instance as the curation keyspace (via
-execution.curation.redis_client._get_client). Two keys per chat:
+execution.curation.redis_client._get_client). Three keys per chat:
 
 - bot:queue_mode:{chat_id}      string, value "select" when active
 - bot:queue_selected:{chat_id}  set of staging item ids
+- bot:queue_page:{chat_id}      string (int), the page the user is viewing
 
-Both keys share a 10 minute TTL and are refreshed on every mutation.
-Exiting the mode deletes both keys. The state is volatile by design —
+All keys share a 10 minute TTL and are refreshed on every mutation.
+Exiting the mode deletes all three keys. The state is volatile by design —
 bot restarts discard it.
 """
 from __future__ import annotations
@@ -26,9 +27,14 @@ def _selected_key(chat_id: int) -> str:
     return f"bot:queue_selected:{chat_id}"
 
 
+def _page_key(chat_id: int) -> str:
+    return f"bot:queue_page:{chat_id}"
+
+
 def _refresh_ttl(pipe, chat_id: int) -> None:
     pipe.expire(_mode_key(chat_id), _TTL_SECONDS)
     pipe.expire(_selected_key(chat_id), _TTL_SECONDS)
+    pipe.expire(_page_key(chat_id), _TTL_SECONDS)
 
 
 def is_select_mode(chat_id: int) -> bool:
@@ -41,6 +47,7 @@ def enter_mode(chat_id: int) -> None:
     pipe = client.pipeline(transaction=True)
     pipe.set(_mode_key(chat_id), _MODE_VALUE, ex=_TTL_SECONDS)
     pipe.delete(_selected_key(chat_id))
+    pipe.set(_page_key(chat_id), "1", ex=_TTL_SECONDS)
     pipe.execute()
 
 
@@ -49,7 +56,27 @@ def exit_mode(chat_id: int) -> None:
     pipe = client.pipeline(transaction=True)
     pipe.delete(_mode_key(chat_id))
     pipe.delete(_selected_key(chat_id))
+    pipe.delete(_page_key(chat_id))
     pipe.execute()
+
+
+def set_page(chat_id: int, page: int) -> None:
+    client = redis_client._get_client()
+    pipe = client.pipeline(transaction=True)
+    pipe.set(_page_key(chat_id), str(page), ex=_TTL_SECONDS)
+    _refresh_ttl(pipe, chat_id)
+    pipe.execute()
+
+
+def get_page(chat_id: int) -> int:
+    client = redis_client._get_client()
+    raw = client.get(_page_key(chat_id))
+    if raw is None:
+        return 1
+    try:
+        return max(1, int(raw))
+    except (ValueError, TypeError):
+        return 1
 
 
 def get_selection(chat_id: int) -> set[str]:

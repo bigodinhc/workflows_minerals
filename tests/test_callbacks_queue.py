@@ -171,6 +171,7 @@ async def test_on_queue_sel_toggle_adds_and_rerenders(mock_callback_query, mocke
     toggle_mock = mocker.patch("webhook.queue_selection.toggle", return_value=True)
     mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
     mocker.patch("webhook.queue_selection.get_selection", return_value={"abc"})
+    mocker.patch("webhook.queue_selection.get_page", return_value=1)
     mocker.patch(
         "bot.routers.callbacks_queue.query_handlers.format_queue_page",
         return_value=("body", {"inline_keyboard": []}),
@@ -206,6 +207,7 @@ async def test_on_queue_sel_all_selects_every_staging_id(mock_callback_query, mo
 
     mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
     mocker.patch("webhook.queue_selection.get_selection", return_value={"a", "b"})
+    mocker.patch("webhook.queue_selection.get_page", return_value=1)
     mocker.patch(
         "redis_queries.list_staging",
         return_value=[{"id": "a"}, {"id": "b"}],
@@ -233,6 +235,7 @@ async def test_on_queue_sel_none_clears_selection(mock_callback_query, mocker):
 
     mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
     mocker.patch("webhook.queue_selection.get_selection", return_value=set())
+    mocker.patch("webhook.queue_selection.get_page", return_value=1)
     clear_mock = mocker.patch("webhook.queue_selection.clear")
     mocker.patch(
         "bot.routers.callbacks_queue.query_handlers.format_queue_page",
@@ -395,6 +398,7 @@ async def test_on_queue_bulk_cancel_rerenders_select_mode(mock_callback_query, m
 
     mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
     mocker.patch("webhook.queue_selection.get_selection", return_value={"a"})
+    mocker.patch("webhook.queue_selection.get_page", return_value=1)
     mocker.patch(
         "bot.routers.callbacks_queue.query_handlers.format_queue_page",
         return_value=("body", {"inline_keyboard": []}),
@@ -453,3 +457,67 @@ async def test_on_queue_bulk_confirm_discard_singular_uses_singular_toast(mock_c
     await on_queue_bulk_confirm(query, QueueBulkConfirm(action="discard"))
 
     query.answer.assert_awaited_with("✅ 1 descartado")
+
+
+@pytest.mark.asyncio
+async def test_on_queue_sel_toggle_preserves_current_page(mock_callback_query, mocker):
+    """BUG FIX: toggling a selection while on page 2 must not reset to page 1."""
+    from bot.callback_data import QueueSelToggle
+    from bot.routers.callbacks_queue import on_queue_sel_toggle
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"x"})
+    get_page_mock = mocker.patch("webhook.queue_selection.get_page", return_value=3)
+    mocker.patch("webhook.queue_selection.toggle", return_value=True)
+    format_mock = mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=AsyncMock())
+
+    await on_queue_sel_toggle(
+        mock_callback_query(chat_id=42), QueueSelToggle(item_id="x"),
+    )
+
+    # format_queue_page must be called with page=3, not page=1
+    assert format_mock.call_args.kwargs["page"] == 3
+
+
+@pytest.mark.asyncio
+async def test_on_queue_page_persists_page_to_selection_state(mock_callback_query, mocker):
+    """Navigating to a page while in select mode persists the page number."""
+    from bot.callback_data import QueuePage
+    from bot.routers.callbacks_queue import on_queue_page
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value=set())
+    mocker.patch("webhook.queue_selection.get_page", return_value=2)
+    set_page_mock = mocker.patch("webhook.queue_selection.set_page")
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=AsyncMock())
+
+    await on_queue_page(mock_callback_query(chat_id=42), QueuePage(page=2))
+
+    set_page_mock.assert_called_once_with(42, 2)
+
+
+@pytest.mark.asyncio
+async def test_on_queue_page_normal_mode_does_not_persist_page(mock_callback_query, mocker):
+    """Outside select mode, navigating does NOT touch selection state."""
+    from bot.callback_data import QueuePage
+    from bot.routers.callbacks_queue import on_queue_page
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=False)
+    set_page_mock = mocker.patch("webhook.queue_selection.set_page")
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=AsyncMock())
+
+    await on_queue_page(mock_callback_query(chat_id=42), QueuePage(page=2))
+
+    set_page_mock.assert_not_called()

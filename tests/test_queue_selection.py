@@ -96,3 +96,60 @@ def test_toggle_refreshes_ttl(fake_redis):
 def test_get_selection_returns_empty_when_mode_absent(fake_redis):
     from webhook.queue_selection import get_selection
     assert get_selection(42) == set()
+
+
+def test_get_page_defaults_to_1_when_absent(fake_redis):
+    from webhook.queue_selection import get_page
+    assert get_page(42) == 1
+
+
+def test_enter_mode_initializes_page_to_1(fake_redis):
+    from webhook.queue_selection import enter_mode, get_page
+    enter_mode(42)
+    assert get_page(42) == 1
+
+
+def test_set_page_persists(fake_redis):
+    from webhook.queue_selection import enter_mode, set_page, get_page
+    enter_mode(42)
+    set_page(42, 3)
+    assert get_page(42) == 3
+
+
+def test_exit_mode_clears_page(fake_redis):
+    from webhook.queue_selection import enter_mode, set_page, exit_mode, get_page
+    enter_mode(42)
+    set_page(42, 5)
+    exit_mode(42)
+    assert get_page(42) == 1  # default after deletion
+
+
+def test_set_page_refreshes_all_ttls(fake_redis):
+    from webhook.queue_selection import enter_mode, set_page, _TTL_SECONDS
+    enter_mode(42)
+    # Burn TTLs
+    fake_redis.expire("bot:queue_mode:42", 5)
+    fake_redis.expire("bot:queue_selected:42", 5)
+    set_page(42, 2)
+    # All three keys should have fresh TTL close to full
+    for key in ("bot:queue_mode:42", "bot:queue_selected:42", "bot:queue_page:42"):
+        ttl = fake_redis.ttl(key)
+        # bot:queue_selected:42 may not exist if no items selected — fakeredis returns -2
+        if ttl == -2:
+            continue
+        assert ttl > 5
+
+
+def test_get_page_handles_garbage_value(fake_redis):
+    from webhook.queue_selection import get_page
+    fake_redis.set("bot:queue_page:42", "not-a-number")
+    assert get_page(42) == 1
+
+
+def test_toggle_refreshes_page_ttl(fake_redis):
+    from webhook.queue_selection import enter_mode, toggle, _TTL_SECONDS
+    enter_mode(42)
+    fake_redis.expire("bot:queue_page:42", 5)
+    toggle(42, "a")
+    ttl = fake_redis.ttl("bot:queue_page:42")
+    assert ttl > 5

@@ -286,11 +286,11 @@ Regra: se Writer entregou alguma dessas, Curator reescreve no momento da formata
 
 | Tipo | Máx linhas WhatsApp (header + corpo) |
 |---|---|
-| PRICING_SESSION | 22 |
-| FUTURES_CURVE | 15 |
-| COMPANY_NEWS | 25 |
-| ANALYTICAL | 18 |
-| DIGEST | 20 |
+| PRICING_SESSION | 30 |
+| FUTURES_CURVE | 25 |
+| COMPANY_NEWS | 30 |
+| ANALYTICAL | 25 |
+| DIGEST | 25 |
 
 Ordem de corte se estourar:
 1. Seção que menos move decisão.

@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 
 _VALID_LEVELS = frozenset({"info", "warn", "error"})
 
+# Workflows that should NEVER publish to the Telegram events channel.
+# Their alerts still flow through _MainChatSink (warn/error, cron_crashed,
+# cron_missed). Used for meta-monitoring jobs that run on a tight cadence
+# and would otherwise flood the firehose with no-op cards — e.g. watchdog
+# runs every 5 min and only has signal when it detects a missed cron.
+_EVENTS_CHANNEL_DENYLIST = frozenset({"watchdog"})
+
 
 def _generate_run_id() -> str:
     """8-char hex, good enough for log grepping and far-from-collision."""
@@ -103,7 +110,7 @@ class EventBus:
         if chat_id and token:
             sinks.append(_MainChatSink(chat_id=chat_id))
         events_channel_id = os.getenv("TELEGRAM_EVENTS_CHANNEL_ID")
-        if events_channel_id and token:
+        if events_channel_id and token and self.workflow not in _EVENTS_CHANNEL_DENYLIST:
             client = _build_telegram_client()
             if client is not None:
                 sinks.append(_EventsChannelSink(chat_id=events_channel_id, client=client))

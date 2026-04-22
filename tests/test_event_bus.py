@@ -581,6 +581,35 @@ def test_events_channel_sink_sink_exceptions_are_swallowed(monkeypatch):
     assert fake.calls == 2  # one send (failed), one edit (failed)
 
 
+def test_events_channel_sink_skipped_for_denylisted_workflow(monkeypatch):
+    """Workflows in _EVENTS_CHANNEL_DENYLIST (e.g. watchdog) must not get
+    an _EventsChannelSink — they run on a tight cadence and would flood the
+    firehose with no-op cards. Main-chat alerts still fire via _MainChatSink
+    when warn/error/cron_missed emits."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="watchdog")
+    bus.emit("cron_started")
+    bus.emit("cron_finished")
+
+    assert fake.sends == []
+    assert fake.edits == []
+    assert not any(type(s).__name__ == "_EventsChannelSink" for s in bus._sinks)
+
+
+def test_events_channel_sink_still_active_for_non_denylisted_workflow(monkeypatch):
+    """Sanity: workflows NOT in the denylist still get the sink as usual."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="daily_report")
+    bus.emit("cron_started")
+
+    assert len(fake.sends) == 1
+    assert any(type(s).__name__ == "_EventsChannelSink" for s in bus._sinks)
+
+
 def test_events_channel_sink_disabled_when_env_missing(monkeypatch, capsys):
     """When TELEGRAM_EVENTS_CHANNEL_ID is absent, the sink is not added to _sinks."""
     monkeypatch.delenv("SUPABASE_URL", raising=False)

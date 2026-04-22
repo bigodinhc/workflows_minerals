@@ -1,58 +1,39 @@
-
 import { NextResponse } from "next/server";
-import { google } from "googleapis";
+import { createClient } from "@supabase/supabase-js";
 
 export async function GET() {
-    const credsJson = process.env.GOOGLE_CREDENTIALS_JSON;
-    const sheetId = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0";
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_KEY;
 
-    if (!credsJson) {
-        console.error("Missing GOOGLE_CREDENTIALS_JSON");
-        return NextResponse.json({ error: "Missing Google Credentials" }, { status: 500 });
+  if (!url || !key) {
+    console.error("Missing SUPABASE_URL or SUPABASE_KEY");
+    return NextResponse.json(
+      { error: "Supabase not configured" },
+      { status: 500 },
+    );
+  }
+
+  try {
+    const supabase = createClient(url, key);
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, name, phone_raw, phone_uazapi, status, created_at, updated_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Supabase error:", error);
+      return NextResponse.json(
+        { error: "Failed to fetch contacts" },
+        { status: 500 },
+      );
     }
 
-    try {
-        let credentials;
-        try {
-            // Try parsing JSON directly
-            credentials = JSON.parse(credsJson);
-        } catch (e) {
-            // Try decoding base64 if it fails (common in env vars)
-            const buff = Buffer.from(credsJson, 'base64');
-            credentials = JSON.parse(buff.toString('utf-8'));
-        }
-
-        const auth = new google.auth.GoogleAuth({
-            credentials,
-            scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-        });
-
-        const sheets = google.sheets({ version: "v4", auth });
-
-        const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: sheetId,
-            range: "A:Z", // Get all data
-        });
-
-        const rows = response.data.values;
-        if (!rows || rows.length === 0) {
-            return NextResponse.json([]);
-        }
-
-        // Assume headers are in the first row
-        const headers = rows[0];
-        const data = rows.slice(1).map((row, index) => {
-            const obj: any = { id: index + 2 }; // Excel Row Number
-            headers.forEach((header, i) => {
-                obj[header] = row[i];
-            });
-            return obj;
-        });
-
-        return NextResponse.json(data);
-
-    } catch (error) {
-        console.error("Google Sheets API Error:", error);
-        return NextResponse.json({ error: "Failed to fetch spreadsheet" }, { status: 500 });
-    }
+    return NextResponse.json(data || []);
+  } catch (error) {
+    console.error("Dashboard contacts route error:", error);
+    return NextResponse.json(
+      { error: "Unexpected error" },
+      { status: 500 },
+    );
+  }
 }

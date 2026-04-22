@@ -434,8 +434,35 @@ def test_events_channel_sink_sends_new_message_on_first_event(monkeypatch):
     assert len(fake.sends) == 1
     assert fake.edits == []
     assert fake.sends[0]["chat_id"] == "-1001234567890"
-    assert "wf_a" in fake.sends[0]["text"]
+    # Unknown workflow → fallback title 🛠️ WF A
+    assert "WF A" in fake.sends[0]["text"]
     assert "first step" in fake.sends[0]["text"]
+
+
+def test_events_channel_sink_uses_friendly_title_for_known_workflow(monkeypatch):
+    """Known workflow renders with its pretty title at the top of the card."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="daily_report")
+    bus.emit("step", label="starting", level="info")
+
+    first_line = fake.sends[0]["text"].split("\n")[0]
+    assert "Daily SGX" in first_line
+    assert "📊" in first_line
+
+
+def test_events_channel_sink_falls_back_title_when_workflow_unknown(monkeypatch):
+    """Unknown workflow → 🛠️ emoji + upper-cased name as title."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="some_new_workflow")
+    bus.emit("step", label="x", level="info")
+
+    first_line = fake.sends[0]["text"].split("\n")[0]
+    assert "🛠️" in first_line
+    assert "SOME NEW WORKFLOW" in first_line
 
 
 def test_events_channel_sink_edits_same_message_on_subsequent_events(monkeypatch):
@@ -461,7 +488,9 @@ def test_events_channel_sink_edits_same_message_on_subsequent_events(monkeypatch
 
 
 def test_events_channel_sink_renders_past_lines_as_done_and_last_as_in_progress(monkeypatch):
-    """After N info events, lines [0..N-2] show ✅ and line [N-1] shows ⏳."""
+    """After N info events, earlier lines show ✅ and the last shows ⏳.
+
+    Card layout: lines[0]=title, lines[1]=blank, lines[2..] are events."""
     fake = _FakeTelegramClient()
     eb = _wire_events_channel(monkeypatch, fake)
 
@@ -472,12 +501,13 @@ def test_events_channel_sink_renders_past_lines_as_done_and_last_as_in_progress(
 
     final_text = fake.edits[-1]["text"]
     lines = final_text.split("\n")
-    assert len(lines) == 3
-    assert "✅" in lines[0]  # past
-    assert "✅" in lines[1]  # past
-    assert "⏳" in lines[2]  # current
-    assert "⏳" not in lines[0]
-    assert "⏳" not in lines[1]
+    # title + blank + 3 events = 5
+    assert len(lines) == 5
+    assert "✅" in lines[2]  # past
+    assert "✅" in lines[3]  # past
+    assert "⏳" in lines[4]  # current
+    assert "⏳" not in lines[2]
+    assert "⏳" not in lines[3]
 
 
 def test_events_channel_sink_finalizes_on_cron_finished(monkeypatch):
@@ -491,7 +521,8 @@ def test_events_channel_sink_finalizes_on_cron_finished(monkeypatch):
 
     final_text = fake.edits[-1]["text"]
     lines = final_text.split("\n")
-    assert "✅" in lines[0]              # past step
+    # title + blank + step + cron_finished
+    assert "✅" in lines[2]              # past step
     assert "✅" in lines[-1]             # cron_finished renders as ✅
     assert "⏳" not in final_text         # no more in-progress
     assert "cron_finished" in final_text
@@ -523,8 +554,9 @@ def test_events_channel_sink_renders_warn_with_warning_emoji(monkeypatch):
 
     final_text = fake.edits[-1]["text"]
     lines = final_text.split("\n")
-    assert "✅" in lines[0]       # past info is done
-    assert "⚠️" in lines[1]      # warn line uses its own emoji, not ⏳
+    # title + blank + step + warn
+    assert "✅" in lines[2]       # past info is done
+    assert "⚠️" in lines[3]      # warn line uses its own emoji, not ⏳
 
 
 def test_events_channel_sink_sink_exceptions_are_swallowed(monkeypatch):

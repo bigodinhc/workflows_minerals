@@ -226,6 +226,28 @@ class _MainChatSink:
         return "\n".join(lines)
 
 
+_WORKFLOW_TITLES = {
+    "morning_check": ("📈", "Morning Check (Platts)"),
+    "daily_report": ("📊", "Daily SGX"),
+    "baltic_ingestion": ("🚢", "Baltic Ingestion"),
+    "market_news": ("📰", "Market News"),
+    "rationale_news": ("🧠", "Rationale News"),
+    "platts_ingestion": ("📥", "Platts Ingestion"),
+    "platts_reports": ("📄", "Platts Reports"),
+    "rebuild_dedup": ("🔧", "Rebuild Dedup"),
+    "watchdog": ("🐕", "Watchdog"),
+}
+
+
+def _card_title_for(workflow: str) -> str:
+    """Return '<emoji> <Pretty Name>' for a workflow. Falls back to 🛠️ + upper-case
+    workflow name for any workflow not in the mapping."""
+    emoji, name = _WORKFLOW_TITLES.get(
+        workflow, ("🛠️", workflow.upper().replace("_", " ")),
+    )
+    return f"{emoji} {name}"
+
+
 class _EventsChannelSink:
     """Live-card sink: one Telegram message per run, edited as events arrive.
 
@@ -269,17 +291,19 @@ class _EventsChannelSink:
 
     @staticmethod
     def _render(events: list) -> str:
-        lines = []
+        if not events:
+            return ""
+        workflow = events[0].get("workflow") or "?"
+        lines = [_card_title_for(workflow), ""]
         total = len(events)
         for i, ev in enumerate(events):
             is_last = (i == total - 1)
             ts = ev.get("ts") or ""
             hhmmss = ts[11:19] if len(ts) >= 19 else ts
-            wf = ev.get("workflow") or "?"
             ev_name = ev.get("event") or "?"
             emoji = _EventsChannelSink._emoji_for(ev, is_last=is_last)
             label = ev.get("label") or ""
-            line = f"{hhmmss} {emoji} {wf}.{ev_name}"
+            line = f"{hhmmss} {emoji} {ev_name}"
             if label:
                 line += f" — {label[:80]}"
             lines.append(line)

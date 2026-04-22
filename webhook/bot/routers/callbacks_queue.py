@@ -1,23 +1,21 @@
-"""Callback handlers for queue navigation and bulk actions."""
+"""Callback handlers for queue navigation and bulk actions.
+
+Originally extracted from webhook/bot/routers/callbacks.py during Phase 2.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
 
 from aiogram import Router
 from aiogram.types import CallbackQuery
+from aiogram.exceptions import TelegramBadRequest
 
-from bot.callback_data import (
-    QueuePage, QueueOpen,
-    QueueModeToggle, QueueSelToggle, QueueSelAll, QueueSelNone,
-    QueueBulkPrompt, QueueBulkConfirm, QueueBulkCancel,
-)
+from bot.callback_data import QueuePage, QueueOpen, QueueModeToggle
 from bot.config import get_bot
 from bot.middlewares.auth import RoleMiddleware
 import query_handlers
-import redis_queries
 from execution.curation import redis_client as curation_redis
 from execution.curation import telegram_poster
 from webhook import queue_selection
@@ -45,12 +43,17 @@ async def _rerender(query: CallbackQuery, page: int = 1) -> None:
     except Exception as exc:
         logger.error(f"queue rerender error: {exc}")
         return
-    await get_bot().edit_message_text(
-        body,
-        chat_id=chat_id,
-        message_id=query.message.message_id,
-        reply_markup=markup,
-    )
+    try:
+        await get_bot().edit_message_text(
+            body,
+            chat_id=chat_id,
+            message_id=query.message.message_id,
+            reply_markup=markup,
+        )
+    except TelegramBadRequest as exc:
+        # Most common cause: 'message is not modified' when the new content
+        # matches the current. Safe to ignore — the user sees the same state.
+        logger.warning(f"queue rerender edit failed: {exc}")
 
 
 # ── Queue navigation ──

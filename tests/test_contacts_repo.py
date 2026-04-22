@@ -174,3 +174,167 @@ def test_get_by_phone_invalid_input_raises_invalid_phone(fake_client):
     repo = ContactsRepo(client=fake_client)
     with pytest.raises(InvalidPhoneError):
         repo.get_by_phone("abc")
+
+
+# ── Write tests ──
+
+class FakeWelcomeRecorder:
+    def __init__(self, fail=False):
+        self.calls = []
+        self.fail = fail
+    def __call__(self, phone_uazapi: str):
+        self.calls.append(phone_uazapi)
+        if self.fail:
+            raise RuntimeError("uazapi send failed")
+
+
+def test_add_happy_path_sends_welcome_then_inserts(fake_client):
+    # 1st query: dup pre-check (empty), 2nd: insert (returns row)
+    dup_q = FakeQuery([])
+    insert_q = FakeQuery([_row(name="Carol", phone_uazapi="5511900000001")])
+
+    fake_client.table.side_effect = [dup_q, insert_q]
+
+    welcome = FakeWelcomeRecorder()
+    repo = ContactsRepo(client=fake_client)
+
+    contact = repo.add("Carol", "+55 11 90000-0001", send_welcome=welcome)
+
+    assert contact.name == "Carol"
+    assert contact.phone_uazapi == "5511900000001"
+    assert welcome.calls == ["5511900000001"]
+
+    # Insert query must be an insert with status=ativo
+    op, args, _ = insert_q.calls[0]
+    assert op == "insert"
+    payload = args[0]
+    assert payload["name"] == "Carol"
+    assert payload["phone_uazapi"] == "5511900000001"
+    assert payload["status"] == "ativo"
+
+
+def test_add_invalid_phone_never_sends_welcome(fake_client):
+    welcome = FakeWelcomeRecorder()
+    repo = ContactsRepo(client=fake_client)
+
+    with pytest.raises(InvalidPhoneError):
+        repo.add("Carol", "abc", send_welcome=welcome)
+
+    assert welcome.calls == []
+    fake_client.table.assert_not_called()
+
+
+def test_add_duplicate_pre_check_raises_and_skips_send(fake_client):
+    dup_q = FakeQuery([_row(name="Alice Existing")])
+    _set_next_query(fake_client, dup_q)
+
+    welcome = FakeWelcomeRecorder()
+    repo = ContactsRepo(client=fake_client)
+
+    with pytest.raises(ContactAlreadyExistsError) as exc_info:
+        repo.add("Alice", "+5511987654321", send_welcome=welcome)
+
+    assert exc_info.value.existing.name == "Alice Existing"
+    assert welcome.calls == []
+
+
+def test_add_welcome_failure_rolls_back_insert(fake_client):
+    dup_q = FakeQuery([])
+    _set_next_query(fake_client, dup_q)
+
+    welcome = FakeWelcomeRecorder(fail=True)
+    repo = ContactsRepo(client=fake_client)
+
+    with pytest.raises(RuntimeError, match="welcome send failed"):
+        repo.add("Carol", "+5511900000002", send_welcome=welcome)
+
+    # Only the pre-check should have been issued — no insert.
+    assert len(fake_client._queries) == 1
+    assert "insert" not in [c[0] for c in dup_q.calls]
+
+
+def test_add_send_welcome_called_before_insert(fake_client):
+    """Ordering guarantee: welcome send must precede DB insert."""
+    call_order = []
+
+    dup_q = FakeQuery([])
+    insert_q = FakeQuery([_row()])
+    fake_client.table.side_effect = [dup_q, insert_q]
+
+    def welcome(p):
+        call_order.append("welcome")
+
+    orig_insert = insert_q.insert
+    def tracked_insert(*a, **kw):
+        call_order.append("insert")
+        return orig_insert(*a, **kw)
+    insert_q.insert = tracked_insert
+
+    repo = ContactsRepo(client=fake_client)
+    repo.add("Alice", "+5511987654321", send_welcome=welcome)
+
+    assert call_order == ["welcome", "insert"]
+
+
+def test_toggle_flips_ativo_to_inativo(fake_client):
+    get_q = FakeQuery([_row(status="ativo")])
+    update_q = FakeQuery([_row(status="inativo")])
+    fake_client.table.side_effect = [get_q, update_q]
+
+    repo = ContactsRepo(client=fake_client)
+    updated = repo.toggle("+5511987654321")
+
+    assert updated.status == "inativo"
+    op, args, _ = update_q.calls[0]
+    assert op == "update"
+    assert args[0] == {"status": "inativo"}
+
+
+def test_toggle_flips_inativo_to_ativo(fake_client):
+    get_q = FakeQuery([_row(status="inativo")])
+    update_q = FakeQuery([_row(status="ativo")])
+    fake_client.table.side_effect = [get_q, update_q]
+
+    repo = ContactsRepo(client=fake_client)
+    updated = repo.toggle("+5511987654321")
+
+    assert updated.status == "ativo"
+
+
+def test_toggle_raises_on_missing_phone(fake_client):
+    get_q = FakeQuery([])
+    _set_next_query(fake_client, get_q)
+
+    repo = ContactsRepo(client=fake_client)
+    with pytest.raises(ContactNotFoundError):
+        repo.toggle("+5511987654321")
+
+
+def test_bulk_set_status_no_search_affects_all(fake_client):
+    update_q = FakeQuery([_row(), _row(), _row()])
+    _set_next_query(fake_client, update_q)
+
+    repo = ContactsRepo(client=fake_client)
+    count = repo.bulk_set_status("inativo")
+
+    assert count == 3
+    ops = [c[0] for c in update_q.calls]
+    assert "update" in ops
+    assert "ilike" not in ops
+
+
+def test_bulk_set_status_with_search_filters(fake_client):
+    update_q = FakeQuery([_row(name="Joao")])
+    _set_next_query(fake_client, update_q)
+
+    repo = ContactsRepo(client=fake_client)
+    count = repo.bulk_set_status("ativo", search="joao")
+
+    assert count == 1
+    assert ("ilike", ("name", "%joao%"), {}) in update_q.calls
+
+
+def test_bulk_set_status_rejects_invalid_status(fake_client):
+    repo = ContactsRepo(client=fake_client)
+    with pytest.raises(ValueError, match="invalid status"):
+        repo.bulk_set_status("banido")

@@ -159,6 +159,97 @@ class ContactsRepo:
             raise ContactNotFoundError(f"no contact with phone {canonical}")
         return self._row_to_contact(rows[0])
 
+    # ---- Writes ----
+
+    def add(
+        self,
+        name: str,
+        phone_raw: str,
+        *,
+        send_welcome: Callable[[str], None],
+    ) -> Contact:
+        """Add a contact after validating the phone and dispatching a welcome
+        message via the injected `send_welcome` callable.
+
+        Flow: normalize → duplicate pre-check → send_welcome → insert.
+
+        Raises:
+          ValueError: if `name` is empty.
+          InvalidPhoneError: if the phone cannot be normalized.
+          ContactAlreadyExistsError: if phone_uazapi already present
+            (pre-check or post-insert unique-violation race).
+          RuntimeError: if `send_welcome` raises (wraps its exception).
+        """
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("name is empty")
+        canonical = normalize_phone(phone_raw)
+
+        # Duplicate pre-check — avoid sending welcome to someone on the list.
+        try:
+            existing = self.get_by_phone(canonical)
+            raise ContactAlreadyExistsError(existing)
+        except ContactNotFoundError:
+            pass
+
+        try:
+            send_welcome(canonical)
+        except Exception as e:
+            raise RuntimeError(f"welcome send failed: {e}") from e
+
+        # Insert. Unique index catches race conditions.
+        try:
+            resp = (
+                self.client.table("contacts")
+                .insert({
+                    "name": name,
+                    "phone_raw": phone_raw,
+                    "phone_uazapi": canonical,
+                    "status": "ativo",
+                })
+                .execute()
+            )
+        except Exception as e:
+            if "duplicate key" in str(e).lower():
+                existing = self.get_by_phone(canonical)
+                raise ContactAlreadyExistsError(existing) from e
+            raise
+        return self._row_to_contact(resp.data[0])
+
+    def toggle(self, phone: str) -> Contact:
+        """Flip status ativo ↔ inativo. Raises ContactNotFoundError."""
+        current = self.get_by_phone(phone)
+        new_status = "inativo" if current.is_active() else "ativo"
+        resp = (
+            self.client.table("contacts")
+            .update({"status": new_status})
+            .eq("id", current.id)
+            .execute()
+        )
+        return self._row_to_contact(resp.data[0])
+
+    def bulk_set_status(
+        self,
+        status: str,
+        *,
+        search: Optional[str] = None,
+    ) -> int:
+        """Set status on all matching contacts. Returns count of rows updated.
+
+        If `search` is None, affects ALL rows.
+        If provided, affects only rows where name ILIKE %search%.
+        """
+        if status not in ("ativo", "inativo"):
+            raise ValueError(f"invalid status: {status!r}")
+        q = self.client.table("contacts").update({"status": status})
+        if search:
+            q = q.ilike("name", f"%{search}%")
+        else:
+            # postgrest update requires a filter; pick a tautology.
+            q = q.neq("id", "00000000-0000-0000-0000-000000000000")
+        resp = q.execute()
+        return len(resp.data or [])
+
     # ---- Internal ----
 
     @staticmethod

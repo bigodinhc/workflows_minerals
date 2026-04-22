@@ -37,19 +37,28 @@ await bus.emit('cron_started', {
     detail: { apify_run_id: Actor.config?.actorRunId ?? null },
 });
 
+async function failWithEvent(message) {
+    await bus.emit('cron_crashed', {
+        label: message.slice(0, 100),
+        detail: { exc_type: 'ConfigError', exc_str: message },
+        level: 'error',
+    });
+    await Actor.fail(message);
+}
+
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = telegramChatId || process.env.TELEGRAM_CHAT_ID;
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!username || !password) {
-    await Actor.fail('username and password are required');
+    await failWithEvent('username and password are required');
 }
 if (!dryRun && !SB_URL) {
-    await Actor.fail('SUPABASE_URL is required when dryRun=false');
+    await failWithEvent('SUPABASE_URL is required when dryRun=false');
 }
 if (!dryRun && (!TG_TOKEN || !TG_CHAT)) {
-    await Actor.fail('TELEGRAM_BOT_TOKEN and chat id required when dryRun=false');
+    await failWithEvent('TELEGRAM_BOT_TOKEN and chat id required when dryRun=false');
 }
 
 const summary = {
@@ -193,17 +202,19 @@ try {
         detail: { summary_type: summary?.type ?? 'unknown' },
     });
 } catch (err) {
+    const errName = err?.name ?? 'UnknownError';
+    const errMsg = err?.message ?? String(err ?? '');
     await bus.emit('cron_crashed', {
-        label: `${err.name}: ${String(err.message || '').slice(0, 100)}`,
+        label: `${errName}: ${errMsg.slice(0, 100)}`,
         detail: {
-            exc_type: err.name,
-            exc_str: String(err).slice(0, 500),
+            exc_type: errName,
+            exc_str: String(err ?? '').slice(0, 500),
         },
         level: 'error',
     });
     await ctx.close();
     await browser.close();
-    await Actor.fail(err.message || String(err));
+    await Actor.fail(errMsg || String(err ?? 'unknown error'));
 } finally {
     try { await ctx.close(); } catch {}
     try { await browser.close(); } catch {}

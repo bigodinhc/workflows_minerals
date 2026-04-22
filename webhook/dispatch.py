@@ -18,11 +18,11 @@ import redis as _redis_sync
 from redis import asyncio as redis_async
 from aiogram.exceptions import TelegramBadRequest
 
-from bot.config import get_bot, UAZAPI_URL, UAZAPI_TOKEN, GOOGLE_CREDENTIALS_JSON, SHEET_ID
+from bot.config import get_bot, UAZAPI_URL, UAZAPI_TOKEN
 from metrics import edit_failures
 from bot.keyboards import build_approval_keyboard
-from execution.core.delivery_reporter import DeliveryReporter, build_contact_from_row
-from execution.integrations.sheets_client import SheetsClient
+from execution.core.delivery_reporter import DeliveryReporter, build_delivery_contact
+from execution.integrations.contacts_repo import ContactsRepo
 
 logger = logging.getLogger(__name__)
 
@@ -65,43 +65,11 @@ def _idempotency_key(phone: str, draft_id: str, message: str) -> str:
     return f"whatsapp:sent:{digest}"
 
 
-# ── Google Sheets (contacts) — sync, wrapped in to_thread ──
-
-def _get_contacts_sync():
-    """Fetch WhatsApp contacts from Google Sheets (sync)."""
-    import gspread
-    from google.oauth2.service_account import Credentials
-    import time
-
-    creds_json = json.loads(GOOGLE_CREDENTIALS_JSON)
-    creds = Credentials.from_service_account_info(creds_json, scopes=[
-        "https://www.googleapis.com/auth/spreadsheets.readonly",
-    ])
-    gc = gspread.authorize(creds)
-    sheet = gc.open_by_key(SHEET_ID).sheet1
-
-    max_retries = 3
-    records = []
-    for attempt in range(max_retries):
-        try:
-            records = sheet.get_all_records()
-            break
-        except Exception as e:
-            if attempt == max_retries - 1:
-                logger.error(f"Failed to fetch contacts after {max_retries} attempts: {e}")
-                raise
-            sleep_time = 2 ** attempt
-            logger.warning(f"Google Sheets API error {e}. Retrying in {sleep_time}s...")
-            time.sleep(sleep_time)
-
-    contacts = [r for r in records if r.get("ButtonPayload") == "Big"]
-    logger.info(f"Found {len(contacts)} contacts with ButtonPayload='Big'")
-    return contacts
-
-
 async def get_contacts():
-    """Fetch WhatsApp contacts (async wrapper)."""
-    return await asyncio.to_thread(_get_contacts_sync)
+    """Fetch active WhatsApp contacts from Supabase (async wrapper)."""
+    def _read():
+        return ContactsRepo().list_active()
+    return await asyncio.to_thread(_read)
 
 
 # ── WhatsApp sending ──
@@ -160,7 +128,7 @@ async def process_approval_async(chat_id, draft_message, draft_id, uazapi_token=
 
     try:
         raw_contacts = await get_contacts()
-        delivery_contacts = [bc for c in raw_contacts if (bc := build_contact_from_row(c))]
+        delivery_contacts = [build_delivery_contact(c) for c in raw_contacts]
 
         try:
             await bot.edit_message_text(
@@ -289,17 +257,12 @@ async def process_test_send_async(chat_id, draft_id, draft_message, uazapi_token
     try:
         contacts = await get_contacts()
         if not contacts:
-            await bot.send_message(chat_id, "❌ Nenhum contato encontrado na planilha.")
+            await bot.send_message(chat_id, "❌ Nenhum contato ativo encontrado.")
             return
 
         first_contact = contacts[0]
-        name = first_contact.get("Nome", "Contato 1")
-        phone = first_contact.get("Evolution-api") or first_contact.get("Telefone")
-        if not phone:
-            await bot.send_message(chat_id, "❌ Primeiro contato sem telefone.")
-            return
-
-        phone = str(phone).replace("whatsapp:", "").strip()
+        name = first_contact.name
+        phone = first_contact.phone_uazapi
 
         result = await send_whatsapp(
             phone, draft_message, draft_id=draft_id, token=uazapi_token, url=uazapi_url

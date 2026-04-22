@@ -337,3 +337,147 @@ def test_with_event_bus_calls_init_sentry(monkeypatch):
     # init_sentry called once with the workflow-derived script name
     assert len(calls) == 1
     assert "baltic_ingestion" in calls[0]
+
+
+def test_events_channel_sink_sends_warn_immediately(monkeypatch):
+    """warn/error events flush immediately, no buffering."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
+    monkeypatch.setenv("TELEGRAM_EVENTS_CHANNEL_ID", "-1001234567890")
+
+    sent_messages = []
+
+    class FakeTelegramClient:
+        def send_message(self, text, chat_id=None, **kwargs):
+            sent_messages.append({"text": text, "chat_id": chat_id})
+            return 1
+
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
+
+    bus = eb.EventBus(workflow="wf_a")
+    bus.emit("step", label="warning thing", level="warn")
+
+    assert len(sent_messages) == 1
+    assert sent_messages[0]["chat_id"] == "-1001234567890"
+    assert "wf_a" in sent_messages[0]["text"]
+    assert "step" in sent_messages[0]["text"]
+
+
+def test_events_channel_sink_buffers_info_until_threshold(monkeypatch):
+    """info events accumulate until the 20-event threshold or 1s window."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
+    monkeypatch.setenv("TELEGRAM_EVENTS_CHANNEL_ID", "-1001234567890")
+
+    sent_messages = []
+
+    class FakeTelegramClient:
+        def send_message(self, text, chat_id=None, **kwargs):
+            sent_messages.append({"text": text, "chat_id": chat_id})
+            return 1
+
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
+
+    # Freeze time so the batch window doesn't expire
+    fake_time = [1000.0]
+    monkeypatch.setattr(eb, "_monotonic", lambda: fake_time[0])
+
+    bus = eb.EventBus(workflow="wf_b")
+    # Emit 5 info events — under threshold; should NOT have flushed yet
+    for i in range(5):
+        bus.emit("step", label=f"step_{i}", level="info")
+
+    assert sent_messages == []
+
+    # Emit 15 more — now at 20; should flush exactly once
+    for i in range(5, 20):
+        bus.emit("step", label=f"step_{i}", level="info")
+
+    assert len(sent_messages) == 1
+    assert "step_0" in sent_messages[0]["text"]
+    assert "step_19" in sent_messages[0]["text"]
+
+
+def test_events_channel_sink_flushes_on_time_window(monkeypatch):
+    """info events flush when 1s elapses since last flush, even below threshold."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
+    monkeypatch.setenv("TELEGRAM_EVENTS_CHANNEL_ID", "-1001234567890")
+
+    sent_messages = []
+
+    class FakeTelegramClient:
+        def send_message(self, text, chat_id=None, **kwargs):
+            sent_messages.append({"text": text, "chat_id": chat_id})
+            return 1
+
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
+
+    fake_time = [1000.0]
+    monkeypatch.setattr(eb, "_monotonic", lambda: fake_time[0])
+
+    bus = eb.EventBus(workflow="wf_c")
+    bus.emit("step", label="first", level="info")
+    assert sent_messages == []
+
+    # Advance time past the 1s window
+    fake_time[0] += 1.5
+    bus.emit("step", label="second", level="info")
+
+    # Now the emit should have triggered a flush of the pending buffer
+    assert len(sent_messages) == 1
+    assert "first" in sent_messages[0]["text"]
+    assert "second" in sent_messages[0]["text"]
+
+
+def test_events_channel_sink_flushes_pending_info_before_warn(monkeypatch):
+    """A warn event flushes any buffered info FIRST to preserve ordering."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
+    monkeypatch.setenv("TELEGRAM_EVENTS_CHANNEL_ID", "-1001234567890")
+
+    sent_messages = []
+
+    class FakeTelegramClient:
+        def send_message(self, text, chat_id=None, **kwargs):
+            sent_messages.append({"text": text, "chat_id": chat_id})
+            return 1
+
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
+
+    fake_time = [1000.0]
+    monkeypatch.setattr(eb, "_monotonic", lambda: fake_time[0])
+
+    bus = eb.EventBus(workflow="wf_d")
+    bus.emit("step", label="buffered_info", level="info")
+    bus.emit("step", label="now_warning", level="warn")
+
+    # Expect 2 sends: first the buffered info (flushed), then the warn (immediate)
+    assert len(sent_messages) == 2
+    assert "buffered_info" in sent_messages[0]["text"]
+    assert "now_warning" in sent_messages[1]["text"]
+
+
+def test_events_channel_sink_disabled_when_env_missing(monkeypatch, capsys):
+    """When TELEGRAM_EVENTS_CHANNEL_ID is absent, the sink is not added to _sinks."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
+    from execution.core.event_bus import EventBus
+
+    bus = EventBus(workflow="wf_e")
+    bus.emit("step", label="nobody hears", level="info")
+
+    # Only stdout fires
+    out = capsys.readouterr().out
+    assert "step" in out  # stdout still gets it

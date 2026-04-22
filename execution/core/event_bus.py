@@ -9,12 +9,14 @@ telemetry.
 Phase 1 (this module): stdout + Supabase + Sentry + main-chat sinks.
 Phase 2 (later): _EventsChannelSink for firehose.
 """
+import atexit
 import functools
 import json
 import logging
 import os
 import secrets
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -30,6 +32,11 @@ def _generate_run_id() -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _monotonic() -> float:
+    """Monkeypatch seam for tests that need to simulate time passage."""
+    return time.monotonic()
 
 
 def _get_supabase_client():
@@ -79,10 +86,15 @@ class EventBus:
         if supabase is not None:
             sinks.append(_SupabaseSink(supabase))
         sinks.append(_SentrySink())  # always-on; internally no-ops if sdk absent
-        chat_id = os.getenv("TELEGRAM_CHAT_ID")
         token = os.getenv("TELEGRAM_BOT_TOKEN")
+        chat_id = os.getenv("TELEGRAM_CHAT_ID")
         if chat_id and token:
             sinks.append(_MainChatSink(chat_id=chat_id))
+        events_channel_id = os.getenv("TELEGRAM_EVENTS_CHANNEL_ID")
+        if events_channel_id and token:
+            client = _build_telegram_client()
+            if client is not None:
+                sinks.append(_EventsChannelSink(chat_id=events_channel_id, client=client))
         return sinks
 
     def emit(
@@ -199,6 +211,88 @@ class _MainChatSink:
             lines.append(label)
         if run_id:
             lines.append(f"run_id: {run_id}")
+        return "\n".join(lines)
+
+
+class _EventsChannelSink:
+    """Firehose sink: sends every emitted event to a dedicated Telegram channel.
+
+    Unlike _MainChatSink (which only fires for warn/error/crashed/missed), this
+    sink relays info events too — a complete audit trail the operator can silence
+    and review on demand.
+
+    Throttling:
+    - warn/error events flush immediately (latency parity with _MainChatSink).
+    - info events batch in 1-second windows OR at 20 events, whichever first.
+    - End-of-run flush via atexit so a short-lived script doesn't lose its tail.
+
+    Rate-limit posture: Telegram allows ~30 msg/sec/chat. With the 1s window we
+    emit ≤1 msg/sec for info bursts, leaving headroom for warn/error spikes.
+    """
+
+    _BATCH_WINDOW_SECONDS = 1.0
+    _MAX_BUFFER = 20  # flush when buffered info reaches this count
+
+    def __init__(self, chat_id: str, client):
+        self._chat_id = chat_id
+        self._client = client
+        self._buffer: list = []
+        self._last_flush = _monotonic()
+        # Register flush at interpreter exit so short scripts don't drop events
+        atexit.register(self._flush_on_exit)
+
+    def emit(self, event_dict: dict) -> None:
+        level = event_dict.get("level", "info")
+        if level in ("warn", "error"):
+            # Preserve ordering: flush any buffered info first, then send this one
+            self._flush()
+            self._send_one([event_dict])
+            return
+        # Info: buffer then maybe flush
+        self._buffer.append(event_dict)
+        if len(self._buffer) >= self._MAX_BUFFER:
+            self._flush()
+            return
+        now = _monotonic()
+        if (now - self._last_flush) >= self._BATCH_WINDOW_SECONDS:
+            self._flush()
+
+    def _flush(self) -> None:
+        if not self._buffer:
+            return
+        batch = self._buffer
+        self._buffer = []
+        self._last_flush = _monotonic()
+        self._send_one(batch)
+
+    def _flush_on_exit(self) -> None:
+        try:
+            self._flush()
+        except Exception:
+            pass  # atexit handlers must not raise
+
+    def _send_one(self, events: list) -> None:
+        text = self._format(events)
+        try:
+            self._client.send_message(text=text, chat_id=self._chat_id, parse_mode=None)
+        except Exception as exc:
+            logger.warning(f"_EventsChannelSink send failed: {exc}")
+
+    @staticmethod
+    def _format(events: list) -> str:
+        lines = []
+        level_emoji = {"info": "ℹ️", "warn": "⚠️", "error": "🚨"}
+        for ev in events:
+            ts = ev.get("ts") or ""
+            hhmmss = ts[11:19] if len(ts) >= 19 else ts
+            wf = ev.get("workflow") or "?"
+            ev_name = ev.get("event") or "?"
+            emoji = level_emoji.get(ev.get("level", "info"), "•")
+            label = ev.get("label") or ""
+            line = f"{hhmmss} {emoji} {wf}.{ev_name}"
+            if label:
+                line += f" — {label[:80]}"
+            lines.append(line)
         return "\n".join(lines)
 
 

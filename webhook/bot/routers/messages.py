@@ -13,15 +13,22 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from bot.config import ANTHROPIC_API_KEY, SHEET_ID
+from bot.config import ANTHROPIC_API_KEY
 from bot.states import AdjustDraft, RejectReason, AddContact, BroadcastMessage, WriterInput
 from bot.middlewares.auth import RoleMiddleware
 from bot.routers._helpers import process_news, process_adjustment
 import contact_admin
 import redis_queries
-from execution.integrations.sheets_client import SheetsClient
+from execution.integrations.contacts_repo import (
+    ContactsRepo, InvalidPhoneError, ContactAlreadyExistsError,
+)
 
 logger = logging.getLogger(__name__)
+
+WELCOME_MESSAGE = (
+    "Você foi adicionado à lista de informações de mercado "
+    "da Minerals Trading."
+)
 
 # ── Reply keyboard text handler (admin + subscriber) ──
 
@@ -185,29 +192,62 @@ async def on_add_contact_data(message: Message, state: FSMContext):
         await message.answer(f"❌ {e}")
         return  # keep state so user can retry
 
+    from webhook.dispatch import send_whatsapp  # local import to avoid cycles
+
+    async def _send_welcome(phone_uazapi: str) -> None:
+        result = await send_whatsapp(
+            phone_uazapi, WELCOME_MESSAGE, draft_id="welcome",
+        )
+        if not result.get("ok") and result.get("status") != "duplicate":
+            raise RuntimeError(
+                f"uazapi send not ok (status={result.get('http_status')})"
+            )
+
+    def _sync_send_welcome(phone_uazapi: str) -> None:
+        asyncio.run(_send_welcome(phone_uazapi))
+
     try:
-        sheets = SheetsClient()
-        await asyncio.to_thread(sheets.add_contact, SHEET_ID, name, phone)
-    except ValueError as e:
-        await message.answer(f"❌ {e}")
+        repo = ContactsRepo()
+        contact = await asyncio.to_thread(
+            repo.add, name, phone, send_welcome=_sync_send_welcome,
+        )
+    except InvalidPhoneError as e:
+        await message.answer(
+            f"❌ Telefone inválido: {e}\n"
+            f"Inclua o DDI (ex: 55 Brasil, 1 EUA).",
+        )
+        await state.clear()
+        return
+    except ContactAlreadyExistsError as e:
+        await message.answer(
+            f"❌ Já existe: {e.existing.name} ({e.existing.status})",
+        )
+        await state.clear()
+        return
+    except RuntimeError as e:
+        await message.answer(
+            f"❌ Não consegui enviar mensagem de boas-vindas — "
+            f"o número pode não ter WhatsApp.\n\nDetalhe: {str(e)[:200]}",
+        )
         await state.clear()
         return
     except Exception as e:
         logger.error(f"add_contact failed: {e}")
-        await message.answer("❌ Erro ao gravar na planilha. Tente novamente.")
+        await message.answer("❌ Erro ao adicionar contato. Tente novamente.")
         await state.clear()
         return
 
+    # Success — fetch active count for confirmation.
     try:
-        sheets = SheetsClient()
-        all_contacts, _ = await asyncio.to_thread(
-            sheets.list_contacts, SHEET_ID, page=1, per_page=10_000,
-        )
-        active = sum(1 for c in all_contacts if str(c.get("ButtonPayload", "")).strip() == "Big")
+        active_contacts = await asyncio.to_thread(repo.list_active)
+        active = len(active_contacts)
     except Exception:
         active = "?"
 
-    await message.answer(f"✅ {name} adicionado\nTotal ativos: {active}")
+    await message.answer(
+        f"✅ {contact.name} adicionado ({contact.phone_uazapi})\n"
+        f"Total ativos: {active}",
+    )
     await state.clear()
 
 

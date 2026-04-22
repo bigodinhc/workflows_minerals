@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 
-TODAY_STR = "2026-04-22"
+TODAY_STR = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 def _today_iso() -> str:
@@ -186,24 +186,27 @@ async def _invoke(dry_run: bool = False):
 
 @pytest.mark.asyncio
 async def test_scenario_1_sent_flag_already_set(
-    spy_state_store, patched_integrations, patched_bot_and_progress, baltic_env, active_bus, monkeypatch,
+    patched_integrations, patched_bot_and_progress, baltic_env, active_bus, monkeypatch,
 ):
     """Phase 0 short-circuit: sent flag already present → exit immediately."""
     from execution.core import state_store
 
+    check_calls = []
+    other_calls = []
+
     def spy_check_true(*args, **kwargs):
-        spy_state_store["check_sent_flag"].append({"args": args, "kwargs": kwargs})
+        check_calls.append(args)
         return True
 
     monkeypatch.setattr(state_store, "check_sent_flag", spy_check_true)
+    monkeypatch.setattr(state_store, "try_claim_alert_key", lambda *a, **k: other_calls.append(("try_claim", a)) or True)
+    monkeypatch.setattr(state_store, "set_sent_flag", lambda *a, **k: other_calls.append(("set_sent", a)))
+    monkeypatch.setattr(state_store, "release_inflight", lambda *a, **k: other_calls.append(("release", a)))
 
     await _invoke(dry_run=False)
 
-    assert len(spy_state_store["check_sent_flag"]) == 1
-    assert spy_state_store["try_claim_alert_key"] == []
-    assert spy_state_store["set_sent_flag"] == []
-    assert spy_state_store["release_inflight"] == []
-    # Email API must not even be called
+    assert len(check_calls) == 1
+    assert other_calls == []
     patched_integrations["baltic"].find_latest_email.assert_not_called()
 
 
@@ -246,24 +249,28 @@ async def test_scenario_3_email_from_yesterday(
 
 @pytest.mark.asyncio
 async def test_scenario_4_concurrent_run_holds_lock(
-    spy_state_store, patched_integrations, patched_bot_and_progress, baltic_env, active_bus, monkeypatch,
+    patched_integrations, patched_bot_and_progress, baltic_env, active_bus, monkeypatch,
 ):
     """Another cron is mid-run → try_claim_alert_key returns False, exit clean."""
     from execution.core import state_store
 
-    def spy_claim_false(*args, **kwargs):
-        spy_state_store["try_claim_alert_key"].append({"args": args, "kwargs": kwargs})
-        return False
+    check_calls = []
+    claim_calls = []
+    other_calls = []
 
+    monkeypatch.setattr(state_store, "check_sent_flag", lambda *a, **k: check_calls.append(a) or False)
+    def spy_claim_false(*args, **kwargs):
+        claim_calls.append(args)
+        return False
     monkeypatch.setattr(state_store, "try_claim_alert_key", spy_claim_false)
+    monkeypatch.setattr(state_store, "set_sent_flag", lambda *a, **k: other_calls.append(("set_sent", a)))
+    monkeypatch.setattr(state_store, "release_inflight", lambda *a, **k: other_calls.append(("release", a)))
 
     await _invoke(dry_run=False)
 
-    assert len(spy_state_store["check_sent_flag"]) == 1
-    assert len(spy_state_store["try_claim_alert_key"]) == 1
-    assert spy_state_store["set_sent_flag"] == []
-    assert spy_state_store["release_inflight"] == []
-    # PDF/Claude/broadcast must not run
+    assert len(check_calls) == 1
+    assert len(claim_calls) == 1
+    assert other_calls == []  # no set_sent_flag, no release_inflight
     patched_integrations["baltic"].get_pdf_attachment.assert_not_called()
     patched_integrations["claude"].extract_data_from_pdf.assert_not_called()
     patched_integrations["delivery_reporter"].dispatch.assert_not_called()
@@ -306,18 +313,48 @@ async def test_scenario_6_claude_low_confidence(
 
 @pytest.mark.asyncio
 async def test_scenario_7_full_success(
-    spy_state_store, patched_integrations, patched_bot_and_progress, baltic_env, active_bus,
+    patched_integrations, patched_bot_and_progress, baltic_env, active_bus, monkeypatch,
 ):
-    """Happy path → check_sent_flag → acquire lock → process → set_sent_flag → release lock."""
+    """Happy path → check_sent_flag → acquire lock → process → set_sent_flag → release lock.
+
+    Also verifies the critical ordering invariant: set_sent_flag MUST complete
+    before release_inflight, so that even if a crash between them keeps the
+    inflight lock held until TTL, the sent flag is already committed and the
+    next run correctly short-circuits at Phase 0."""
+    from execution.core import state_store
+
+    call_order = []
+
+    def spy_check(*args, **kwargs):
+        call_order.append("check_sent_flag")
+        return False
+
+    def spy_claim(*args, **kwargs):
+        call_order.append("try_claim_alert_key")
+        return True
+
+    def spy_set(*args, **kwargs):
+        call_order.append("set_sent_flag")
+
+    def spy_release(*args, **kwargs):
+        call_order.append("release_inflight")
+
+    monkeypatch.setattr(state_store, "check_sent_flag", spy_check)
+    monkeypatch.setattr(state_store, "try_claim_alert_key", spy_claim)
+    monkeypatch.setattr(state_store, "set_sent_flag", spy_set)
+    monkeypatch.setattr(state_store, "release_inflight", spy_release)
+
     await _invoke(dry_run=False)
 
-    assert len(spy_state_store["check_sent_flag"]) == 1
-    assert len(spy_state_store["try_claim_alert_key"]) == 1
-    assert len(spy_state_store["set_sent_flag"]) == 1
-    assert len(spy_state_store["release_inflight"]) == 1
+    # All four helpers called exactly once
+    assert call_order.count("check_sent_flag") == 1
+    assert call_order.count("try_claim_alert_key") == 1
+    assert call_order.count("set_sent_flag") == 1
+    assert call_order.count("release_inflight") == 1
 
-    # Verify ordering: sent flag set before inflight released
-    # (both happen in the success path; ordering matters because a crash
-    # between them would leave sent=set but inflight=held until TTL, which
-    # is fine but we want the documented order)
+    # Critical ordering: check → acquire → set → release
+    assert call_order.index("check_sent_flag") < call_order.index("try_claim_alert_key")
+    assert call_order.index("try_claim_alert_key") < call_order.index("set_sent_flag")
+    assert call_order.index("set_sent_flag") < call_order.index("release_inflight")
+
     patched_integrations["delivery_reporter"].dispatch.assert_called_once()

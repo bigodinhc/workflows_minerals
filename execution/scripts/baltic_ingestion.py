@@ -40,6 +40,10 @@ WORKFLOW_NAME = "baltic"
 IRONMARKET_URL = "https://merry-adaptation-production.up.railway.app/ingest/price"
 IRONMARKET_API_KEY = "ironmkt_WUbuYLe4m06GTiYos_fVwvBfNa2l8GWoJtE9K8MJFCY" # Keeping hardcoded as requested, or load from env
 
+# Split-lock idempotency TTLs
+_INFLIGHT_LOCK_TTL_SEC = 20 * 60   # 20 min — covers max observed broadcast duration
+_SENT_FLAG_TTL_SEC = 48 * 3600     # 48 h — one reporting day + buffer
+
 def get_emoji(direction):
     if direction == 'UP': return '📈'
     if direction == 'DOWN': return '📉'
@@ -294,7 +298,7 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
         # durations (17-18min yesterday); if exceeded, tune upward.
         if not args.dry_run:
             acquired = await asyncio.to_thread(
-                state_store.try_claim_alert_key, inflight_key, 20 * 60
+                state_store.try_claim_alert_key, inflight_key, _INFLIGHT_LOCK_TTL_SEC
             )
             if not acquired:
                 logger.info("Another run is processing this report. Exiting.")
@@ -390,9 +394,9 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             f"Failed: {report.failure_count}"
         )
 
-        # ── PHASE 4c: commit success — set sent flag ─────────────────────────
+        # ── PHASE 6c: commit success — set sent flag ─────────────────────────
         if not args.dry_run:
-            await asyncio.to_thread(state_store.set_sent_flag, sent_key, 48 * 3600)
+            await asyncio.to_thread(state_store.set_sent_flag, sent_key, _SENT_FLAG_TTL_SEC)
 
         await reporter.finish(report=report, message=message)
 

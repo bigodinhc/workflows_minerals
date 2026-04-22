@@ -73,3 +73,46 @@ def test_parse_next_run_returns_none_when_yaml_malformed(tmp_path):
     yml.write_text("not: [valid yaml")
     result = parse_next_run("broken", workflows_dir=str(wf_dir))
     assert result is None
+
+
+def test_parse_previous_run_returns_most_recent_past_occurrence(tmp_path, monkeypatch):
+    """parse_previous_run walks one cron interval backward from `now` and
+    returns the most recent scheduled run that has already passed."""
+    from execution.core import cron_parser
+
+    # Write a minimal workflow YAML: runs at 09:00 UTC Mon-Fri
+    wf_dir = tmp_path / "workflows"
+    wf_dir.mkdir()
+    wf_file = wf_dir / "test_wf.yml"
+    wf_file.write_text(
+        "name: Test\n"
+        "on:\n"
+        "  schedule:\n"
+        "    - cron: '0 9 * * 1-5'\n"
+        "jobs:\n"
+        "  x:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps: [{run: 'echo'}]\n"
+    )
+
+    # Fix `now` to a known Wednesday at 14:00 UTC. The previous 09:00 UTC run
+    # happened 5 hours ago, same day.
+    from datetime import datetime, timezone
+    fixed_now = datetime(2026, 4, 15, 14, 0, 0, tzinfo=timezone.utc)  # Wed
+    monkeypatch.setattr(cron_parser, "_utc_now", lambda: fixed_now)
+
+    previous = cron_parser.parse_previous_run("test_wf", workflows_dir=str(wf_dir))
+
+    assert previous is not None
+    # parse_previous_run returns in UTC (not BRT) to match `now` semantics used by watchdog
+    assert previous.tzinfo is not None
+    # The previous 09:00 UTC Wed run is 5 hours before fixed_now
+    from datetime import timedelta
+    assert previous == fixed_now - timedelta(hours=5)
+
+
+def test_parse_previous_run_returns_none_when_workflow_missing(tmp_path):
+    """If the workflow YAML doesn't exist, return None (not raise)."""
+    from execution.core import cron_parser
+    previous = cron_parser.parse_previous_run("nonexistent", workflows_dir=str(tmp_path))
+    assert previous is None

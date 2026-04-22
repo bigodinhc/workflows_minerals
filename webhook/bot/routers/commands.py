@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 _TAIL_LIMIT = 30
 _LABEL_TRUNCATE = 80
+_TAIL_VALID_LEVELS = frozenset({"info", "warn", "error"})
 
 
 # ── Public router (no auth) ──
@@ -58,13 +59,32 @@ async def cmd_status(message: Message):
 
 @admin_router.message(Command("tail"))
 async def cmd_tail(message: Message, command: CommandObject):
-    args = (command.args or "").strip().split()
-    if not args:
+    raw_args = (command.args or "").strip().split()
+    if not raw_args:
         await message.reply(_tail_help())
         return
 
-    workflow = args[0]
-    explicit_run_id = args[1] if len(args) > 1 else None
+    # Split positional args from --level=X flag. The flag can appear anywhere.
+    level_filter = None
+    positional = []
+    for arg in raw_args:
+        if arg.startswith("--level="):
+            level_filter = arg.split("=", 1)[1].lower()
+            if level_filter not in _TAIL_VALID_LEVELS:
+                await message.reply(
+                    f"Level inválido: `{level_filter}`. "
+                    f"Use um de: {', '.join(sorted(_TAIL_VALID_LEVELS))}."
+                )
+                return
+        else:
+            positional.append(arg)
+
+    if not positional:
+        await message.reply(_tail_help())
+        return
+
+    workflow = positional[0]
+    explicit_run_id = positional[1] if len(positional) > 1 else None
 
     if workflow not in ALL_WORKFLOWS:
         await message.reply(
@@ -94,7 +114,9 @@ async def cmd_tail(message: Message, command: CommandObject):
         return
 
     try:
-        events = await asyncio.to_thread(_query_event_log_sync, client, workflow, run_id)
+        events = await asyncio.to_thread(
+            _query_event_log_sync, client, workflow, run_id, level_filter,
+        )
     except Exception as exc:
         logger.error(f"/tail event_log query failed: {exc}")
         err_text = str(exc)[:100].replace("`", "'")
@@ -103,20 +125,26 @@ async def cmd_tail(message: Message, command: CommandObject):
 
     rows = events.data or []
     if not rows:
+        filter_note = f" (level={level_filter})" if level_filter else ""
         await message.reply(
-            f"📜 `{workflow}.{run_id}` — sem eventos no event_log."
+            f"📜 `{workflow}.{run_id}`{filter_note} — sem eventos no event_log."
         )
         return
 
-    await message.reply(_format_tail(workflow, run_id, rows))
+    await message.reply(_format_tail(workflow, run_id, rows, level_filter))
 
 
-def _query_event_log_sync(client, workflow, run_id):
-    return (
+def _query_event_log_sync(client, workflow, run_id, level_filter=None):
+    query = (
         client.table("event_log")
         .select("ts, level, event, label, detail")
         .eq("workflow", workflow)
         .eq("run_id", run_id)
+    )
+    if level_filter is not None:
+        query = query.eq("level", level_filter)
+    return (
+        query
         .order("ts", desc=False)
         .limit(_TAIL_LIMIT)
         .execute()
@@ -127,14 +155,16 @@ def _tail_help() -> str:
     return (
         "📜 *Uso do /tail*\n\n"
         f"`/tail <workflow>` — últimos {_TAIL_LIMIT} eventos do run mais recente\n"
-        f"`/tail <workflow> <run_id>` — últimos {_TAIL_LIMIT} eventos de um run específico\n\n"
+        f"`/tail <workflow> <run_id>` — últimos {_TAIL_LIMIT} eventos de um run específico\n"
+        f"`/tail <workflow> --level=warn` — filtra por nível (info/warn/error)\n\n"
         f"Workflows: {', '.join(ALL_WORKFLOWS)}"
     )
 
 
-def _format_tail(workflow: str, run_id: str, rows: list) -> str:
+def _format_tail(workflow: str, run_id: str, rows: list, level_filter: str = None) -> str:
     level_emoji = {"info": "ℹ️", "warn": "⚠️", "error": "🚨"}
-    lines = [f"📜 `{workflow}.{run_id}` (últimos {len(rows)} eventos)\n"]
+    filter_note = f" (level={level_filter})" if level_filter else ""
+    lines = [f"📜 `{workflow}.{run_id}`{filter_note} (últimos {len(rows)} eventos)\n"]
     for row in rows:
         ts = (row.get("ts") or "")
         hhmmss = ts[11:19] if len(ts) >= 19 else ts

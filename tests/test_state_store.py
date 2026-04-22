@@ -171,3 +171,60 @@ def test_streak_alert_exception_does_not_propagate(fake_redis, monkeypatch):
     state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
     # Streak still updated
     assert fake_redis.get("wf:streak:test") == "3"
+
+
+def test_try_claim_alert_key_returns_true_on_first_claim(monkeypatch):
+    """First caller with a fresh key should return True (alert should fire).
+    Uses a fake redis client to avoid real Redis."""
+    from execution.core import state_store
+
+    set_calls = []
+
+    class FakeRedis:
+        def set(self, key, value, nx=False, ex=None):
+            set_calls.append({"key": key, "value": value, "nx": nx, "ex": ex})
+            return True  # redis-py returns True/None for SET NX; True = key set
+
+    monkeypatch.setattr(state_store, "_get_client", lambda: FakeRedis())
+
+    assert state_store.try_claim_alert_key("wf:test:1", ttl_seconds=60) is True
+    assert len(set_calls) == 1
+    assert set_calls[0]["key"] == "wf:test:1"
+    assert set_calls[0]["nx"] is True
+    assert set_calls[0]["ex"] == 60
+
+
+def test_try_claim_alert_key_returns_false_on_duplicate_claim(monkeypatch):
+    """Second caller with a still-alive key should return False (alert already sent)."""
+    from execution.core import state_store
+
+    class FakeRedis:
+        def set(self, key, value, nx=False, ex=None):
+            return None  # redis-py returns None when NX fails (key already exists)
+
+    monkeypatch.setattr(state_store, "_get_client", lambda: FakeRedis())
+
+    assert state_store.try_claim_alert_key("wf:test:2", ttl_seconds=60) is False
+
+
+def test_try_claim_alert_key_returns_true_when_redis_unavailable(monkeypatch):
+    """When Redis is down, degrade permissive: return True so the alert
+    still fires. Losing one duplicate alert is worse than losing the alert
+    entirely."""
+    from execution.core import state_store
+    monkeypatch.setattr(state_store, "_get_client", lambda: None)
+
+    assert state_store.try_claim_alert_key("wf:test:3", ttl_seconds=60) is True
+
+
+def test_try_claim_alert_key_returns_true_when_redis_raises(monkeypatch):
+    """If the Redis SET itself raises (connection reset mid-call), degrade permissive."""
+    from execution.core import state_store
+
+    class FlakyRedis:
+        def set(self, key, value, nx=False, ex=None):
+            raise RuntimeError("connection lost")
+
+    monkeypatch.setattr(state_store, "_get_client", lambda: FlakyRedis())
+
+    assert state_store.try_claim_alert_key("wf:test:4", ttl_seconds=60) is True

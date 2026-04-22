@@ -287,6 +287,7 @@ def test_record_success_persists_run_id_when_bus_active(fake_redis, monkeypatch)
 
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
@@ -308,6 +309,7 @@ def test_record_failure_persists_run_id_when_bus_active(fake_redis, monkeypatch)
 
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
@@ -329,6 +331,7 @@ def test_record_empty_persists_run_id_when_bus_active(fake_redis, monkeypatch):
 
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
@@ -350,6 +353,7 @@ def test_record_crash_persists_run_id_when_bus_active(fake_redis, monkeypatch):
 
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
@@ -384,6 +388,7 @@ def test_record_crash_dedup_skips_write_even_with_bus_active(fake_redis, monkeyp
 
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)

@@ -42,9 +42,12 @@ def _monotonic() -> float:
 
 def _get_supabase_client():
     """Return a supabase-py Client, or None if credentials/library missing.
+
+    Accepts SUPABASE_SERVICE_ROLE_KEY (webhook-side convention) or
+    SUPABASE_KEY (legacy script-side) — preference for the service-role key.
     Extracted to module scope so tests can monkeypatch."""
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
     if not url or not key:
         return None
     try:

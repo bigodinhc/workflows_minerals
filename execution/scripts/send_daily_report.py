@@ -16,12 +16,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.logger import WorkflowLogger
-from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
+from execution.core.delivery_reporter import DeliveryReporter, build_delivery_contact
+from execution.integrations.contacts_repo import ContactsRepo
 from execution.core.progress_reporter import ProgressReporter
 
-# CONFIG
-SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0" 
-SHEET_NAME = "Página1"
 
 def format_price_message(prices):
     """
@@ -138,10 +136,9 @@ def main():
         print("\n--- PREVIEW ---\n" + message + "\n---------------\n")
         
         # 3. Fetch Contacts
-        logger.info("Fetching contacts from Sheets...")
-        from execution.integrations.sheets_client import SheetsClient
-        sheets = SheetsClient()
-        contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME)
+        logger.info("Fetching contacts...")
+        contacts_repo = ContactsRepo()
+        contacts = contacts_repo.list_active()
         
         if not contacts:
             logger.warning("No contacts found to send to.")
@@ -153,7 +150,7 @@ def main():
         from execution.integrations.uazapi_client import UazapiClient
         uazapi = UazapiClient()
 
-        delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
+        delivery_contacts = [build_delivery_contact(c) for c in contacts]
 
         if args.dry_run:
             logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")

@@ -281,8 +281,37 @@ class ContactsRepo:
         return self._row_to_contact(resp.data[0])
 
     def toggle(self, phone: str) -> Contact:
-        """Flip status ativo ↔ inativo. Raises ContactNotFoundError."""
-        current = self.get_by_phone(phone)
+        """Flip status ativo ↔ inativo on the row whose phone_uazapi EXACTLY
+        matches `phone` (no sibling expansion). This is a row-level action:
+        the caller (inline-keyboard button) passes the exact phone_uazapi it
+        rendered, so toggling the wrong row when two siblings coexist would
+        surprise the user.
+
+        Use get_by_phone for intent-level lookups (/add dup pre-check) where
+        the caller asks "is this person on the list in any form?".
+
+        Raises ContactNotFoundError if no row matches the exact phone.
+        """
+        # Accept user-ish input; if it normalizes, use the canonical; if not,
+        # fall back to loose (handles legacy 12-digit rows) then to raw digits.
+        try:
+            candidate = normalize_phone(phone)
+        except InvalidPhoneError:
+            try:
+                candidate = _normalize_phone_loose(phone)
+            except InvalidPhoneError:
+                candidate = re.sub(r"\D", "", str(phone or ""))
+        resp = (
+            self.client.table("contacts")
+            .select("*")
+            .eq("phone_uazapi", candidate)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            raise ContactNotFoundError(f"no contact with phone {candidate}")
+        current = self._row_to_contact(rows[0])
         new_status = "inativo" if current.is_active() else "ativo"
         resp = (
             self.client.table("contacts")

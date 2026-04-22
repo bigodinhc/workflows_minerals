@@ -317,6 +317,46 @@ def test_toggle_raises_on_missing_phone(fake_client):
         repo.toggle("+5511987654321")
 
 
+def test_toggle_uses_exact_phone_match_not_siblings(fake_client):
+    """Toggle flips the exact phone_uazapi row, not a sibling BR form.
+    Regression: earlier version used get_by_phone which expands BR siblings
+    and could flip the wrong row when both 12-dig and 13-dig forms coexist."""
+    get_q = FakeQuery([_row(status="ativo", phone_uazapi="5537999021186")])
+    update_q = FakeQuery([_row(status="inativo", phone_uazapi="5537999021186")])
+    fake_client.table.side_effect = [get_q, update_q]
+
+    repo = ContactsRepo(client=fake_client)
+    repo.toggle("5537999021186")
+
+    # Query must use .eq on the exact phone, NOT .in_ with siblings.
+    eq_calls_on_phone = [
+        call for call in get_q.calls
+        if call[0] == "eq" and call[1][0] == "phone_uazapi"
+    ]
+    assert len(eq_calls_on_phone) == 1
+    assert eq_calls_on_phone[0][1][1] == "5537999021186"
+    # And sibling expansion (in_) must NOT have been used for the lookup.
+    in_calls = [call for call in get_q.calls if call[0] == "in_"]
+    assert in_calls == []
+
+
+def test_toggle_accepts_legacy_12_digit_phone_directly(fake_client):
+    """Toggle button renders with the exact phone_uazapi from DB. For migrated
+    legacy rows that's the 12-digit pre-2012 form, which the strict
+    normalize_phone rejects. Toggle must still work on it."""
+    get_q = FakeQuery([_row(status="ativo", phone_uazapi="553799021186",
+                             name="Antonio Carlos")])
+    update_q = FakeQuery([_row(status="inativo", phone_uazapi="553799021186",
+                                name="Antonio Carlos")])
+    fake_client.table.side_effect = [get_q, update_q]
+
+    repo = ContactsRepo(client=fake_client)
+    updated = repo.toggle("553799021186")
+
+    assert updated.name == "Antonio Carlos"
+    assert updated.status == "inativo"
+
+
 def test_bulk_set_status_no_search_affects_all(fake_client):
     update_q = FakeQuery([_row(), _row(), _row()])
     _set_next_query(fake_client, update_q)

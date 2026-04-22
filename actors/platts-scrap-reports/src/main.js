@@ -11,6 +11,7 @@ import { sendReportsSummary } from './notify/telegramSummary.js';
 import { isAlreadyStored, setTelegramMessageId, uploadPdf } from './persist/supabaseUpload.js';
 import { datePartsFromIso, parsePublishedDate } from './util/dates.js';
 import { slugify } from './util/slug.js';
+import { EventBus } from './lib/eventBus.js';
 
 await Actor.init();
 
@@ -26,19 +27,38 @@ const {
     telegramChatId,
 } = input;
 
+const bus = new EventBus({
+    workflow: 'platts_scrap_reports',
+    traceId: input.trace_id,
+    parentRunId: input.parent_run_id,
+});
+
+await bus.emit('cron_started', {
+    detail: { apify_run_id: process.env.ACTOR_RUN_ID ?? null },
+});
+
+async function failWithEvent(message) {
+    await bus.emit('cron_crashed', {
+        label: message.slice(0, 100),
+        detail: { exc_type: 'ConfigError', exc_str: message },
+        level: 'error',
+    });
+    await Actor.fail(message);
+}
+
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = telegramChatId || process.env.TELEGRAM_CHAT_ID;
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!username || !password) {
-    await Actor.fail('username and password are required');
+    await failWithEvent('username and password are required');
 }
 if (!dryRun && !SB_URL) {
-    await Actor.fail('SUPABASE_URL is required when dryRun=false');
+    await failWithEvent('SUPABASE_URL is required when dryRun=false');
 }
 if (!dryRun && (!TG_TOKEN || !TG_CHAT)) {
-    await Actor.fail('TELEGRAM_BOT_TOKEN and chat id required when dryRun=false');
+    await failWithEvent('TELEGRAM_BOT_TOKEN and chat id required when dryRun=false');
 }
 
 const summary = {
@@ -178,8 +198,25 @@ async function run() {
 
 try {
     await run();
-} finally {
+    await bus.emit('cron_finished', {
+        detail: { summary_type: summary?.type ?? 'unknown' },
+    });
+} catch (err) {
+    const errName = err?.name ?? 'UnknownError';
+    const errMsg = err?.message ?? String(err ?? '');
+    await bus.emit('cron_crashed', {
+        label: `${errName}: ${errMsg.slice(0, 100)}`,
+        detail: {
+            exc_type: errName,
+            exc_str: String(err ?? '').slice(0, 500),
+        },
+        level: 'error',
+    });
     await ctx.close();
     await browser.close();
-    await Actor.exit();
+    await Actor.fail(errMsg || String(err ?? 'unknown error'));
+} finally {
+    try { await ctx.close(); } catch {}
+    try { await browser.close(); } catch {}
 }
+await Actor.exit();

@@ -167,6 +167,7 @@ def main() -> int:
         print("ERROR: TELEGRAM_CHAT_ID not set.", file=sys.stderr)
         return 2
 
+    bus = get_current_bus()
     run_input = {
         "username": username,
         "password": password,
@@ -178,6 +179,9 @@ def main() -> int:
             "GDRIVE_PLATTS_REPORTS_FOLDER_ID", "1KxixMP9rKF0vGzINGvmmyFvouaOvL02y"
         ),
     }
+    if bus is not None:
+        run_input["trace_id"] = bus.trace_id
+        run_input["parent_run_id"] = bus.run_id
 
     try:
         return asyncio.run(_run_with_progress(args, chat_id, run_input))

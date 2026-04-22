@@ -222,20 +222,21 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
     reporter._pending_card_state = []
     reporter._last_edit_at = None
 
+    sent_key = f"daily_report:sent:{REPORT_TYPE}:{today_str}"
+    inflight_key = f"daily_report:inflight:{REPORT_TYPE}:{today_str}"
+    inflight_held = False
+
     try:
-        # ── PHASE 1: check control sheet ─────────────────────────────────────
+        # ── PHASE 0: check sent flag (read-only, no side effect) ─────────────
         if not args.dry_run:
-            claim_key = f"daily_report:sent:{REPORT_TYPE}:{today_str}"
-            claimed = await asyncio.to_thread(
-                state_store.try_claim_alert_key, claim_key, 48 * 3600
-            )
-            if not claimed:
-                logger.info("Report already sent today. Exiting.")
-                await reporter.step("Skipped", "report already sent today", level="info")
+            already_sent = await asyncio.to_thread(state_store.check_sent_flag, sent_key)
+            if already_sent:
+                logger.info("Report already delivered today. Exiting.")
+                await reporter.step("Skipped", "already delivered today", level="info")
                 await reporter.finish()
                 return
 
-        # ── PHASE 2: fetch email via Graph API ────────────────────────────────
+        # ── PHASE 1: fetch email via Graph API ────────────────────────────────
         logger.info("Checking Outlook for Baltic Exchange email...")
         bus.emit("step", label="Buscando emails (Graph API)")
         baltic = BalticClient()
@@ -259,7 +260,7 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             await reporter.finish()
             return
 
-        # Validate if email is actually from TODAY
+        # ── PHASE 2: validate email is from TODAY ─────────────────────────────
         email_date_str = msg['receivedDateTime']
         try:
             email_date_str_clean = email_date_str.replace("Z", "+00:00")
@@ -286,7 +287,23 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             f"from {msg.get('from', {}).get('emailAddress', {}).get('address', 'unknown')} at {email_date_str}",
         )
 
-        # ── PHASE 3: extract PDF attachment ───────────────────────────────────
+        # ── PHASE 3: acquire in-flight lock ──────────────────────────────────
+        # We have confirmed data to process. Claim the lock to prevent a
+        # concurrent cron (started while we're still running) from broadcasting
+        # the same report twice. 20min TTL safely covers observed broadcast
+        # durations (17-18min yesterday); if exceeded, tune upward.
+        if not args.dry_run:
+            acquired = await asyncio.to_thread(
+                state_store.try_claim_alert_key, inflight_key, 20 * 60
+            )
+            if not acquired:
+                logger.info("Another run is processing this report. Exiting.")
+                await reporter.step("Skipped", "another run in progress", level="info")
+                await reporter.finish()
+                return
+            inflight_held = True
+
+        # ── PHASE 4: extract PDF attachment ───────────────────────────────────
         pdf_bytes, filename = await asyncio.to_thread(baltic.get_pdf_attachment, msg['id'])
 
         if not pdf_bytes:
@@ -298,7 +315,7 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
         logger.info(f"Downloaded PDF: {filename}")
         await reporter.step("PDF extracted", filename or "attachment downloaded")
 
-        # ── PHASE 4: Claude extraction ────────────────────────────────────────
+        # ── PHASE 5: Claude extraction ────────────────────────────────────────
         logger.info("Sending to Claude for extraction...")
         claude = ClaudeClient()
         data = await asyncio.to_thread(claude.extract_data_from_pdf, pdf_bytes)
@@ -327,7 +344,7 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             await reporter.finish()
             return
 
-        # ── PHASE 5: ingest to IronMarket + send WhatsApp ─────────────────────
+        # ── PHASE 6: ingest to IronMarket + send WhatsApp ─────────────────────
         bus.emit("step", label="Enviando para IronMarket")
         t0 = _time.time()
         success, err = await asyncio.to_thread(ingest_to_ironmarket, data)
@@ -373,6 +390,10 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             f"Failed: {report.failure_count}"
         )
 
+        # ── PHASE 4c: commit success — set sent flag ─────────────────────────
+        if not args.dry_run:
+            await asyncio.to_thread(state_store.set_sent_flag, sent_key, 48 * 3600)
+
         await reporter.finish(report=report, message=message)
 
     except Exception as exc:
@@ -383,6 +404,13 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
         )
         raise
     finally:
+        # Release the in-flight lock regardless of outcome. Auto-expires in
+        # 20min as a crash safety net if this release is skipped.
+        if inflight_held:
+            try:
+                await asyncio.to_thread(state_store.release_inflight, inflight_key)
+            except Exception as release_exc:
+                logger.warning(f"Failed to release inflight lock: {release_exc}")
         await bot.session.close()
 
 

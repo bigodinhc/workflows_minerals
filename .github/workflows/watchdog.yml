@@ -31,4 +31,4 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python -m execution.scripts.watchdog
+        run: python -m execution.scripts.watchdog_cron

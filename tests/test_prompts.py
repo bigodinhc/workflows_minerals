@@ -131,28 +131,94 @@ def test_curator_has_whatsapp_format_rules():
     assert "###" in CURATOR_SYSTEM  # in PROIBIDO section
 
 
+def test_curator_has_five_templates():
+    """v4: Curator routes by [TIPO: ...] into 5 templates."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert "PRICING_SESSION" in CURATOR_SYSTEM
+    assert "FUTURES_CURVE" in CURATOR_SYSTEM
+    assert "COMPANY_NEWS" in CURATOR_SYSTEM
+    assert "ANALYTICAL" in CURATOR_SYSTEM
+    assert "DIGEST" in CURATOR_SYSTEM
+    assert "EVENTO_CRITICO" not in CURATOR_SYSTEM
+
+
+def test_curator_has_date_rule():
+    """v4: Curator has explicit PT-BR date formatting rule."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    # Month abbreviations in PT-BR CAPS
+    assert "ABR" in CURATOR_SYSTEM
+    assert "MAI" in CURATOR_SYSTEM
+    assert "DEZ" in CURATOR_SYSTEM
+    # Data rule section exists
+    lower = CURATOR_SYSTEM.lower()
+    assert "data" in lower and "pt-br" in lower
+
+
+def test_curator_has_ativo_dominante_rule():
+    """v4: COMPANY_NEWS ativo dominante rule."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    lower = CURATOR_SYSTEM.lower()
+    assert "ativo dominante" in lower
+
+
+def test_curator_has_watch_render_rule():
+    """v4: Watch: line rendered as plain prose (no bold/mono)."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert "Watch:" in CURATOR_SYSTEM
+
+
+def test_curator_has_blank_line_rule():
+    """v4: Blank-line-between-bullets rule (heterogeneous vs homogeneous)."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    lower = CURATOR_SYSTEM.lower()
+    assert "heterogên" in lower or "homogên" in lower
+
+
+def test_curator_has_proibido_list():
+    """v4: Curator has proibido list (mirror of Writer)."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    lower = CURATOR_SYSTEM.lower()
+    assert "significativo" in lower
+    assert "dinâmica observada" in lower
+
+
+def test_curator_has_hard_ceiling_per_type():
+    """v4: Hard ceiling is per-type (not single 25-line rule)."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    assert "TETO" in CURATOR_SYSTEM or "teto" in CURATOR_SYSTEM
+    # Per-type ceilings present
+    assert "30" in CURATOR_SYSTEM  # PRICING_SESSION / COMPANY_NEWS
+    assert "25" in CURATOR_SYSTEM  # others
+
+
+def test_curator_has_futures_example_fixed():
+    """v4: FUTURES example uses correct spread values from input."""
+    from execution.core.prompts.curator import CURATOR_SYSTEM
+    # Correct values from the SGX input
+    assert "$0,60" in CURATOR_SYSTEM or "`$0,60`" in CURATOR_SYSTEM
+    # Wrong v3 values must be gone
+    assert "$0,40-0,45" not in CURATOR_SYSTEM
+    assert "$1,50-1,60" not in CURATOR_SYSTEM
+
+
 def test_curator_has_tabular_data_rule():
     from execution.core.prompts.curator import CURATOR_SYSTEM
     lower = CURATOR_SYSTEM.lower()
-    assert "tabela" in lower
-    assert "prosa" in lower
+    assert "mono inline" in lower or "inline mono" in lower
 
 
 def test_curator_has_few_shot_examples():
+    """v4: 5 examples (one per type)."""
     from execution.core.prompts.curator import CURATOR_SYSTEM
-    assert "EXEMPLO" in CURATOR_SYSTEM
+    assert CURATOR_SYSTEM.count("EXEMPLO") >= 5
+    assert "EXEMPLO 1" in CURATOR_SYSTEM
+    assert "EXEMPLO 5" in CURATOR_SYSTEM
 
 
 def test_curator_has_no_silencio_profissional():
     """v2: Removed redundant section."""
     from execution.core.prompts.curator import CURATOR_SYSTEM
     assert "SILÊNCIO PROFISSIONAL" not in CURATOR_SYSTEM
-
-
-def test_curator_has_hard_ceiling():
-    from execution.core.prompts.curator import CURATOR_SYSTEM
-    assert "TETO DURO" in CURATOR_SYSTEM
-    assert "25 linhas" in CURATOR_SYSTEM
 
 
 def test_curator_removes_source_footer():

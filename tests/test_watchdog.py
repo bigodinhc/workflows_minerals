@@ -1,4 +1,8 @@
-"""Integration tests for execution.scripts.watchdog."""
+"""Integration tests for execution.scripts.watchdog_cron.
+
+(Named watchdog_cron to avoid shadowing the PyPI `watchdog` package when
+this repo's scripts are invoked via `python execution/scripts/X.py` — which
+puts execution/scripts/ on sys.path[0]. See 2026-04-21 hotfix.)"""
 import json
 import pytest
 from datetime import datetime, timezone, timedelta
@@ -20,7 +24,7 @@ def disable_sinks(monkeypatch):
 def test_watchdog_emits_cron_missed_when_last_run_too_old(monkeypatch, capsys, disable_sinks):
     """Workflow's previous expected run was 30 minutes ago; grace is 15;
     state store shows last run was yesterday. Expect cron_missed emitted."""
-    from execution.scripts import watchdog as wd
+    from execution.scripts import watchdog_cron as wd
 
     now = datetime(2026, 4, 21, 14, 0, 0, tzinfo=timezone.utc)
     previous_expected = now - timedelta(minutes=30)
@@ -77,7 +81,7 @@ def test_watchdog_emits_cron_missed_when_last_run_too_old(monkeypatch, capsys, d
 
 def test_watchdog_skips_when_within_grace_window(monkeypatch, capsys, disable_sinks):
     """Previous expected was 5 minutes ago; grace is 15; still in window → no alert."""
-    from execution.scripts import watchdog as wd
+    from execution.scripts import watchdog_cron as wd
     from execution.core import cron_parser, state_store
     from webhook import status_builder
 
@@ -100,7 +104,7 @@ def test_watchdog_skips_when_within_grace_window(monkeypatch, capsys, disable_si
 def test_watchdog_skips_when_last_run_after_previous_expected(monkeypatch, capsys, disable_sinks):
     """Previous expected 30 min ago; but last_run 10 min ago (i.e., ran late but ran).
     Should NOT alert."""
-    from execution.scripts import watchdog as wd
+    from execution.scripts import watchdog_cron as wd
     from execution.core import cron_parser, state_store
     from webhook import status_builder
 
@@ -123,7 +127,7 @@ def test_watchdog_skips_when_last_run_after_previous_expected(monkeypatch, capsy
 def test_watchdog_is_idempotent_via_claim_guard(monkeypatch, capsys, disable_sinks):
     """When try_claim_alert_key returns False (already alerted), watchdog
     should NOT emit a duplicate cron_missed."""
-    from execution.scripts import watchdog as wd
+    from execution.scripts import watchdog_cron as wd
     from execution.core import cron_parser, state_store
     from webhook import status_builder
 
@@ -145,7 +149,7 @@ def test_watchdog_is_idempotent_via_claim_guard(monkeypatch, capsys, disable_sin
 def test_watchdog_skips_workflow_with_no_previous_run(monkeypatch, capsys, disable_sinks):
     """If cron_parser.parse_previous_run returns None (workflow has no schedule
     or YAML is missing), skip silently — not an error."""
-    from execution.scripts import watchdog as wd
+    from execution.scripts import watchdog_cron as wd
     from execution.core import cron_parser, state_store
     from webhook import status_builder
 

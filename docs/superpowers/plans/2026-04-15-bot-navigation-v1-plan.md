@@ -1611,52 +1611,42 @@ def test_consume_reject_reason_expired_state_returns_none(fake_redis, monkeypatc
 
 
 def test_adjust_state_takes_precedence_in_handle_message(fake_redis, monkeypatch):
-    """End-to-end: with BOTH states set, the adjust handler must consume the
-    message and the reject feedback reason must remain empty.
+    """End-to-end: with BOTH states set, the adjust handler consumes the
+    message and the reject feedback reason remains empty.
 
     Drives the real Flask handler via test_client so the cascade order in
-    handle_message is exercised, not just asserted by inspection.
+    telegram_webhook is exercised, not just asserted by inspection. Relies
+    on the synchronous `del ADJUST_STATE[chat_id]` happening BEFORE the
+    daemon thread starts — no thread join needed.
     """
     from webhook import app as webhook_app
     from webhook.redis_queries import list_feedback
 
-    sent: list[tuple] = []
-    monkeypatch.setattr(webhook_app, "send_telegram_message",
-                        lambda chat_id, text, **kw: sent.append((chat_id, text)))
-
-    # Track whether the adjust handler path executed
-    adjust_called = {"value": False}
-    def fake_adjust(chat_id, draft_id, feedback_text):
-        adjust_called["value"] = True
-        webhook_app.ADJUST_STATE.pop(chat_id, None)
-    # The real adjust handler name in app.py — adapt if it differs
-    monkeypatch.setattr(webhook_app, "process_adjust_feedback", fake_adjust, raising=False)
+    # Stub the heavy AI processor; we only care about the cascade decision
+    monkeypatch.setattr(webhook_app, "process_adjustment_async",
+                        lambda *args, **kwargs: None)
 
     webhook_app.ADJUST_STATE[999] = {"draft_id": "d1", "awaiting_feedback": True}
     webhook_app.begin_reject_reason(chat_id=999, action="curate_reject",
                                     item_id="x", title="T")
 
     client = webhook_app.app.test_client()
-    payload = {
-        "message": {
-            "chat": {"id": 999},
-            "text": "this should go to ADJUST not REJECT",
-        }
-    }
+    payload = {"message": {"chat": {"id": 999},
+                           "text": "this should go to ADJUST not REJECT"}}
     resp = client.post("/webhook", json=payload)
     assert resp.status_code == 200
 
-    # Adjust must have run; reject reason state must still be present (not consumed)
-    assert adjust_called["value"] is True
+    # ADJUST consumed the message (cleared its state synchronously in the dispatch)
+    assert 999 not in webhook_app.ADJUST_STATE
+    # REJECT state still present — was NOT consumed
     assert 999 in webhook_app.REJECT_REASON_STATE
-
-    # And the feedback reason must NOT have been overwritten with the adjust text
+    # The placeholder feedback's reason was NOT overwritten with the message text
     entries = list_feedback(limit=10)
     assert entries, "begin_reject_reason should have left a placeholder entry"
     assert entries[0]["reason"] == ""
 ```
 
-> **Note on Step 4 wiring:** when adding the cascade in `handle_message`, ensure the ADJUST check runs BEFORE `consume_reject_reason`. The test above will fail loudly if that ordering is reversed.
+> **Note on Step 4 wiring:** when adding the cascade in `telegram_webhook`, ensure the ADJUST check runs BEFORE `consume_reject_reason`. The test above will fail loudly if that ordering is reversed.
 
 - [ ] **Step 2: Run tests to verify they fail**
 

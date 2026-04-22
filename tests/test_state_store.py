@@ -373,4 +373,28 @@ def test_record_success_omits_run_id_when_no_bus(fake_redis):
     record_success("test", {"total": 1, "success": 1, "failure": 0}, 100)
     raw = fake_redis.get("wf:last_run:test")
     data = json.loads(raw)
-    assert "run_id" not in data or data["run_id"] is None
+    assert "run_id" not in data
+
+
+def test_record_crash_dedup_skips_write_even_with_bus_active(fake_redis, monkeypatch):
+    """When dedup hits (same crash observed twice within window), record_crash
+    must early-return BEFORE writing the payload, even when a bus is active.
+    Locks the contract: dedup supersedes run_id persistence."""
+    from execution.core import state_store, event_bus
+
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
+    bus = event_bus.EventBus(workflow="dedup_wf")
+    token = event_bus._active_bus.set(bus)
+    try:
+        state_store.record_crash("dedup_wf", "first")        # claims dedup key
+        fake_redis.delete("wf:last_run:dedup_wf")             # clear to detect second write
+        state_store.record_crash("dedup_wf", "second")        # should be a no-op
+    finally:
+        event_bus._active_bus.reset(token)
+
+    assert fake_redis.get("wf:last_run:dedup_wf") is None     # no second write occurred

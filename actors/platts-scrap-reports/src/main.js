@@ -34,7 +34,7 @@ const bus = new EventBus({
 });
 
 await bus.emit('cron_started', {
-    detail: { apify_run_id: Actor.config?.actorRunId ?? null },
+    detail: { apify_run_id: process.env.ACTOR_RUN_ID ?? null },
 });
 
 async function failWithEvent(message) {

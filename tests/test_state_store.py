@@ -7,10 +7,21 @@ from unittest.mock import patch
 
 @pytest.fixture
 def fake_redis(monkeypatch):
-    """Injects a fakeredis instance as the module-level client."""
+    """Injects a fakeredis instance as the module-level client.
+
+    Also stubs _send_streak_alert so tests that cross the streak threshold
+    never leak to a real Telegram chat. This guard prevents the pollution
+    that happened on 2026-04-21: a full pytest run with TELEGRAM_BOT_TOKEN
+    + TELEGRAM_CHAT_ID in env fired real "TEST falhou 3x/4x seguidas" alerts
+    to the operator's main chat.
+
+    Individual tests that assert alert behavior (test_streak_alert_fires_*)
+    override this stub with their own monkeypatch — the fixture stub is the
+    default, per-test overrides still work."""
     fake = fakeredis.FakeRedis(decode_responses=True)
     from execution.core import state_store
     monkeypatch.setattr(state_store, "_get_client", lambda: fake)
+    monkeypatch.setattr(state_store, "_send_streak_alert", lambda *a, **k: None)
     return fake
 
 
@@ -69,6 +80,11 @@ def test_record_empty_does_not_touch_streak(fake_redis):
 def test_record_crash_increments_streak(fake_redis):
     from execution.core.state_store import record_crash
     record_crash("test", "LSEG connection timeout")
+    # Clear dedup key to simulate the 5-min TTL having expired between runs.
+    # In production, two independent crashes from the same workflow are typically
+    # minutes/hours apart; the dedup window only suppresses double-reports of the
+    # SAME exception from progress.fail + @with_event_bus.
+    fake_redis.delete("wf:crash_dedup:test")
     record_crash("test", "LSEG connection timeout")
     assert fake_redis.get("wf:streak:test") == "2"
     raw = fake_redis.get("wf:last_run:test")
@@ -146,7 +162,9 @@ def test_streak_alert_fires_on_crash_too(fake_redis, monkeypatch):
     calls = []
     monkeypatch.setattr(state_store, "_send_streak_alert", lambda wf, streak, failures: calls.append(wf))
     state_store.record_crash("test", "err1")
+    fake_redis.delete("wf:crash_dedup:test")  # simulate dedup window expiry
     state_store.record_crash("test", "err2")
+    fake_redis.delete("wf:crash_dedup:test")
     state_store.record_crash("test", "err3")
     assert calls == ["test"]
 
@@ -228,3 +246,35 @@ def test_try_claim_alert_key_returns_true_when_redis_raises(monkeypatch):
     monkeypatch.setattr(state_store, "_get_client", lambda: FlakyRedis())
 
     assert state_store.try_claim_alert_key("wf:test:4", ttl_seconds=60) is True
+
+
+def test_record_crash_dedups_within_window(fake_redis):
+    """Two record_crash calls for the same workflow within the dedup window
+    should only increment the streak ONCE. Models the real-world scenario
+    where both progress.fail() and @with_event_bus observe the same exception."""
+    from execution.core.state_store import record_crash
+    record_crash("some_wf", "ValueError: boom")
+    record_crash("some_wf", "ValueError: boom")  # same crash observed from decorator
+    assert fake_redis.get("wf:streak:some_wf") == "1"  # not "2"
+    # The dedup key is present (SET NX held it)
+    assert fake_redis.get("wf:crash_dedup:some_wf") == "1"
+
+
+def test_record_crash_dedup_is_per_workflow(fake_redis):
+    """Different workflows have independent dedup keys — simultaneous crashes
+    across workflows should each be recorded."""
+    from execution.core.state_store import record_crash
+    record_crash("wf_a", "err a")
+    record_crash("wf_b", "err b")
+    assert fake_redis.get("wf:streak:wf_a") == "1"
+    assert fake_redis.get("wf:streak:wf_b") == "1"
+
+
+def test_record_crash_dedup_records_after_expiry(fake_redis):
+    """After the dedup window expires (simulated by deleting the key), a new
+    crash IS recorded — streak increments normally."""
+    from execution.core.state_store import record_crash
+    record_crash("some_wf", "first")
+    fake_redis.delete("wf:crash_dedup:some_wf")  # simulate 5-min TTL having passed
+    record_crash("some_wf", "second")
+    assert fake_redis.get("wf:streak:some_wf") == "2"

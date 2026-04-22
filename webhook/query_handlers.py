@@ -153,14 +153,85 @@ def _queue_button_text(item: dict) -> str:
     return f"{icon} {title}"
 
 
-def format_queue_page(page: int = 1) -> tuple[str, Optional[dict]]:
+def _format_queue_normal(total: int, time_info: str, page_items: list[dict],
+                         total_pages: int, page: int) -> tuple[str, dict]:
+    text = f"*🗂️ STAGING · {total} items{time_info}*"
+    keyboard: list[list[dict]] = []
+    keyboard.append([{
+        "text": "☑️ Modo seleção",
+        "callback_data": "q_mode:enter",
+    }])
+    for item in page_items:
+        item_id = item.get("id") or ""
+        staged = _format_staged_time(item.get("stagedAt", ""))
+        time_tag = f" 🕐{staged}" if staged else ""
+        keyboard.append([{
+            "text": _queue_button_text(item) + time_tag,
+            "callback_data": f"queue_open:{item_id}",
+        }])
+    if total_pages > 1:
+        row: list[dict] = []
+        if page > 1:
+            row.append({"text": "⬅ anterior", "callback_data": f"queue_page:{page - 1}"})
+        row.append({"text": f"{page}/{total_pages}", "callback_data": "noop"})
+        if page < total_pages:
+            row.append({"text": "próximo ➡", "callback_data": f"queue_page:{page + 1}"})
+        keyboard.append(row)
+    return text, {"inline_keyboard": keyboard}
+
+
+def _format_queue_select(total: int, selected: set, time_info: str,
+                         page_items: list[dict], total_pages: int,
+                         page: int) -> tuple[str, dict]:
+    selected_count = len(selected)
+    text = f"*🗂️ STAGING · {selected_count} selecionados de {total}{time_info}*"
+    keyboard: list[list[dict]] = []
+    for item in page_items:
+        item_id = item.get("id") or ""
+        staged = _format_staged_time(item.get("stagedAt", ""))
+        time_tag = f" 🕐{staged}" if staged else ""
+        check = "☑️" if item_id in selected else "☐"
+        label = f"{check} {_queue_button_text(item)}{time_tag}"
+        keyboard.append([{
+            "text": label,
+            "callback_data": f"q_sel:{item_id}",
+        }])
+    keyboard.append([
+        {"text": "✅ Todos", "callback_data": "q_all"},
+        {"text": "❌ Nenhum", "callback_data": "q_none"},
+    ])
+    keyboard.append([
+        {"text": f"📦 Arquivar {selected_count}", "callback_data": "q_bulk:archive"},
+        {"text": f"🗑️ Descartar {selected_count}", "callback_data": "q_bulk:discard"},
+    ])
+    keyboard.append([{"text": "🔙 Sair", "callback_data": "q_mode:exit"}])
+    if total_pages > 1:
+        row: list[dict] = []
+        if page > 1:
+            row.append({"text": "⬅ anterior", "callback_data": f"queue_page:{page - 1}"})
+        row.append({"text": f"{page}/{total_pages}", "callback_data": "noop"})
+        if page < total_pages:
+            row.append({"text": "próximo ➡", "callback_data": f"queue_page:{page + 1}"})
+        keyboard.append(row)
+    return text, {"inline_keyboard": keyboard}
+
+
+def format_queue_page(
+    page: int = 1,
+    mode: str = "normal",
+    selected: Optional[set] = None,
+) -> tuple[str, Optional[dict]]:
     """Return (text, reply_markup) for /queue at given 1-indexed page.
 
-    reply_markup is None when there are no items. Each item row has a
-    single callback button `queue_open:<id>` whose *text* is the item
-    title prefixed by a type icon (🗞️ / 📊). Pagination row appended
-    if total_pages > 1.
+    mode='normal' (default) renders each item as a single button opening
+    the curation card, plus an '☑️ Modo seleção' entry button at the top.
+
+    mode='select' renders each item as a checkbox toggle, plus action
+    rows (✅ Todos / ❌ Nenhum / 📦 Arquivar N / 🗑️ Descartar N / 🔙 Sair).
+    'selected' must be the set of currently selected item ids.
     """
+    if selected is None:
+        selected = set()
     items = redis_queries.list_staging(limit=200)
     total = len(items)
     if total == 0:
@@ -172,34 +243,18 @@ def format_queue_page(page: int = 1) -> tuple[str, Optional[dict]]:
     end = start + _QUEUE_PAGE_SIZE
     page_items = items[start:end]
 
-    # Show collection time range from stagedAt
     staged_times = [i.get("stagedAt", "") for i in items if i.get("stagedAt")]
     if staged_times:
         oldest = _format_staged_time(min(staged_times))
         newest = _format_staged_time(max(staged_times))
-        time_info = f" · coletados {oldest}–{newest} BRT" if oldest != newest else f" · coletado {newest} BRT"
+        time_info = (
+            f" · coletados {oldest}–{newest} BRT"
+            if oldest != newest
+            else f" · coletado {newest} BRT"
+        )
     else:
         time_info = ""
 
-    text = f"*🗂️ STAGING · {total} items{time_info}*"
-
-    keyboard: list[list[dict]] = []
-    for item in page_items:
-        item_id = item.get("id") or ""
-        staged = _format_staged_time(item.get("stagedAt", ""))
-        time_tag = f" 🕐{staged}" if staged else ""
-        keyboard.append([{
-            "text": _queue_button_text(item) + time_tag,
-            "callback_data": f"queue_open:{item_id}",
-        }])
-
-    if total_pages > 1:
-        row: list[dict] = []
-        if page > 1:
-            row.append({"text": "⬅ anterior", "callback_data": f"queue_page:{page - 1}"})
-        row.append({"text": f"{page}/{total_pages}", "callback_data": "noop"})
-        if page < total_pages:
-            row.append({"text": "próximo ➡", "callback_data": f"queue_page:{page + 1}"})
-        keyboard.append(row)
-
-    return text, {"inline_keyboard": keyboard}
+    if mode == "select":
+        return _format_queue_select(total, selected, time_info, page_items, total_pages, page)
+    return _format_queue_normal(total, time_info, page_items, total_pages, page)

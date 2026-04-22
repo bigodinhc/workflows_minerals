@@ -190,10 +190,10 @@ def test_queue_single_page_titles_in_buttons(fake_redis):
     assert "coletados" in text
     # Buttons carry title with icon + collection time
     buttons = markup["inline_keyboard"]
-    assert len(buttons) == 3
-    assert buttons[0][0]["text"].startswith("🗞️ Title 0")
-    assert "🕐" in buttons[0][0]["text"]
-    assert buttons[0][0]["callback_data"] == "queue_open:item0"
+    assert len(buttons) == 4
+    assert buttons[1][0]["text"].startswith("🗞️ Title 0")
+    assert "🕐" in buttons[1][0]["text"]
+    assert buttons[1][0]["callback_data"] == "queue_open:item0"
 
 
 def test_queue_button_uses_rationale_icon(fake_redis):
@@ -203,8 +203,8 @@ def test_queue_button_uses_rationale_icon(fake_redis):
         "stagedAt": "2026-04-15T10:00:00Z"
     }))
     _, markup = format_queue_page(page=1)
-    assert markup["inline_keyboard"][0][0]["text"].startswith("📊 Daily Rationale")
-    assert "🕐" in markup["inline_keyboard"][0][0]["text"]
+    assert markup["inline_keyboard"][1][0]["text"].startswith("📊 Daily Rationale")
+    assert "🕐" in markup["inline_keyboard"][1][0]["text"]
 
 
 def test_queue_paginated(fake_redis):
@@ -218,10 +218,10 @@ def test_queue_paginated(fake_redis):
     assert "STAGING" in text_p1
     assert "12 items" in text_p1
     assert "coletados" in text_p1
-    # 5 item rows + 1 pagination row
-    assert len(markup_p1["inline_keyboard"]) == 6
+    # 1 select-mode button + 5 item rows + 1 pagination row
+    assert len(markup_p1["inline_keyboard"]) == 7
     # Item buttons têm o título
-    assert markup_p1["inline_keyboard"][0][0]["text"].startswith("🗞️ Title 11")
+    assert markup_p1["inline_keyboard"][1][0]["text"].startswith("🗞️ Title 11")
     # Pagination row (última)
     pag_texts = [b["text"] for b in markup_p1["inline_keyboard"][-1]]
     assert any("1/3" in t for t in pag_texts)
@@ -237,7 +237,7 @@ def test_queue_truncates_long_title_in_button(fake_redis):
         "stagedAt": "2026-04-15T10:00:00Z"
     }))
     _, markup = format_queue_page(page=1)
-    btn_text = markup["inline_keyboard"][0][0]["text"]
+    btn_text = markup["inline_keyboard"][1][0]["text"]
     # Título truncado em 40 chars + "…" + ícone + espaço ≤ 64
     assert btn_text.startswith("🗞️ ")
     assert "…" in btn_text
@@ -253,6 +253,112 @@ def test_queue_escapes_markdown_in_button_text(fake_redis):
         "stagedAt": "2026-04-15T10:00:00Z"
     }))
     _, markup = format_queue_page(page=1)
-    btn_text = markup["inline_keyboard"][0][0]["text"]
+    btn_text = markup["inline_keyboard"][1][0]["text"]
     # Button text is plain, so markdown chars are OK literally
     assert "Vale" in btn_text
+
+
+def test_queue_normal_mode_has_enter_select_button(fake_redis):
+    """Normal /queue now has an '☑️ Modo seleção' button above items."""
+    import json
+    from webhook.query_handlers import format_queue_page
+    fake_redis.set("platts:staging:x", json.dumps({
+        "id": "x", "title": "T", "type": "news",
+        "stagedAt": "2026-04-15T10:00:00Z",
+    }))
+    _, markup = format_queue_page(page=1)
+    rows = markup["inline_keyboard"]
+    # First row is the enter-select button
+    assert rows[0][0]["text"] == "☑️ Modo seleção"
+    assert rows[0][0]["callback_data"] == "q_mode:enter"
+    # Item row follows
+    assert rows[1][0]["text"].startswith("🗞️ T")
+
+
+def test_queue_select_mode_header_shows_selection_count(fake_redis):
+    import json
+    from webhook.query_handlers import format_queue_page
+    fake_redis.set("platts:staging:a", json.dumps({
+        "id": "a", "title": "A", "type": "news",
+        "stagedAt": "2026-04-15T10:00:00Z",
+    }))
+    fake_redis.set("platts:staging:b", json.dumps({
+        "id": "b", "title": "B", "type": "news",
+        "stagedAt": "2026-04-15T11:00:00Z",
+    }))
+    text, _ = format_queue_page(page=1, mode="select", selected={"a"})
+    assert "1 selecionados de 2" in text
+
+
+def test_queue_select_mode_items_render_checkboxes(fake_redis):
+    import json
+    from webhook.query_handlers import format_queue_page
+    fake_redis.set("platts:staging:a", json.dumps({
+        "id": "a", "title": "A", "type": "news",
+        "stagedAt": "2026-04-15T10:00:00Z",
+    }))
+    fake_redis.set("platts:staging:b", json.dumps({
+        "id": "b", "title": "B", "type": "news",
+        "stagedAt": "2026-04-15T11:00:00Z",
+    }))
+    _, markup = format_queue_page(page=1, mode="select", selected={"a"})
+    rows = markup["inline_keyboard"]
+    # Find item rows (single-button rows with q_sel callback)
+    item_rows = [r for r in rows if r[0]["callback_data"].startswith("q_sel:")]
+    texts = [r[0]["text"] for r in item_rows]
+    # 'a' selected gets ☑️, 'b' unselected gets ☐
+    assert any(t.startswith("☑️") and "A" in t for t in texts)
+    assert any(t.startswith("☐") and "B" in t for t in texts)
+
+
+def test_queue_select_mode_has_action_rows(fake_redis):
+    import json
+    from webhook.query_handlers import format_queue_page
+    fake_redis.set("platts:staging:a", json.dumps({
+        "id": "a", "title": "A", "type": "news",
+        "stagedAt": "2026-04-15T10:00:00Z",
+    }))
+    _, markup = format_queue_page(page=1, mode="select", selected={"a"})
+    rows = markup["inline_keyboard"]
+    all_texts = [b["text"] for row in rows for b in row]
+    assert "✅ Todos" in all_texts
+    assert "❌ Nenhum" in all_texts
+    assert "📦 Arquivar 1" in all_texts
+    assert "🗑️ Descartar 1" in all_texts
+    assert "🔙 Sair" in all_texts
+
+
+def test_queue_select_mode_counts_zero_when_no_selection(fake_redis):
+    import json
+    from webhook.query_handlers import format_queue_page
+    fake_redis.set("platts:staging:a", json.dumps({
+        "id": "a", "title": "A", "type": "news",
+        "stagedAt": "2026-04-15T10:00:00Z",
+    }))
+    _, markup = format_queue_page(page=1, mode="select", selected=set())
+    all_texts = [b["text"] for row in markup["inline_keyboard"] for b in row]
+    assert "📦 Arquivar 0" in all_texts
+    assert "🗑️ Descartar 0" in all_texts
+
+
+def test_queue_select_mode_preserves_pagination(fake_redis):
+    import json
+    from webhook.query_handlers import format_queue_page
+    for i in range(12):
+        fake_redis.set(f"platts:staging:i{i:02d}", json.dumps({
+            "id": f"i{i:02d}", "title": f"T{i:02d}", "type": "news",
+            "stagedAt": f"2026-04-15T{i:02d}:00:00Z",
+        }))
+    _, markup = format_queue_page(page=1, mode="select", selected=set())
+    rows = markup["inline_keyboard"]
+    # Pagination row must still be present (last row)
+    pag_texts = [b["text"] for b in rows[-1]]
+    assert any("1/3" in t for t in pag_texts)
+
+
+def test_queue_empty_keeps_old_output(fake_redis):
+    """Empty staging still returns the old '(Nenhum item aguardando.)' string."""
+    from webhook.query_handlers import format_queue_page
+    text, markup = format_queue_page(page=1)
+    assert text == "*🗂️ STAGING*\n\nNenhum item aguardando."
+    assert markup is None

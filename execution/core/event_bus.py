@@ -12,12 +12,12 @@ Phase 2 (later): _EventsChannelSink for firehose.
 import atexit
 import functools
 import json
-from contextvars import ContextVar
 import logging
 import os
 import secrets
 import sys
 import time
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Optional
 

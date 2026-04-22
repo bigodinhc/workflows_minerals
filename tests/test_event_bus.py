@@ -540,6 +540,11 @@ def test_get_current_bus_returns_none_outside_decorator():
 
 
 def test_get_current_bus_returns_active_bus_inside_decorator(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
     from execution.core.event_bus import with_event_bus, get_current_bus
     seen = {}
 
@@ -553,6 +558,11 @@ def test_get_current_bus_returns_active_bus_inside_decorator(monkeypatch):
 
 
 def test_get_current_bus_resets_after_decorator_exits(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
     from execution.core.event_bus import with_event_bus, get_current_bus
 
     @with_event_bus("test_wf")
@@ -563,7 +573,12 @@ def test_get_current_bus_resets_after_decorator_exits(monkeypatch):
     assert get_current_bus() is None
 
 
-def test_get_current_bus_resets_even_when_decorator_raises():
+def test_get_current_bus_resets_even_when_decorator_raises(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
     from execution.core.event_bus import with_event_bus, get_current_bus
 
     @with_event_bus("test_wf")
@@ -575,9 +590,14 @@ def test_get_current_bus_resets_even_when_decorator_raises():
     assert get_current_bus() is None
 
 
-def test_get_current_bus_isolated_across_nested_calls():
+def test_get_current_bus_isolated_across_nested_calls(monkeypatch):
     """If a decorated function calls another decorated function, the inner
     bus is active during inner call; outer bus restored afterward."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
     from execution.core.event_bus import with_event_bus, get_current_bus
     trail = []
 

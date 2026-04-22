@@ -13,7 +13,7 @@ from datetime import datetime
 # Adjust path to allow imports from root
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
-from execution.core.event_bus import with_event_bus
+from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 from execution.core.progress_reporter import ProgressReporter
@@ -89,6 +89,8 @@ def format_price_message(prices):
 @with_event_bus("daily_report")
 def main():
     logger = WorkflowLogger("DailyReport")
+    bus = get_current_bus()
+    bus.emit("step", label="Iniciando daily_report")
 
     progress = ProgressReporter(
         workflow="daily_report",
@@ -109,12 +111,17 @@ def main():
         from execution.integrations.lseg_client import LSEGClient
         
         # 1. Fetch Prices (LSEG)
+        bus.emit("step", label="Conectando ao LSEG")
+        import time as _time
+        t0 = _time.time()
         logger.info("Connecting to LSEG...")
         lseg = LSEGClient()
         lseg.connect()
-        
+
         logger.info("Fetching latest futures data...")
         prices = lseg.get_futures_data()
+        bus.emit("api_call", label="lseg.get_futures_data",
+                 detail={"duration_ms": int((_time.time() - t0) * 1000), "rows": len(prices) if prices else 0})
         
         if not prices:
             logger.warning("No prices found/returned from LSEG!")
@@ -125,6 +132,7 @@ def main():
         logger.info(f"Got {len(prices)} contracts.")
             
         # 2. Format Message
+        bus.emit("step", label=f"Formatando mensagem ({len(prices)} contratos)")
         message = format_price_message(prices)
         logger.info("Message formatted successfully")
         print("\n--- PREVIEW ---\n" + message + "\n---------------\n")
@@ -152,6 +160,7 @@ def main():
             progress.finish_empty("dry-run")
             return
 
+        bus.emit("step", label=f"Enviando WhatsApp para {len(delivery_contacts)} contatos")
         progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
 
         reporter = DeliveryReporter(

@@ -34,6 +34,20 @@ _TAIL_LIMIT = 30
 _LABEL_TRUNCATE = 80
 _TAIL_VALID_LEVELS = frozenset({"info", "warn", "error"})
 
+# Superset of ALL_WORKFLOWS (cron-scheduled) plus non-cron workflows that still
+# write to event_log — scripts triggered by other scripts and the 2 Apify actors.
+# /tail accepts any of these; /status + watchdog iterate ALL_WORKFLOWS only.
+_TAIL_KNOWN_WORKFLOWS = frozenset(
+    set(ALL_WORKFLOWS) | {
+        "platts_ingestion",
+        "platts_reports",
+        "platts_scrap_full_news",
+        "platts_scrap_reports",
+        "rebuild_dedup",
+        "watchdog",
+    }
+)
+
 
 # ── Public router (no auth) ──
 
@@ -59,9 +73,12 @@ async def cmd_status(message: Message):
 
 @admin_router.message(Command("tail"))
 async def cmd_tail(message: Message, command: CommandObject):
+    # All replies use parse_mode=None — workflow names contain underscores that
+    # Telegram's Markdown V1 parser interprets as italic entities, producing
+    # 'Can't find end of the entity' errors on _tail_help() and _format_tail().
     raw_args = (command.args or "").strip().split()
     if not raw_args:
-        await message.reply(_tail_help())
+        await message.reply(_tail_help(), parse_mode=None)
         return
 
     # Split positional args from --level=X flag. The flag can appear anywhere.
@@ -72,24 +89,26 @@ async def cmd_tail(message: Message, command: CommandObject):
             level_filter = arg.split("=", 1)[1].lower()
             if level_filter not in _TAIL_VALID_LEVELS:
                 await message.reply(
-                    f"Level inválido: `{level_filter}`. "
-                    f"Use um de: {', '.join(sorted(_TAIL_VALID_LEVELS))}."
+                    f"Level inválido: {level_filter}. "
+                    f"Use um de: {', '.join(sorted(_TAIL_VALID_LEVELS))}.",
+                    parse_mode=None,
                 )
                 return
         else:
             positional.append(arg)
 
     if not positional:
-        await message.reply(_tail_help())
+        await message.reply(_tail_help(), parse_mode=None)
         return
 
     workflow = positional[0]
     explicit_run_id = positional[1] if len(positional) > 1 else None
 
-    if workflow not in ALL_WORKFLOWS:
+    if workflow not in _TAIL_KNOWN_WORKFLOWS:
         await message.reply(
-            f"Workflow desconhecido: `{workflow}`.\n\n"
-            f"Disponíveis: {', '.join(ALL_WORKFLOWS)}"
+            f"Workflow desconhecido: {workflow}.\n\n"
+            f"Disponíveis: {', '.join(sorted(_TAIL_KNOWN_WORKFLOWS))}",
+            parse_mode=None,
         )
         return
 
@@ -98,19 +117,23 @@ async def cmd_tail(message: Message, command: CommandObject):
         from execution.core import state_store
         status = state_store.get_status(workflow)
         if status is None:
-            await message.reply(f"Nenhum run recente de `{workflow}`.")
+            await message.reply(f"Nenhum run recente de {workflow}.", parse_mode=None)
             return
         run_id = status.get("run_id")
         if run_id is None:
             await message.reply(
-                f"Run mais recente de `{workflow}` sem run_id (legacy, anterior ao Phase 4).\n"
-                f"Use `/tail {workflow} <run_id>` com um ID explícito."
+                f"Run mais recente de {workflow} sem run_id (legacy, anterior ao Phase 4).\n"
+                f"Use /tail {workflow} <run_id> com um ID explícito.",
+                parse_mode=None,
             )
             return
 
     client = _get_supabase_client()
     if client is None:
-        await message.reply("⚠️ Supabase indisponível — não consigo buscar eventos.")
+        await message.reply(
+            "⚠️ Supabase indisponível — não consigo buscar eventos.",
+            parse_mode=None,
+        )
         return
 
     try:
@@ -119,19 +142,22 @@ async def cmd_tail(message: Message, command: CommandObject):
         )
     except Exception as exc:
         logger.error(f"/tail event_log query failed: {exc}")
-        err_text = str(exc)[:100].replace("`", "'")
-        await message.reply(f"⚠️ Erro ao consultar event\\_log: `{err_text}`")
+        await message.reply(
+            f"⚠️ Erro ao consultar event_log: {str(exc)[:100]}",
+            parse_mode=None,
+        )
         return
 
     rows = events.data or []
     if not rows:
         filter_note = f" (level={level_filter})" if level_filter else ""
         await message.reply(
-            f"📜 `{workflow}.{run_id}`{filter_note} — sem eventos no event_log."
+            f"📜 {workflow}.{run_id}{filter_note} — sem eventos no event_log.",
+            parse_mode=None,
         )
         return
 
-    await message.reply(_format_tail(workflow, run_id, rows, level_filter))
+    await message.reply(_format_tail(workflow, run_id, rows, level_filter), parse_mode=None)
 
 
 def _query_event_log_sync(client, workflow, run_id, level_filter=None):
@@ -152,19 +178,21 @@ def _query_event_log_sync(client, workflow, run_id, level_filter=None):
 
 
 def _tail_help() -> str:
+    # Plain text — sent with parse_mode=None so underscores in workflow names
+    # don't trip Telegram's Markdown V1 italic parser.
     return (
-        "📜 *Uso do /tail*\n\n"
-        f"`/tail <workflow>` — últimos {_TAIL_LIMIT} eventos do run mais recente\n"
-        f"`/tail <workflow> <run_id>` — últimos {_TAIL_LIMIT} eventos de um run específico\n"
-        f"`/tail <workflow> --level=warn` — filtra por nível (info/warn/error)\n\n"
-        f"Workflows: {', '.join(ALL_WORKFLOWS)}"
+        "📜 Uso do /tail\n\n"
+        f"/tail <workflow> — últimos {_TAIL_LIMIT} eventos do run mais recente\n"
+        f"/tail <workflow> <run_id> — últimos {_TAIL_LIMIT} eventos de um run específico\n"
+        f"/tail <workflow> --level=warn — filtra por nível (info/warn/error)\n\n"
+        f"Workflows: {', '.join(sorted(_TAIL_KNOWN_WORKFLOWS))}"
     )
 
 
 def _format_tail(workflow: str, run_id: str, rows: list, level_filter: str = None) -> str:
     level_emoji = {"info": "ℹ️", "warn": "⚠️", "error": "🚨"}
     filter_note = f" (level={level_filter})" if level_filter else ""
-    lines = [f"📜 `{workflow}.{run_id}`{filter_note} (últimos {len(rows)} eventos)\n"]
+    lines = [f"📜 {workflow}.{run_id}{filter_note} (últimos {len(rows)} eventos)\n"]
     for row in rows:
         ts = (row.get("ts") or "")
         hhmmss = ts[11:19] if len(ts) >= 19 else ts

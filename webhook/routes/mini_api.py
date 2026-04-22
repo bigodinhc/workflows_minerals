@@ -15,8 +15,9 @@ from aiohttp import web
 import redis_queries
 from execution.curation import redis_client
 from reports_nav import _get_supabase
-from bot.config import SHEET_ID
 from execution.integrations.sheets_client import SheetsClient
+
+_SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
 from routes.mini_auth import validate_init_data
 from workflow_trigger import (
     WORKFLOW_CATALOG,
@@ -412,7 +413,7 @@ async def get_contacts(request: web.Request) -> web.Response:
     try:
         sheets = SheetsClient()
         contacts, total_pages = await asyncio.to_thread(
-            sheets.list_contacts, SHEET_ID, search=search, page=page, per_page=20,
+            sheets.list_contacts, _SHEET_ID, search=search, page=page, per_page=20,
         )
     except Exception as exc:
         logger.error(f"contacts query error: {exc}")
@@ -441,7 +442,7 @@ async def toggle_contact(request: web.Request) -> web.Response:
     try:
         sheets = SheetsClient()
         name, new_status = await asyncio.to_thread(
-            sheets.toggle_contact, SHEET_ID, phone,
+            sheets.toggle_contact, _SHEET_ID, phone,
         )
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=404)
@@ -494,7 +495,7 @@ async def _fetch_contacts_active() -> int:
     try:
         sheets = SheetsClient()
         contacts, _ = await asyncio.to_thread(
-            sheets.list_contacts, SHEET_ID, page=1, per_page=10_000,
+            sheets.list_contacts, _SHEET_ID, page=1, per_page=10_000,
         )
         return sum(1 for c in contacts if str(c.get("ButtonPayload", "")).strip() == "Big")
     except Exception as exc:

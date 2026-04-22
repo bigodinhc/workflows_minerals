@@ -21,7 +21,6 @@ ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 UAZAPI_URL = os.getenv("UAZAPI_URL", "https://mineralstrading.uazapi.com")
 UAZAPI_TOKEN = (os.getenv("UAZAPI_TOKEN") or "").strip()
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
-SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
 WEBHOOK_PATH = "/webhook"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 8080))

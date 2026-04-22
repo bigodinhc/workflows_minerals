@@ -50,6 +50,7 @@ jobs:
           # Telegram
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_EVENTS_CHANNEL_ID: ${{ secrets.TELEGRAM_EVENTS_CHANNEL_ID }}
           TELEGRAM_WEBHOOK_URL: ${{ vars.TELEGRAM_WEBHOOK_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
 

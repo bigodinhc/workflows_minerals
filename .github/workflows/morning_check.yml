@@ -50,6 +50,7 @@ jobs:
           UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_EVENTS_CHANNEL_ID: ${{ secrets.TELEGRAM_EVENTS_CHANNEL_ID }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
         run: |
           DATE_ARG=""

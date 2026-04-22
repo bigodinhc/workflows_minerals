@@ -101,17 +101,29 @@ async def test_reject_reason_skip_keyword_shortcircuits(
 
 
 @pytest.mark.asyncio
-async def test_add_contact_data_happy_path_writes_to_sheet(
+async def test_add_contact_data_happy_path_calls_repo_add(
     mock_message, fsm_context_in_state, mocker,
 ):
+    from datetime import datetime, timezone
+    from execution.integrations.contacts_repo import Contact
+    _now = datetime.now(timezone.utc)
+    added_contact = Contact(
+        id="new-id", name="João", phone_raw="11999998888",
+        phone_uazapi="5511999998888", status="ativo",
+        created_at=_now, updated_at=_now,
+    )
     msg = mock_message(text="João 11999998888")
     state = fsm_context_in_state(state=AddContact.waiting_data)
     mocker.patch(
         "bot.routers.messages.contact_admin.parse_add_input",
         return_value=("João", "11999998888"),
     )
-    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=([], 0)))
-    mocker.patch("bot.routers.messages.SheetsClient")
+    # First to_thread call: repo.add → Contact; second: repo.list_active → []
+    mocker.patch(
+        "asyncio.to_thread",
+        new=AsyncMock(side_effect=[added_contact, []]),
+    )
+    mocker.patch("bot.routers.messages.ContactsRepo")
 
     await on_add_contact_data(msg, state)
 

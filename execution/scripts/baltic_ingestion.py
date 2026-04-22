@@ -22,7 +22,9 @@ from datetime import datetime
 # Adjust path to allow imports from root
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
-from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
+from execution.integrations.contacts_repo import ContactsRepo
+from execution.core.delivery_reporter import DeliveryReporter, build_delivery_contact
+from execution.core import state_store
 import time as _time
 
 from execution.core.event_bus import with_event_bus, get_current_bus
@@ -30,14 +32,11 @@ from execution.core.logger import WorkflowLogger
 from execution.core.sentry_init import init_sentry
 from execution.integrations.baltic_client import BalticClient
 from execution.integrations.claude_client import ClaudeClient
-from execution.integrations.sheets_client import SheetsClient
 from execution.integrations.uazapi_client import UazapiClient
 
 # CONFIGURATION
 REPORT_TYPE = "BALTIC_REPORT"
 WORKFLOW_NAME = "baltic"
-SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
-SHEET_NAME_CONTACTS = "Página1"
 IRONMARKET_URL = "https://merry-adaptation-production.up.railway.app/ingest/price"
 IRONMARKET_API_KEY = "ironmkt_WUbuYLe4m06GTiYos_fVwvBfNa2l8GWoJtE9K8MJFCY" # Keeping hardcoded as requested, or load from env
 
@@ -225,14 +224,13 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
 
     try:
         # ── PHASE 1: check control sheet ─────────────────────────────────────
-        sheets = SheetsClient()
-
         if not args.dry_run:
-            already_done = await asyncio.to_thread(
-                sheets.check_daily_status, SHEET_ID, today_str, REPORT_TYPE
+            claim_key = f"daily_report:sent:{REPORT_TYPE}:{today_str}"
+            claimed = await asyncio.to_thread(
+                state_store.try_claim_alert_key, claim_key, 48 * 3600
             )
-            if already_done:
-                logger.info("Baltic report already processed today. Exiting.")
+            if not claimed:
+                logger.info("Report already sent today. Exiting.")
                 await reporter.step("Skipped", "report already sent today", level="info")
                 await reporter.finish()
                 return
@@ -342,10 +340,11 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
         message = format_whatsapp_message(data)
 
         bus.emit("step", label="Enviando WhatsApp")
-        contacts = await asyncio.to_thread(sheets.get_contacts, SHEET_ID, SHEET_NAME_CONTACTS)
+        contacts_repo = ContactsRepo()
+        contacts = await asyncio.to_thread(contacts_repo.list_active)
         uazapi = UazapiClient()
 
-        delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
+        delivery_contacts = [build_delivery_contact(c) for c in contacts]
 
         if not delivery_contacts:
             logger.warning("No active contacts found.")
@@ -373,11 +372,6 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             f"Baltic broadcast complete. Sent: {report.success_count}, "
             f"Failed: {report.failure_count}"
         )
-
-        # ── PHASE 6: mark complete ────────────────────────────────────────────
-        if report.success_count > 0:
-            await asyncio.to_thread(sheets.mark_daily_status, SHEET_ID, today_str, REPORT_TYPE)
-            logger.info("Marked as complete in control sheet.")
 
         await reporter.finish(report=report, message=message)
 

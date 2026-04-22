@@ -1,204 +1,218 @@
 # Architecture
 
-**Analysis Date:** 2026-04-17
+**Analysis Date:** 2026-04-22
 
 ## Pattern Overview
 
-**Overall:** Modular monorepo (Python + TypeScript) with event-driven microservice-like boundaries.
+**Overall:** Layered + Repository Pattern
+
+The system uses a **3-layer architecture** with clear separation of concerns:
+1. **Handler Layer** (Telegram bot routers) — receives user input & callbacks
+2. **Service Layer** (dispatch, query handlers) — orchestrates workflows
+3. **Repository Layer** (ContactsRepo) — abstracts Supabase data access
+
+This enables testing of business logic independently of external services (Telegram, Supabase, Uazapi). The recent refactor migrated contacts storage from Google Sheets to Supabase via the `ContactsRepo` interface pattern.
 
 **Key Characteristics:**
-- **Backend:** Python execution layer (curation, agent orchestration) + aiohttp webhook server (Telegram bot + Mini App API)
-- **Frontend:** React/TypeScript Mini App (Telegram Web App) + Next.js Dashboard (React)
-- **Scrapers:** Apify Actor orchestration (JavaScript/Node.js) running in cloud, output → Supabase Storage + Postgres
-- **Message Flow:** Webhook ingestion (Apify callbacks, GitHub Actions) → Redis staging → Curation classification → Telegram bot approval → WhatsApp broadcast
-- **Persistence:** Supabase (Postgres tables + Storage buckets), Redis (FSM state, staging queues, dedup caches), Google Sheets (contact admin)
+- **Async-first**: Aiogram + aiohttp for concurrent operations
+- **Dependency Injection**: Services accept client/repo injections for testability
+- **Callback-driven UI**: Aiogram's CallbackData factories for type-safe Telegram button interactions
+- **FSM (Finite State Machine)**: Redis-backed state management for multi-step workflows
+- **Error Categorization**: Structured error types for WhatsApp delivery failures
 
 ## Layers
 
-**Apify Scraper Actors:**
-- Purpose: Cloud-based web scrapers that extract Platts/TSI data (prices, news, reports)
-- Location: `/actors/`
-- Contains: JavaScript/Node.js actors (platts-scrap-price, platts-scrap-full-news, platts-scrap-reports, etc.)
-- Depends on: Apify platform, Supabase Storage/Postgres, Telegram API (for notifications)
-- Used by: Execution scripts via ApifyClient; output stored in Supabase
+**Handler Layer (Telegram Bot Routers):**
+- Purpose: Parse Telegram updates, enforce authorization, dispatch to services
+- Location: `webhook/bot/routers/`
+- Contains: Command handlers (`commands.py`), message FSM handlers (`messages.py`), callback query handlers (`callbacks_*.py`)
+- Depends on: ContactsRepo, dispatch, contact_admin utilities
+- Used by: Aiogram dispatcher (webhook entry point at `webhook/bot/main.py`)
 
-**Execution Layer (Python):**
-- Purpose: Core business logic, scheduling, AI agent orchestration
-- Location: `/execution/`
+**Service/Orchestration Layer:**
+- Purpose: Business logic, multi-step workflows, external API coordination
+- Location: `webhook/dispatch.py`, `webhook/contact_admin.py`, `execution/core/`
 - Contains:
-  - `scripts/` — Cron-triggered ingestion workflows (platts_ingestion.py, morning_check.py, send_daily_report.py)
-  - `curation/` — Classification/routing of scraped data (router.py, id_gen.py, redis_client.py, telegram_poster.py)
-  - `agents/` — Claude-based AI for market analysis (rationale_agent.py: 3-phase extraction → synthesis → localization)
-  - `integrations/` — External API clients (supabase_client.py, sheets_client.py, apify_client.py, telegram_client.py, claude_client.py, etc.)
-  - `core/` — State management, logging, utilities (state_store.py, progress_reporter.py, delivery_reporter.py, logger.py)
-- Depends on: Supabase, Redis, Apify, Claude API, Google Sheets API, LSEG (Platts), Telegram API
-- Used by: Webhook handlers, scheduled jobs
+  - `dispatch.py` — WhatsApp sending (idempotency, Redis checks)
+  - `contact_admin.py` — Input parsing, state management, UI rendering
+  - `execution/core/delivery_reporter.py` — Aggregated delivery results & error categorization
+  - `execution/core/progress_reporter.py` — Workflow event logging
+- Depends on: ContactsRepo, Telegram API, Uazapi, Redis, Supabase
+- Used by: Handlers, scripts, webhook routes
 
-**Webhook Server (aiohttp + Aiogram):**
-- Purpose: HTTP server handling Telegram webhook updates, Mini App API, and internal routes
-- Location: `/webhook/bot/` (Telegram bot) + `/webhook/routes/` (API endpoints)
-- Contains:
-  - `bot/main.py` — Entry point (creates aiohttp app, registers routers)
-  - `bot/config.py` — Environment/singletons (Bot, Dispatcher, Redis storage)
-  - `bot/routers/` — Message handlers (commands, callbacks, messages, FSM states)
-  - `bot/middlewares/` — Auth middleware (role-based access control)
-  - `routes/` — HTTP endpoints (api.py for store-draft/seen-articles, mini_api.py for Mini App, preview.py for draft preview)
-- Depends on: Aiogram (Telegram), Redis (FSM state), Execution layer, Supabase, Google Sheets
-- Used by: Telegram users, Mini App frontend, GitHub Actions
+**Repository Layer (Data Access):**
+- Purpose: Isolate Supabase client calls, normalize phone numbers, enforce business rules
+- Location: `execution/integrations/contacts_repo.py`
+- Contains: `ContactsRepo` class with methods: `list_active()`, `list_all()`, `get_by_phone()`, `add()`, `toggle()`, `bulk_set_status()`
+- Depends on: supabase-py client, phonenumbers library
+- Used by: Handlers, dispatch, scripts, dashboard API (`dashboard/app/api/contacts/route.ts`)
 
-**Telegram Mini App Frontend (React/TypeScript):**
-- Purpose: In-Telegram web interface for browsing workflows, news, reports, contacts
-- Location: `/webhook/mini-app/src/`
-- Contains:
-  - `App.tsx` — Main router and tab navigation
-  - `pages/` — Workflows, News, NewsDetail, Reports, Contacts, More, Home
-  - `components/` — Reusable UI (TabBar, Card, Skeleton, Buttons)
-  - `hooks/` — Custom hooks (useNavigation, useAuth, etc.)
-  - `lib/` — API client, utilities
-- Depends on: Telegram Web App SDK (telegram.d.ts), aiohttp Mini App API (/api/mini/*)
-- Used by: Telegram Mini App SDK
-
-**Dashboard Frontend (Next.js/React):**
-- Purpose: Admin dashboard for monitoring, delivery reports, contacts management, news curation
-- Location: `/dashboard/`
-- Contains:
-  - `app/api/` — Server-side API routes (contacts, delivery-report, logs, news, workflows)
-  - `app/` — Page routes (news, workflows, executions, contacts)
-  - `components/` — UI sections (dashboard, delivery, layout, ui)
-  - `lib/` — Utilities and API clients
-- Depends on: Execution layer (for logs/state), Supabase, Google Sheets
-- Used by: Admin web browser
+**Data Layer:**
+- Purpose: Persist contact data, event logs
+- Location: `supabase/migrations/20260422_contacts.sql`
+- Contains: `contacts` table (id, name, phone_raw, phone_uazapi, status, created_at, updated_at)
+- Depends on: Supabase PostgreSQL, Telegram Webhook API, Uazapi, Google Sheets (legacy, being phased out)
 
 ## Data Flow
 
-**Core Workflow: Scrape → Classify → Approve → Broadcast**
+**Add Contact Flow (/add command):**
 
-1. **Data Ingestion (Apify Actors)**
-   - Actors scrape Platts/TSI websites on schedule
-   - Output → Supabase Storage (PDF reports) + Postgres (structured data: news, prices)
-   - Actor sends callback notification to webhook or logs to Telegram
+1. User sends `/add` → `cmd_add()` in `webhook/bot/routers/commands.py` sets FSM state `AddContact.waiting_data`
+2. User sends text → `on_add_contact_data()` in `webhook/bot/routers/messages.py`
+3. Parse input via `contact_admin.parse_add_input(text)` → extract name, phone
+4. Validate phone via `normalize_phone()` in ContactsRepo → E.164 format
+5. Call `ContactsRepo.add(name, phone, send_welcome=_sync_send_welcome)`:
+   - Duplicate pre-check via `get_by_phone()`
+   - Call injected `send_welcome()` → wraps `dispatch.send_whatsapp()` for Uazapi
+   - Insert into `contacts` table
+   - Handle race conditions (unique constraint on phone_uazapi)
+6. On success: Send confirmation toast with active count
+7. On error: Send user-friendly message (InvalidPhoneError, ContactAlreadyExistsError, etc.)
 
-2. **Execution Script Trigger (platts_ingestion.py)**
-   - Cron or manual trigger via GitHub Actions
-   - Fetches dataset from Apify via ApifyClient
-   - Flattens nested actor output into article list
+**List/Toggle Contact Flow (/list, toggle callbacks):**
 
-3. **Curation Classification (router.py)**
-   - Each item classified as "rationale" (RMW Rationale/Lump tab) or "news" (other)
-   - Generated unique ID via hash(title)
-   - Dedup check: skip if already seen or in staging
-   - Staged in Redis with `platts:staging:{id}` and marked seen/scraped
+1. User sends `/list [search]` → `cmd_list()` fetches page 1
+2. `_render_list_view()` calls `ContactsRepo.list_all(search=search, page=page, per_page=10)`
+3. Build inline keyboard via `contact_admin.build_list_keyboard(contacts)` → Contact Bulkbuttns + pagination
+4. User taps contact button → `ContactToggle` callback fires in `webhook/bot/routers/callbacks_contacts.py`
+5. `on_contact_toggle()` calls `ContactsRepo.toggle(phone)` → flips status ativo ↔ inativo
+6. Refresh list message with updated keyboard
 
-4. **Telegram Queue (/queue command)**
-   - Bot retrieves staging items from Redis (type: "news" or "rationale")
-   - Displays paginated inline buttons for admin review
-   - Admin can approve, reject, adjust, or send to AI
+**Bulk Operations (ContactBulk/ContactBulkConfirm/ContactBulkCancel):**
 
-5. **Approval + AI Processing**
-   - **News:** Direct approval → posted to Telegram channel
-   - **Rationale:** Sent to Claude agent (3-phase: analyst → synthesis → localizer) → structured briefing generated
-   - Approved items moved from staging → Telegram channel/WhatsApp broadcast
+1. User taps "✅ Ativar todos" or "❌ Desativar todos" button
+2. `on_bulk_prompt()` counts matching contacts, shows confirmation dialog with `ContactBulkConfirm` callback
+3. User taps "✅ Sim" → `on_bulk_confirm()` calls `ContactsRepo.bulk_set_status(status, search=search)`
+4. Update message with result count
 
-6. **Broadcast**
-   - Approved messages posted to Telegram channel (subscribers notified)
-   - WhatsApp endpoint receives same message, posts to WhatsApp group (via WhatsApp Cloud API webhook)
-   - Delivery tracked in Postgres (delivery_reports table)
+**WhatsApp Broadcast Flow:**
 
-7. **Mini App (Real-Time Feed)**
-   - Mini App fetches latest news from `/api/mini/news` (reads from Supabase/Redis)
-   - Displays workflows (GitHub Actions runs), reports (Supabase Storage), contacts (Google Sheets)
+1. User sends `/s` → shows main menu
+2. User taps "📲 Enviar Msg" → FSM state `BroadcastMessage.waiting_text`
+3. User sends message text → `on_broadcast_text()` creates draft, shows preview + confirm buttons
+4. User taps "✅ Enviar" → `BroadcastConfirm` callback triggers dispatch
+5. `dispatch.send_whatsapp()` called for each active contact:
+   - Idempotency check via Redis (24h window: `whatsapp:sent:<hash>`)
+   - Uazapi HTTP POST to `{UAZAPI_URL}/api/message/send`
+   - Error categorization (WhatsApp disconnected, rate limit, invalid number, etc.)
+6. `DeliveryReporter` aggregates results, sends Telegram summary
 
-**State Management:**
-- **Redis:** FSM state (user conversation context), staging queue, dedup cache (seen articles), workflow state
-- **Supabase Postgres:** Persistent records (news articles, reports metadata, delivery logs, contacts)
-- **Google Sheets:** Contact list (admin managed)
-- **Local memory (webhook):** Draft approvals in-flight
+**Event Log Flow (Internal):**
+
+1. Scripts/handlers call `progress_reporter.emit(workflow, run_id, event, label, detail)`
+2. Inserts to `execution_log` table (workflow, run_id, ts, level, event, label, detail)
+3. `/tail <workflow>` command queries and formats last 30 events for user
+
+**State Management (FSM):**
+
+- Redis backend via `aiogram.fsm.storage.redis.RedisStorage`
+- Key pattern: `fsm:<chat_id>:<user_id>:<state_key>`
+- Used for: AddContact flow, AdjustDraft, RejectReason, BroadcastMessage, WriterInput
+- TTL: Auto-expiry per state (contact_admin uses explicit 5-min TTL for legacy state dict)
 
 ## Key Abstractions
 
-**Curation Router:**
-- Purpose: Classify and stage scraped items with dedup
-- Examples: `execution/curation/router.py`, `execution/curation/id_gen.py`
-- Pattern: Functional, stateless classification. Persists state to Redis.
+**ContactsRepo Interface:**
+- Purpose: Abstract Supabase from business logic; enable testing with fake clients
+- Examples: `execution/integrations/contacts_repo.py`
+- Pattern: Dependency injection (optional `client=` parameter in `__init__`); test passes `MagicMock()` client
+- Methods expose contact operations (CRUD, search, bulk) with domain-specific exceptions
 
-**RationaleAgent (Claude 3-Phase):**
-- Purpose: Extract market intelligence from raw reports
-- Examples: `execution/agents/rationale_agent.py`
-- Pattern: Sequential AI prompting (analyst → synthesis → localizer)
+**CallbackData Factories:**
+- Purpose: Type-safe Telegram button serialization/deserialization
+- Examples: `webhook/bot/callback_data.py` — `ContactToggle`, `ContactBulk`, `ContactBulkConfirm`, `ContactBulkCancel`
+- Pattern: Aiogram's `CallbackData` base class with `.pack()` / `.filter()` decorators
+- Benefit: Eliminates string-parsing bugs; strongly-typed callback parameters in handlers
 
-**Telegram Bot Handlers:**
-- Purpose: Handle user commands, callbacks, and FSM flows
-- Examples: `webhook/bot/routers/callbacks.py`, `webhook/bot/routers/messages.py`
-- Pattern: Aiogram routers with middleware, CallbackData objects for type-safe button actions
+**DeliveryReporter:**
+- Purpose: Structured error reporting with categorization (circuit breaker logic)
+- Examples: `execution/core/delivery_reporter.py`
+- Pattern: Enum-based error categories, per-category action hints, sample contact names
+- Used by: Broadcast dispatch, script execution logging
 
-**Mini App API:**
-- Purpose: REST endpoints for in-app data fetching
-- Examples: `webhook/routes/mini_api.py` (/api/mini/news, /api/mini/workflows, etc.)
-- Pattern: aiohttp handlers with init_data validation (Telegram SDK)
-
-**External Integrations (Client Classes):**
-- Purpose: Encapsulate API calls to external services
-- Examples: `execution/integrations/apify_client.py`, `execution/integrations/sheets_client.py`, `execution/integrations/claude_client.py`
-- Pattern: Single responsibility, error handling, logging
+**FSM States:**
+- Purpose: Multi-step user flows with state persistence
+- Examples: `webhook/bot/states.py` — `AddContact`, `AdjustDraft`, `RejectReason`, `BroadcastMessage`
+- Pattern: Aiogram's `StatesGroup` + Redis storage; auto-cleared by handlers or TTL
 
 ## Entry Points
 
 **Telegram Webhook:**
-- Location: `webhook/bot/main.py:main()`
-- Triggers: POST /webhook (Telegram updates) via aiohttp
-- Responsibilities: Route Telegram messages to handlers, manage FSM state (Redis)
+- Location: `webhook/bot/main.py` (`create_app()`, `main()`)
+- Triggers: Telegram sends update via POST to `/webhook`
+- Responsibilities:
+  1. Setup Aiogram dispatcher with routers (commands, callbacks, messages)
+  2. Register Aiogram webhook handler with aiohttp
+  3. Mount additional aiohttp routes (API, preview, mini-app)
+  4. On startup: set webhook URL with Telegram API
+  5. On shutdown: delete webhook, close bot session
 
-**Execution Scripts (Cron Jobs):**
-- Location: `execution/scripts/*.py` (platts_ingestion.py, morning_check.py, send_daily_report.py, etc.)
-- Triggers: Railway/GitHub Actions scheduled or manual
-- Responsibilities: Fetch data, classify, queue for approval, dispatch to Telegram/WhatsApp
+**CLI Scripts:**
+- Location: `execution/scripts/` (send_daily_report.py, send_news.py, baltic_ingestion.py, etc.)
+- Triggers: GitHub Actions cron jobs
+- Responsibilities: Data ingestion, report generation, WhatsApp broadcast via `dispatch.send_whatsapp()`
 
-**GitHub Actions Workflows:**
-- Location: `.github/workflows/`
-- Triggers: Scheduled crons, manual dispatch
-- Responsibilities: Invoke execution scripts, trigger Apify actors, post drafts to webhook
+**Admin Commands:**
+- Location: `webhook/bot/routers/commands.py`
+- Triggers: User types `/command` in Telegram
+- Examples: `/add` (AddContact FSM), `/list` (fetch & render), `/status` (workflow health), `/tail` (event log)
 
-**Apify Actor Main:**
-- Location: `actors/platts-scrap-*/src/main.js`
-- Triggers: Manual or scheduled via Apify platform
-- Responsibilities: Scrape data, save to Supabase, notify webhook
-
-**Next.js Dashboard:**
-- Location: `dashboard/` with `dashboard/app/page.tsx` as root
-- Triggers: Admin browser navigation
-- Responsibilities: Display workflows, news, contacts, delivery reports
-
-**Mini App Frontend:**
-- Location: `webhook/mini-app/src/main.tsx` (compiled to dist/, served by webhook)
-- Triggers: User taps "Open Mini App" in Telegram
-- Responsibilities: Display workflows, news feed, reports, contacts in-Telegram
+**HTTP API Routes:**
+- Location: `webhook/routes/api.py`, `webhook/routes/mini_api.py`
+- Triggers: External services or frontend
+- Examples: Report downloads, workflow status, mini-app auth
 
 ## Error Handling
 
-**Strategy:** Comprehensive try-catch with structured logging and fallback user messaging.
+**Strategy:** Multi-level validation with domain-specific exceptions
 
 **Patterns:**
-- **Aiogram handlers:** Catch exceptions, log with WorkflowLogger, reply with user-friendly error message
-- **Execution scripts:** Catch at top level, log traceback, exit with non-zero code (Railway detects failure)
-- **External API calls:** Retry logic (exponential backoff), log each attempt, raise after max retries
-- **State transitions:** FSM errors logged; invalid states return error message without state change
+
+1. **Validation Layer** (`contact_admin.py`):
+   - `parse_add_input()` — raises `ValueError` for bad format
+   - Phone regex check — no unexpected characters
+   - Length check — 10-15 digits
+
+2. **Repository Layer** (`ContactsRepo`):
+   - `normalize_phone()` — raises `InvalidPhoneError` for unparseable/invalid phones
+   - `add()` — pre-check for duplicate, post-insert unique constraint race condition handling
+   - Raises `ContactAlreadyExistsError` with existing contact details
+   - Raises `ContactNotFoundError` on lookups that fail
+
+3. **Handler Layer** (routers):
+   - Catch domain exceptions → user-friendly Telegram messages
+   - Log errors with `logger.error()` for ops visibility
+   - Send error toast via `query.answer()`
+
+4. **WhatsApp Sending** (`dispatch.send_whatsapp()`):
+   - Categorize HTTP errors: WHATSAPP_DISCONNECTED, RATE_LIMIT, INVALID_NUMBER, UPSTREAM_5XX, AUTH, TIMEOUT, NETWORK, UNKNOWN
+   - Circuit breaker: abort if 5 consecutive FATAL_CATEGORIES errors
+   - Idempotency via Redis: prevent duplicate sends
 
 ## Cross-Cutting Concerns
 
 **Logging:** 
-- Framework: Python `structlog` + custom `WorkflowLogger` (colored console output, file logs to `/.tmp/logs/`)
-- Pattern: Each module logs entry/exit of workflows, errors, and key state changes
+- Framework: `logging` module (stdlib)
+- Approach: Each module uses `logger = logging.getLogger(__name__)`
+- Sentry integration: Optional via `SENTRY_DSN` env var (captures exceptions + breadcrumbs)
+- Level: INFO for startup, WARNING for degradation, ERROR for operational issues
 
-**Validation:**
-- **User input:** FSM states constrain expected message types; invalid input returns error
-- **External data:** Defensive parsing (isinstance checks) for Apify actor payloads; malformed items skipped with warning
-- **Auth:** RoleMiddleware on Telegram handlers (admin vs subscriber vs public); Mini App validates init_data signature
+**Validation:** 
+- Phone numbers: libphonenumber (phonenumbers library) for E.164 parsing
+- Input parsing: Custom parsers in `contact_admin.py` + form validators in Aiogram filters
+- Schema validation: (Not yet) — candidates: pydantic, zod (dashboard)
 
-**Authentication:**
-- **Telegram:** Bot token in environment; webhook signature validation (Telegram sends X-Telegram-Init-Data header)
-- **Mini App:** Telegram SDK init_data (signed by Telegram, validated server-side in `validate_init_data()`)
-- **Admin routes:** Middleware checks user role against Postgres user_roles table
+**Authentication:** 
+- Telegram: Bot token in env var + webhook URL verification
+- Admin checks: `RoleMiddleware` via `bot.users.is_admin(chat_id)`
+- Supabase: Service role key (no RLS for internal scripts); RLS disabled in contacts table (service_role only)
+
+**Async Coordination:**
+- Framework: Aiogram + aiohttp
+- Thread-bridging: `asyncio.to_thread()` for blocking repos/scripts (ContactsRepo, delivery_reporter)
+- Background tasks: `create_background_task()` in `bot/main.py` for long-running ops
+- Redis async: `redis_async.from_url()` for idempotency checks, FSM state
 
 ---
 
-*Architecture analysis: 2026-04-17*
+*Architecture analysis: 2026-04-22*

@@ -5,7 +5,7 @@ import pytest
 
 from execution.integrations.contacts_repo import (
     Contact, ContactsRepo, ContactNotFoundError,
-    ContactAlreadyExistsError, InvalidPhoneError,
+    ContactAlreadyExistsError, InvalidPhoneError, _parse_ts,
 )
 
 
@@ -338,3 +338,31 @@ def test_bulk_set_status_rejects_invalid_status(fake_client):
     repo = ContactsRepo(client=fake_client)
     with pytest.raises(ValueError, match="invalid status"):
         repo.bulk_set_status("banido")
+
+
+# ── _parse_ts edge cases (Python 3.9 microsecond handling) ──
+
+def test_parse_ts_accepts_zero_microseconds():
+    dt = _parse_ts("2026-04-22T10:00:00+00:00")
+    assert dt.year == 2026 and dt.microsecond == 0
+
+
+def test_parse_ts_accepts_six_digit_microseconds():
+    dt = _parse_ts("2026-04-22T10:00:00.123456+00:00")
+    assert dt.microsecond == 123456
+
+
+def test_parse_ts_accepts_five_digit_microseconds_supabase_style():
+    """Supabase returns 5-digit microseconds which Py3.9 fromisoformat rejects."""
+    dt = _parse_ts("2026-04-22T11:08:22.39898+00:00")
+    assert dt.microsecond == 398980
+
+
+def test_parse_ts_accepts_one_digit_microseconds():
+    dt = _parse_ts("2026-04-22T10:00:00.5+00:00")
+    assert dt.microsecond == 500000
+
+
+def test_parse_ts_accepts_z_suffix():
+    dt = _parse_ts("2026-04-22T10:00:00Z")
+    assert dt.utcoffset().total_seconds() == 0

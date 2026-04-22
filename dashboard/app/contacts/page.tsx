@@ -46,7 +46,7 @@ export default function ContactsPage() {
                     {isLoading ? "..." : filteredContacts.length} RECORDS
                 </span>
                 <div className="flex-1 h-px bg-[#1a1a1a]"></div>
-                <span className="text-[9px] text-[#333] uppercase">SYNCED FROM GOOGLE SHEETS</span>
+                <span className="text-[9px] text-[#333] uppercase">SYNCED FROM SUPABASE</span>
             </div>
 
             {/* Table */}

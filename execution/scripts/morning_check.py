@@ -17,10 +17,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.logger import WorkflowLogger
-from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
+from execution.core.delivery_reporter import DeliveryReporter, build_delivery_contact
 from execution.core.progress_reporter import ProgressReporter
+from execution.core import state_store
 from execution.integrations.platts_client import PlattsClient
-from execution.integrations.sheets_client import SheetsClient
+from execution.integrations.contacts_repo import ContactsRepo
 from execution.integrations.uazapi_client import UazapiClient
 
 # --- CONFIGURATION (Whitelists ported from JS) ---
@@ -69,8 +70,6 @@ FREIGHT_KEYS = [] # No freight symbols mapped yet
 FREIGHT_KEYS = [] # No freight mapped
 
 REPORT_TYPE = "MORNING_REPORT"
-SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
-SHEET_NAME_CONTACTS = "Página1"
 
 def normalize_text(text):
     if not text: return ""
@@ -210,12 +209,11 @@ def main():
     progress.start("Preparando dados...")
 
     try:
-        # 2. Check Control Sheet
-        sheets = SheetsClient()
-
+        # 2. Idempotency claim via Redis (48h TTL — report is daily).
         if not args.dry_run:
-            bus.emit("step", label="Checando Control Sheet (status diário)")
-            if sheets.check_daily_status(SHEET_ID, date_str, REPORT_TYPE):
+            bus.emit("step", label="Checando idempotência via Redis")
+            claim_key = f"daily_report:sent:{REPORT_TYPE}:{date_str}"
+            if not state_store.try_claim_alert_key(claim_key, ttl_seconds=48 * 3600):
                 logger.info("Report already sent today. Exiting.")
                 progress.finish_empty("report ja enviado hoje")
                 return
@@ -264,7 +262,8 @@ def main():
             print("\n-----------------------\n")
 
         # 5. Send & Mark using shared DeliveryReporter
-        contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME_CONTACTS)
+        contacts_repo = ContactsRepo()
+        contacts = contacts_repo.list_active()
 
         if not contacts:
             logger.warning("No contacts found.")
@@ -273,7 +272,7 @@ def main():
 
         uazapi = UazapiClient()
 
-        delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
+        delivery_contacts = [build_delivery_contact(c) for c in contacts]
 
         if args.dry_run:
             logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
@@ -300,10 +299,6 @@ def main():
         logger.info(
             f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"
         )
-
-        if report.success_count > 0:
-            sheets.mark_daily_status(SHEET_ID, date_str, REPORT_TYPE)
-            logger.info("Control sheet updated.")
 
     except Exception as exc:
         progress.fail(exc)

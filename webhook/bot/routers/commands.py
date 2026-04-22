@@ -16,7 +16,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from bot.config import get_bot, ANTHROPIC_API_KEY, SHEET_ID, TELEGRAM_WEBHOOK_URL
+from bot.config import get_bot, ANTHROPIC_API_KEY, TELEGRAM_WEBHOOK_URL
 from bot.states import AddContact, NewsInput
 from bot.keyboards import build_main_menu_keyboard
 from bot.middlewares.auth import RoleMiddleware
@@ -24,7 +24,7 @@ import contact_admin
 import query_handlers
 from status_builder import build_status_message, ALL_WORKFLOWS
 from reports_nav import reports_show_types, _get_supabase as _get_supabase_client
-from execution.integrations.sheets_client import SheetsClient
+from execution.integrations.contacts_repo import ContactsRepo
 
 logger = logging.getLogger(__name__)
 
@@ -299,16 +299,16 @@ async def cmd_menu_reply(message: Message):
 # ── Helpers ──
 
 async def _render_list_view(chat_id, page, search, message_id=None):
-    """Fetch contacts and render list message with keyboard."""
+    """Fetch contacts from Supabase and render the list message with keyboard."""
     bot = get_bot()
     try:
-        sheets = SheetsClient()
+        repo = ContactsRepo()
         per_page = 10
         contacts, total_pages = await asyncio.to_thread(
-            sheets.list_contacts, SHEET_ID, search=search, page=page, per_page=per_page,
+            repo.list_all, search=search, page=page, per_page=per_page,
         )
         all_contacts, _ = await asyncio.to_thread(
-            sheets.list_contacts, SHEET_ID, search=search, page=1, per_page=10_000,
+            repo.list_all, search=search, page=1, per_page=10_000,
         )
         total = len(all_contacts)
 
@@ -325,7 +325,7 @@ async def _render_list_view(chat_id, page, search, message_id=None):
             await bot.edit_message_text(msg, chat_id=chat_id, message_id=message_id, reply_markup=kb)
     except Exception as e:
         logger.error(f"_render_list_view failed: {e}")
-        err_msg = "❌ Erro ao acessar planilha. Tente novamente."
+        err_msg = "❌ Erro ao acessar base de contatos. Tente novamente."
         if message_id:
             await bot.edit_message_text(err_msg, chat_id=chat_id, message_id=message_id)
         else:

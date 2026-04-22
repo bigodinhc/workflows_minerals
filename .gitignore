@@ -40,3 +40,4 @@ actors/*/.local-input.json
 
 # Git worktrees
 .worktrees/
+execution/supabase/.temp/

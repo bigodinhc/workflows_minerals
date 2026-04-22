@@ -1,0 +1,9 @@
+-- Placeholder for migration 20260416042250, applied directly to the remote
+-- Supabase project before migration tracking was set up. Content unknown from git.
+--
+-- This file exists so `supabase migration list` / `db push` can reconcile the
+-- remote's schema_migrations table with the local migrations directory. It is
+-- intentionally empty: the DDL was already applied via the Supabase SQL editor.
+--
+-- Do not delete without running `supabase migration repair --status reverted 20260416042250`
+-- first, otherwise the CLI will refuse to push new migrations.

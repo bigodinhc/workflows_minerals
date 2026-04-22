@@ -9,14 +9,15 @@ def test_writer_importable():
 
 def test_writer_has_inviolable_rules():
     from execution.core.prompts.writer import WRITER_SYSTEM
-    assert "jamais arredonde" in WRITER_SYSTEM.lower() or "nunca arredonde" in WRITER_SYSTEM.lower()
-    assert "nunca invente" in WRITER_SYSTEM.lower() or "não invente" in WRITER_SYSTEM.lower()
+    lower = WRITER_SYSTEM.lower()
+    assert "nunca arredonde" in lower or "jamais arredonde" in lower
+    assert "nunca invente" in lower or "não invente" in lower
     assert "CFR" in WRITER_SYSTEM
     assert "FOB" in WRITER_SYSTEM
     assert "DATA NÃO ESPECIFICADA" in WRITER_SYSTEM
 
 
-def test_writer_has_no_classification_tags():
+def test_writer_has_no_legacy_classification_tags():
     """v2: Writer output must NOT include [CLASSIFICAÇÃO] or [ELEMENTOS] tags."""
     from execution.core.prompts.writer import WRITER_SYSTEM
     assert "[CLASSIFICAÇÃO" not in WRITER_SYSTEM
@@ -24,16 +25,61 @@ def test_writer_has_no_classification_tags():
     assert "[IMPACTO PRINCIPAL" not in WRITER_SYSTEM
 
 
-def test_writer_has_few_shot_examples():
+def test_writer_has_five_types():
+    """v5: Writer classifies into 5 types (EVENTO_CRITICO removed)."""
     from execution.core.prompts.writer import WRITER_SYSTEM
-    assert "<example>" in WRITER_SYSTEM or "EXEMPLO" in WRITER_SYSTEM
+    assert "PRICING_SESSION" in WRITER_SYSTEM
+    assert "FUTURES_CURVE" in WRITER_SYSTEM
+    assert "COMPANY_NEWS" in WRITER_SYSTEM
+    assert "ANALYTICAL" in WRITER_SYSTEM
+    assert "DIGEST" in WRITER_SYSTEM
+    assert "EVENTO_CRITICO" not in WRITER_SYSTEM
 
 
-def test_writer_has_trader_persona():
+def test_writer_has_ordered_classification_rules():
+    """v5: classification is ordered decision rules, DIGEST first."""
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    # DIGEST rule appears before COMPANY_NEWS rule in the decision order
+    digest_pos = WRITER_SYSTEM.find("→ DIGEST")
+    company_pos = WRITER_SYSTEM.find("→ COMPANY_NEWS")
+    assert digest_pos > 0 and company_pos > 0
+    assert digest_pos < company_pos
+
+
+def test_writer_has_proibido_list():
+    """v5: Writer has an explicit proibido list matching the Curator."""
     from execution.core.prompts.writer import WRITER_SYSTEM
     lower = WRITER_SYSTEM.lower()
-    assert "trader" in lower
-    assert "mesa" in lower
+    assert "proibid" in lower  # "PALAVRAS PROIBIDAS" or similar header
+    assert "significativo" in lower
+    assert "substancial" in lower
+    assert "dinâmica observada" in lower
+    assert "em meio a" in lower
+
+
+def test_writer_has_bullets_and_sections_size_targets():
+    """v5: size targets in bullets + sections, not WhatsApp lines."""
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    lower = WRITER_SYSTEM.lower()
+    assert "bullets" in lower
+    assert "seções" in lower
+    # Size table must have per-type bullet ranges
+    assert "8-12" in WRITER_SYSTEM  # PRICING_SESSION bullets
+    assert "10-14" in WRITER_SYSTEM  # COMPANY_NEWS bullets
+
+
+def test_writer_has_watch_rule():
+    """v5: Watch: line format is pinned."""
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    assert "Watch:" in WRITER_SYSTEM
+
+
+def test_writer_has_driver_heuristic():
+    """v5: DRIVER section rule with 'remove mechanism' test."""
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    lower = WRITER_SYSTEM.lower()
+    assert "driver" in lower
+    assert "remove" in lower  # "remova o mecanismo" heuristic
 
 
 def test_writer_has_drop_list():
@@ -43,22 +89,26 @@ def test_writer_has_drop_list():
     assert "platts is part of" in lower
 
 
-def test_writer_has_budget():
-    from execution.core.prompts.writer import WRITER_SYSTEM
-    lower = WRITER_SYSTEM.lower()
-    assert "1/3" in WRITER_SYSTEM or "um terço" in lower
-    assert "18-22 linhas" in WRITER_SYSTEM
-
-
 def test_writer_forbids_inventing():
     from execution.core.prompts.writer import WRITER_SYSTEM
     lower = WRITER_SYSTEM.lower()
     assert "nunca invente" in lower or "não invente" in lower
 
 
-def test_writer_drops_tabular_phrase():
+def test_writer_has_trader_persona():
     from execution.core.prompts.writer import WRITER_SYSTEM
-    assert "tabelas alinhadas" not in WRITER_SYSTEM
+    lower = WRITER_SYSTEM.lower()
+    assert "trader" in lower
+    assert "mesa" in lower
+
+
+def test_writer_has_few_shot_examples():
+    """v5: 5 examples (one per type)."""
+    from execution.core.prompts.writer import WRITER_SYSTEM
+    assert WRITER_SYSTEM.count("EXEMPLO") >= 5
+    # Each type appears as example header
+    assert "EXEMPLO 1" in WRITER_SYSTEM
+    assert "EXEMPLO 5" in WRITER_SYSTEM
 
 
 def test_writer_prefers_bullets():

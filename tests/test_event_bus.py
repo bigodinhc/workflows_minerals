@@ -716,13 +716,20 @@ def test_get_current_bus_isolated_across_nested_calls(monkeypatch):
     ]
 
 
-def test_emit_without_label_uses_event_name_as_label():
+def test_emit_without_label_uses_event_name_as_label(monkeypatch):
     """event_log.label is NOT NULL in Supabase. When a caller emits an event
     without an explicit label (e.g., lifecycle events cron_started/
     cron_finished emitted by the @with_event_bus decorator), the event name
     itself must populate the label field. Otherwise the _SupabaseSink insert
     throws 'null value in column label violates not-null constraint' and the
     event silently drops from the timeline."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
     from execution.core.event_bus import EventBus
 
     captured = []
@@ -740,9 +747,17 @@ def test_emit_without_label_uses_event_name_as_label():
     assert captured[0]["label"] == "cron_started"  # fallback
 
 
-def test_emit_with_explicit_label_keeps_it():
-    """Regression guard: explicit labels must not be overwritten by the event
-    name fallback."""
+def test_emit_with_explicit_label_keeps_it(monkeypatch):
+    """Regression guard: explicit labels are preserved, and empty-string
+    labels (the actual footgun that caused the Supabase NOT NULL violation)
+    fall back to the event name rather than producing None."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
     from execution.core.event_bus import EventBus
 
     captured = []
@@ -753,7 +768,13 @@ def test_emit_with_explicit_label_keeps_it():
 
     bus = EventBus(workflow="test")
     bus._sinks = [_CaptureSink()]
-    bus.emit("step", label="fetching data")
 
+    bus.emit("step", label="fetching data")
     assert captured[0]["event"] == "step"
     assert captured[0]["label"] == "fetching data"
+
+    # Empty-string label must fall back to the event name (NOT None).
+    # If someone reverted the fix to `label or None`, this assertion fails.
+    bus.emit("cron_heartbeat", label="")
+    assert captured[1]["event"] == "cron_heartbeat"
+    assert captured[1]["label"] == "cron_heartbeat"

@@ -71,6 +71,11 @@ FREIGHT_KEYS = [] # No freight mapped
 
 REPORT_TYPE = "MORNING_REPORT"
 
+# Split-lock idempotency TTLs
+_INFLIGHT_LOCK_TTL_SEC = 20 * 60   # 20 min — covers max observed broadcast duration
+_SENT_FLAG_TTL_SEC = 48 * 3600     # 48 h — one reporting day + buffer
+
+
 def normalize_text(text):
     if not text: return ""
     return " ".join(str(text).strip().lower().split())
@@ -177,17 +182,33 @@ def build_message(report_items, date_str):
 @with_event_bus("morning_check")
 def main():
     logger = WorkflowLogger("MorningCheck")
-    bus = get_current_bus()
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Skip sending and saving state")
     parser.add_argument("--date", type=str, help="Override date (YYYY-MM-DD)", default=None)
     args = parser.parse_args()
-    
-    # 1. Check Date (Business Day)
-    if args.date:
+    _run_pipeline(args)
+
+
+def _run_pipeline(args):
+    """Pipeline body extracted for testability.
+
+    Called by main() inside the @with_event_bus context, so get_current_bus()
+    resolves here. Split-lock idempotency:
+      - Phase 0: check sent flag (read-only, no lock)
+      - Phase 1: fetch Platts data
+      - Phase 2a/2b: early-exit if data empty/incomplete (no lock held)
+      - Phase 3: acquire in-flight lock (short TTL, released in finally)
+      - Phase 4: format + send
+      - Phase 5: commit success — write sent flag (long TTL)
+    """
+    logger = WorkflowLogger("MorningCheck")
+    bus = get_current_bus()
+
+    # 1. Resolve date (supports --date override for backfills)
+    date_override = getattr(args, 'date', None)
+    if date_override:
         try:
-            today = datetime.strptime(args.date, "%Y-%m-%d").date()
+            today = datetime.strptime(date_override, "%Y-%m-%d").date()
             logger.info(f"Using manual date override: {today}")
         except ValueError:
             logger.error("Invalid date format. Use YYYY-MM-DD.")
@@ -197,7 +218,7 @@ def main():
 
     date_str = today.strftime("%Y-%m-%d")
     date_fmt_br = today.strftime("%d/%m/%Y")
-    
+
     logger.info(f"Starting Morning Check for {date_str}")
     bus.emit("step", label=f"Iniciando morning_check ({date_str})")
 
@@ -208,31 +229,35 @@ def main():
     )
     progress.start("Preparando dados...")
 
+    sent_key = f"daily_report:sent:{REPORT_TYPE}:{date_str}"
+    inflight_key = f"daily_report:inflight:{REPORT_TYPE}:{date_str}"
+    inflight_held = False
+
     try:
-        # 2. Idempotency claim via Redis (48h TTL — report is daily).
+        # ── PHASE 0: check sent flag (read-only) ─────────────────────────────
         if not args.dry_run:
-            bus.emit("step", label="Checando idempotência via Redis")
-            claim_key = f"daily_report:sent:{REPORT_TYPE}:{date_str}"
-            if not state_store.try_claim_alert_key(claim_key, ttl_seconds=48 * 3600):
-                logger.info("Report already sent today. Exiting.")
-                progress.finish_empty("report ja enviado hoje")
+            bus.emit("step", label="Checando sent flag")
+            if state_store.check_sent_flag(sent_key):
+                logger.info("Report already delivered today. Exiting.")
+                progress.finish_empty("report já entregue hoje")
                 return
 
-        # 3. Fetch Data
+        # ── PHASE 1: fetch Platts data ───────────────────────────────────────
         bus.emit("step", label="Baixando dados Platts")
         platts = PlattsClient()
-        # We use today for fetching. The client handles prev day calculation.
         t0 = _time.time()
         report_items = platts.get_report_data(datetime.combine(today, datetime.min.time()))
         bus.emit("api_call", label="platts.get_report_data",
-                 detail={"duration_ms": int((_time.time() - t0) * 1000), "rows": len(report_items) if report_items else 0})
+                 detail={"duration_ms": int((_time.time() - t0) * 1000),
+                         "rows": len(report_items) if report_items else 0})
 
+        # ── PHASE 2a: empty data — no lock, no flag ──────────────────────────
         if not report_items:
             logger.info("No data available yet from Platts. Will retry later.")
             progress.finish_empty("sem dados do Platts ainda")
-            sys.exit(0) # Exit success (so GitHub Action doesn't fail, just finishes)
+            sys.exit(0)  # Exit success — GitHub Action doesn't fail, next run retries
 
-        # --- VALIDATION: Check minimum items collected ---
+        # ── PHASE 2b: incomplete data — no lock, no flag ─────────────────────
         MIN_ITEMS_EXPECTED = 10  # Threshold - should collect at least 10 symbols
         TOTAL_SYMBOLS = 26  # Total configured in SYMBOLS_DETAILS
 
@@ -242,16 +267,24 @@ def main():
             logger.warning(f"⚠️ INCOMPLETE DATA: Only {len(report_items)}/{TOTAL_SYMBOLS} items collected!")
             logger.warning(f"   Threshold is {MIN_ITEMS_EXPECTED}. Skipping send, will retry on next scheduled run.")
             progress.finish_empty(f"dados incompletos ({len(report_items)}/{TOTAL_SYMBOLS})")
-            sys.exit(0)  # Exit gracefully - next scheduled action will retry
+            sys.exit(0)  # Exit gracefully — next scheduled action will retry
 
-        # DEBUG: Print items to see why filtering failed
         if args.dry_run:
             logger.info("--- DEBUG: RAW ITEMS FROM PLATTS ---")
             for i in report_items:
                 logger.info(f"Item: {i}")
             logger.info("------------------------------------")
 
-        # 4. Format Message
+        # ── PHASE 3: acquire in-flight lock ──────────────────────────────────
+        # Data is valid and complete. Claim the lock before broadcasting.
+        if not args.dry_run:
+            if not state_store.try_claim_alert_key(inflight_key, ttl_seconds=_INFLIGHT_LOCK_TTL_SEC):
+                logger.info("Another run is processing this report. Exiting.")
+                progress.finish_empty("another run in progress")
+                return
+            inflight_held = True
+
+        # ── PHASE 4: format + send ────────────────────────────────────────────
         bus.emit("step", label=f"Formatando mensagem ({len(report_items)} items)")
         message = build_message(report_items, date_fmt_br)
 
@@ -261,7 +294,6 @@ def main():
             print(message)
             print("\n-----------------------\n")
 
-        # 5. Send & Mark using shared DeliveryReporter
         contacts_repo = ContactsRepo()
         contacts = contacts_repo.list_active()
 
@@ -300,9 +332,20 @@ def main():
             f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"
         )
 
+        # ── PHASE 5: commit success — set sent flag ───────────────────────────
+        if not args.dry_run:
+            state_store.set_sent_flag(sent_key, ttl_seconds=_SENT_FLAG_TTL_SEC)
+
     except Exception as exc:
         progress.fail(exc)
         raise
+    finally:
+        if inflight_held:
+            try:
+                state_store.release_inflight(inflight_key)
+            except Exception as release_exc:
+                logger.warning(f"Failed to release inflight lock: {release_exc}")
+
 
 if __name__ == "__main__":
     main()

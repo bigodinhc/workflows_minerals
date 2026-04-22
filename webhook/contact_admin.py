@@ -142,31 +142,25 @@ def build_list_keyboard(contacts: list, page: int, total_pages: int,
                         search: Optional[str]) -> dict:
     """
     Build inline_keyboard dict with one toggle button per contact,
-    plus a bottom nav row if total_pages > 1.
+    plus bulk-action and nav rows.
+
+    `contacts` is a list of execution.integrations.contacts_repo.Contact
+    instances (dataclass with .name, .phone_uazapi, .status, etc.).
     """
     rows = []
 
     for c in contacts:
-        name = c.get("ProfileName", "—")
-        raw_phone = (
-            c.get("Evolution-api")
-            or c.get("n8n-evo")
-            or c.get("From")
-            or ""
-        )
-        phone_digits = digits_only(str(raw_phone))
-        status = str(c.get("ButtonPayload", "")).strip()
-        emoji = "✅" if status == "Big" else "❌"
-        label = f"{emoji} {name} — {phone_digits}"
+        emoji = "✅" if c.status == "ativo" else "❌"
+        label = f"{emoji} {c.name} — {c.phone_uazapi}"
         # Telegram button text limit: 64 chars
         if len(label) > 60:
             label = label[:57] + "..."
         rows.append([{
             "text": label,
-            "callback_data": f"tgl:{phone_digits}",
+            "callback_data": f"tgl:{c.phone_uazapi}",
         }])
 
-    # Navigation row (only when >1 page)
+    # Pagination row (only when >1 page)
     if total_pages > 1:
         prev_page = max(1, page - 1)
         next_page = min(total_pages, page + 1)
@@ -175,6 +169,14 @@ def build_list_keyboard(contacts: list, page: int, total_pages: int,
             {"text": "◀", "callback_data": f"pg:{prev_page}{suffix}"},
             {"text": f"{page}/{total_pages}", "callback_data": "nop"},
             {"text": "▶", "callback_data": f"pg:{next_page}{suffix}"},
+        ])
+
+    # Bulk-action row (always shown when there's at least one contact).
+    if contacts:
+        bulk_suffix = f":{search}" if search else ":"
+        rows.append([
+            {"text": "✅ Ativar todos", "callback_data": f"bulk:ativo{bulk_suffix}"},
+            {"text": "❌ Desativar todos", "callback_data": f"bulk:inativo{bulk_suffix}"},
         ])
 
     return {"inline_keyboard": rows}

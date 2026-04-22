@@ -266,7 +266,16 @@ class ContactsRepo:
 
 
 def _parse_ts(s: str) -> datetime:
-    """Parse Supabase ISO timestamp (may end with 'Z' or '+00:00')."""
+    """Parse Supabase ISO timestamp (may end with 'Z' or '+00:00').
+
+    Python 3.9's datetime.fromisoformat requires microseconds to be exactly
+    0, 3, or 6 digits. Supabase returns variable precision (e.g. 5 digits).
+    Pad to 6 digits when needed.
+    """
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
+    m = re.match(r"^(.*\.)(\d{1,5})([+-].*)$", s)
+    if m:
+        prefix, micro, tz = m.groups()
+        s = prefix + micro.ljust(6, "0") + tz
     return datetime.fromisoformat(s)

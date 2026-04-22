@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
@@ -22,11 +22,28 @@ from bot.keyboards import build_main_menu_keyboard
 from bot.middlewares.auth import RoleMiddleware
 import contact_admin
 import query_handlers
-from status_builder import build_status_message
+from status_builder import build_status_message, ALL_WORKFLOWS
 from reports_nav import reports_show_types
 from execution.integrations.sheets_client import SheetsClient
 
 logger = logging.getLogger(__name__)
+
+
+def _get_supabase_client():
+    """Return a supabase-py Client, or None if credentials/lib missing.
+    Extracted so tests can monkeypatch."""
+    import os
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
+    if not url or not key:
+        return None
+    try:
+        from supabase import create_client
+        return create_client(url, key)
+    except Exception as exc:
+        logger.warning(f"/tail: supabase init failed: {exc}")
+        return None
+
 
 # ── Public router (no auth) ──
 
@@ -48,6 +65,93 @@ async def cmd_status(message: Message):
         logger.error(f"/status failed: {exc}")
         body = f"⚠️ Erro ao gerar status: {str(exc)[:100]}"
     await message.answer(body)
+
+
+@admin_router.message(Command("tail"))
+async def cmd_tail(message: Message, command: CommandObject):
+    args = (command.args or "").strip().split()
+    if not args:
+        await message.reply(_tail_help())
+        return
+
+    workflow = args[0]
+    explicit_run_id = args[1] if len(args) > 1 else None
+
+    if workflow not in ALL_WORKFLOWS:
+        await message.reply(
+            f"Workflow desconhecido: `{workflow}`.\n\n"
+            f"Disponíveis: {', '.join(ALL_WORKFLOWS)}"
+        )
+        return
+
+    run_id = explicit_run_id
+    if run_id is None:
+        from execution.core import state_store
+        status = state_store.get_status(workflow)
+        if status is None:
+            await message.reply(f"Nenhum run recente de `{workflow}`.")
+            return
+        run_id = status.get("run_id")
+        if run_id is None:
+            await message.reply(
+                f"Run mais recente de `{workflow}` sem run_id (legacy, anterior ao Phase 4).\n"
+                f"Use `/tail {workflow} <run_id>` com um ID explícito."
+            )
+            return
+
+    client = _get_supabase_client()
+    if client is None:
+        await message.reply("⚠️ Supabase indisponível — não consigo buscar eventos.")
+        return
+
+    try:
+        events = (
+            client.table("event_log")
+            .select("ts, level, event, label, detail")
+            .eq("workflow", workflow)
+            .eq("run_id", run_id)
+            .order("ts", desc=False)
+            .limit(30)
+            .execute()
+        )
+    except Exception as exc:
+        logger.error(f"/tail event_log query failed: {exc}")
+        await message.reply(f"⚠️ Erro ao consultar event_log: {str(exc)[:100]}")
+        return
+
+    rows = events.data or []
+    if not rows:
+        await message.reply(
+            f"📜 `{workflow}.{run_id}` — sem eventos no event_log."
+        )
+        return
+
+    await message.reply(_format_tail(workflow, run_id, rows))
+
+
+def _tail_help() -> str:
+    return (
+        "📜 *Uso do /tail*\n\n"
+        "`/tail <workflow>` — últimos 30 eventos do run mais recente\n"
+        "`/tail <workflow> <run_id>` — últimos 30 eventos de um run específico\n\n"
+        f"Workflows: {', '.join(ALL_WORKFLOWS)}"
+    )
+
+
+def _format_tail(workflow: str, run_id: str, rows: list) -> str:
+    level_emoji = {"info": "ℹ️", "warn": "⚠️", "error": "🚨"}
+    lines = [f"📜 `{workflow}.{run_id}` (últimos {len(rows)} eventos)\n"]
+    for row in rows:
+        ts = (row.get("ts") or "")
+        hhmmss = ts[11:19] if len(ts) >= 19 else ts
+        emoji = level_emoji.get(row.get("level", "info"), "•")
+        event = row.get("event", "?")
+        label = row.get("label") or ""
+        line = f"{hhmmss} {emoji} {event}"
+        if label:
+            line += f" — {label[:80]}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 @admin_router.message(Command("cancel"))

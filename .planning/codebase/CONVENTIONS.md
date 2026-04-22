@@ -247,6 +247,30 @@ Planning artifacts during an active task live in `.planning/codebase/` (this fil
 - Python: `@dataclass` from stdlib — `Contact`, `DeliveryResult`, `DeliveryReport` in `execution/core/delivery_reporter.py`; `@dataclass` for `Contact` in `execution/integrations/contacts_repo.py`. Use `asdict()` for JSON serialization.
 - TypeScript: interfaces or `type` aliases; no runtime validation library in use yet (user's global pattern suggests zod — not adopted here).
 
+## Idempotency — daily reports (split-lock pattern)
+
+Daily-report workflows (`baltic_ingestion`, `morning_check`) use **two** Redis keys, not one:
+
+- `daily_report:inflight:{REPORT_TYPE}:{date}` — 20min TTL. Acquired via `try_claim_alert_key` after data validation; released in `finally` on exit. Prevents two crons from broadcasting the same report in parallel. Auto-expires after a crash.
+- `daily_report:sent:{REPORT_TYPE}:{date}` — 48h TTL. Written via `set_sent_flag` **only** after the full broadcast (IronMarket POST + WhatsApp dispatch) succeeds. Checked via `check_sent_flag` at the start of every run.
+
+### Claim ordering rule
+
+Early-exits that precede any side effect (source data missing, stale, or incomplete) must not touch either key. Early-exits that occur after Phase 3 (lock acquired) release the lock in `finally` but do **not** set the sent flag — the next cron retries cleanly.
+
+### Anti-pattern (the bug of 2026-04-22)
+
+Using a single long-TTL `SET NX EX` key as both the concurrency guard and the sent flag. A pre-processing early-exit then holds the key for the full TTL, blocking all retries on the same day. The Sheets→Supabase migration (`df15d9aa`) regressed this by compacting the legacy `check_daily_status` + `mark_daily_status` pair into one atomic call; the split-lock pattern above is the correct replacement.
+
+### When to deviate
+
+If operational experience shows mid-broadcast crashes happen often enough that duplicate WhatsApp messages become a real complaint, add per-contact dedup (Redis set of delivered phone numbers under a 48h key). `DeliveryReporter` already tracks per-contact results, so this is ~20 lines. Not needed today.
+
+### Reference
+
+- Design doc: `docs/superpowers/specs/2026-04-22-idempotency-claim-ordering-fix-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-04-22-idempotency-split-lock-plan.md`
+
 ---
 
 *Convention analysis: 2026-04-22*

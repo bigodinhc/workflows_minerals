@@ -210,13 +210,22 @@ def get_all_status(workflows: list) -> dict:
 
 
 def try_claim_alert_key(key: str, ttl_seconds: int) -> bool:
-    """Atomic Redis SET NX EX. Returns True if the caller claimed the key
-    (should fire the alert), False if the key already existed (someone else
-    alerted). Degrades permissive: returns True on any Redis failure so an
-    alert still fires rather than silently swallowed.
+    """Atomic Redis SET NX EX. Returns True if the caller claimed the key,
+    False if the key already existed. Degrades permissive: returns True on
+    any Redis failure so the caller proceeds rather than silently skipping.
 
-    Use for idempotent alert suppression (e.g., watchdog missing-cron
-    notifications that must fire exactly once per miss)."""
+    Two use cases:
+
+    1. Short-TTL in-flight mutex — guards a section that must not run
+       concurrently. Pair with `release_inflight()` in a finally block;
+       the TTL is the crash safety net.
+
+    2. Alert-fire deduplication — e.g., watchdog missing-cron notifications
+       that must fire exactly once per miss.
+
+    For the 'mark as completed' semantic (set a long-TTL flag only after a
+    pipeline succeeds), use `set_sent_flag()` instead — this function's
+    atomicity is wasted when you only want to record success."""
     client = _get_client()
     if client is None:
         return True

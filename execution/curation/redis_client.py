@@ -9,6 +9,8 @@ Keyspaces:
 
 All functions use REDIS_URL env var via _get_client(). Tests monkeypatch _get_client.
 """
+from __future__ import annotations
+
 import json
 import os
 from datetime import datetime, timezone
@@ -113,6 +115,40 @@ def discard(item_id: str) -> None:
     """Delete staging without archiving."""
     client = _get_client()
     client.delete(_staging_key(item_id))
+
+
+def bulk_archive(item_ids: list[str], date: str, chat_id: int) -> dict:
+    """Archive multiple items. Returns {'archived': [...ids], 'failed': [...ids]}.
+
+    Each item is archived independently via archive() — one missing or
+    errored item does not affect the others. Order of 'archived' and
+    'failed' reflects input order.
+    """
+    archived: list[str] = []
+    failed: list[str] = []
+    for item_id in item_ids:
+        try:
+            result = archive(item_id, date, chat_id=chat_id)
+        except Exception:
+            failed.append(item_id)
+            continue
+        if result is None:
+            failed.append(item_id)
+        else:
+            archived.append(item_id)
+    return {"archived": archived, "failed": failed}
+
+
+def bulk_discard(item_ids: list[str]) -> int:
+    """Delete multiple staging keys. Returns count of keys actually deleted.
+
+    Missing keys are silently skipped (deleted count does not include them).
+    """
+    if not item_ids:
+        return 0
+    client = _get_client()
+    keys = [_staging_key(i) for i in item_ids]
+    return int(client.delete(*keys))
 
 
 def get_archive(date: str, item_id: str) -> Optional[dict]:

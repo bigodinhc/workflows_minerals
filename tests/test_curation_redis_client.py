@@ -195,3 +195,51 @@ def test_mark_scraped_idempotent(fake_redis):
     mark_scraped("2026-04-16", "abc123")
     mark_scraped("2026-04-16", "abc123")
     assert fake_redis.scard("platts:scraped:2026-04-16") == 1
+
+
+def test_bulk_archive_moves_all_present_items(fake_redis):
+    from execution.curation.redis_client import set_staging, bulk_archive
+    set_staging("a", {"id": "a", "title": "A"})
+    set_staging("b", {"id": "b", "title": "B"})
+    result = bulk_archive(["a", "b"], "2026-04-22", chat_id=42)
+    assert result == {"archived": ["a", "b"], "failed": []}
+    assert fake_redis.get("platts:staging:a") is None
+    assert fake_redis.get("platts:staging:b") is None
+    assert fake_redis.get("platts:archive:2026-04-22:a") is not None
+    assert fake_redis.get("platts:archive:2026-04-22:b") is not None
+
+
+def test_bulk_archive_reports_missing_items_as_failed(fake_redis):
+    from execution.curation.redis_client import set_staging, bulk_archive
+    set_staging("a", {"id": "a"})
+    result = bulk_archive(["a", "missing"], "2026-04-22", chat_id=42)
+    assert result["archived"] == ["a"]
+    assert result["failed"] == ["missing"]
+
+
+def test_bulk_archive_empty_list_is_noop(fake_redis):
+    from execution.curation.redis_client import bulk_archive
+    assert bulk_archive([], "2026-04-22", chat_id=42) == {"archived": [], "failed": []}
+
+
+def test_bulk_archive_preserves_order(fake_redis):
+    from execution.curation.redis_client import set_staging, bulk_archive
+    for id_ in ("z", "a", "m"):
+        set_staging(id_, {"id": id_})
+    result = bulk_archive(["z", "a", "m"], "2026-04-22", chat_id=42)
+    assert result["archived"] == ["z", "a", "m"]
+
+
+def test_bulk_discard_deletes_present_returns_count(fake_redis):
+    from execution.curation.redis_client import set_staging, bulk_discard
+    set_staging("a", {"id": "a"})
+    set_staging("b", {"id": "b"})
+    count = bulk_discard(["a", "b", "missing"])
+    assert count == 2
+    assert fake_redis.get("platts:staging:a") is None
+    assert fake_redis.get("platts:staging:b") is None
+
+
+def test_bulk_discard_empty_list_is_noop(fake_redis):
+    from execution.curation.redis_client import bulk_discard
+    assert bulk_discard([]) == 0

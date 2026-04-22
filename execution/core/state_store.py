@@ -114,11 +114,30 @@ def record_empty(workflow: str, reason: str) -> None:
         logger.warning(f"state_store.record_empty failed: {exc}")
 
 
+_CRASH_DEDUP_TTL_SECONDS = 300  # 5 min: dedup same-workflow crashes recorded twice
+
+
 def record_crash(workflow: str, exc_text: str) -> None:
-    """Record a workflow crash (uncaught exception). Increments streak. May trigger alert."""
+    """Record a workflow crash (uncaught exception). Increments streak. May trigger alert.
+
+    Idempotent per workflow within a 5-minute window. The @with_event_bus decorator
+    (execution/core/event_bus.py) and progress_reporter.fail() may both observe the
+    same exception and both call record_crash — the SET NX dedup key ensures only the
+    first write wins. Prevents double-counting the same crash as two streak increments.
+
+    Dedup-key failure (Redis flaky mid-call) falls through to recording, since an
+    extra alert is better than silently dropping a crash."""
     client = _get_client()
     if client is None:
         return
+    try:
+        dedup_key = f"wf:crash_dedup:{workflow}"
+        claimed = client.set(dedup_key, "1", nx=True, ex=_CRASH_DEDUP_TTL_SECONDS)
+        if not claimed:
+            return  # already recorded within dedup window
+    except Exception as exc:
+        logger.warning(f"state_store.record_crash dedup check failed: {exc}")
+        # Fall through — over-alerting beats silent drop
     try:
         now = _now_iso()
         _write_last_run(client, workflow, {

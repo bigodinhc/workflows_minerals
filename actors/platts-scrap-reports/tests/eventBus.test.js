@@ -104,6 +104,36 @@ describe('EventBus', () => {
         warnSpy.mockRestore();
     });
 
+    it('emit warns on supabase PostgREST error without throwing', async () => {
+        const logSpy  = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const bus = new EventBus({ workflow: 'test' });
+        bus._supabase = {
+            from: () => ({ insert: () => Promise.resolve({ data: null, error: { message: 'RLS denied' } }) }),
+        };
+        await expect(bus.emit('cron_started')).resolves.not.toThrow();
+        expect(warnSpy).toHaveBeenCalled();
+        const warnArgs = warnSpy.mock.calls[0];
+        expect(warnArgs.some(a => typeof a === 'string' && a.includes('insert failed'))).toBe(true);
+        logSpy.mockRestore();
+        warnSpy.mockRestore();
+    });
+
+    it('emit is never-raise when detail contains circular refs', async () => {
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const bus = new EventBus({ workflow: 'test' });
+        const circular = { self: null };
+        circular.self = circular;
+
+        await expect(bus.emit('cron_started', { detail: circular })).resolves.not.toThrow();
+        // Stdout fallback still produced a line
+        expect(logSpy).toHaveBeenCalled();
+        const logged = JSON.parse(logSpy.mock.calls[0][0]);
+        expect(logged.event).toBe('cron_started');
+        expect(logged.detail).toBe('[unserializable]');
+        logSpy.mockRestore();
+    });
+
     it('emit is never-raise when supabase client is null', async () => {
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
         const bus = new EventBus({ workflow: 'test' });

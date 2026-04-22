@@ -59,11 +59,30 @@ export class EventBus {
             detail,
         };
         // Stdout sink — always fires (surfaces in Apify run logs).
-        console.log(JSON.stringify({ ts: new Date().toISOString(), ...row }));
+        try {
+            console.log(JSON.stringify({ ts: new Date().toISOString(), ...row }));
+        } catch {
+            // detail (or a field inside it) is not JSON-serializable (e.g. circular ref).
+            // Emit a shallow version with a placeholder detail so the event still lands.
+            console.log(JSON.stringify({
+                ts: new Date().toISOString(),
+                workflow: this._workflow,
+                run_id: this._runId,
+                trace_id: this._traceId,
+                parent_run_id: this._parentRunId,
+                level,
+                event,
+                label,
+                detail: '[unserializable]',
+            }));
+        }
         // Supabase sink — best-effort.
         if (this._supabase) {
             try {
-                await this._supabase.from('event_log').insert(row);
+                const { error } = await this._supabase.from('event_log').insert(row);
+                if (error) {
+                    console.warn('EventBus: event_log insert failed:', error.message);
+                }
             } catch (err) {
                 console.warn('EventBus: event_log insert failed:', err.message);
             }

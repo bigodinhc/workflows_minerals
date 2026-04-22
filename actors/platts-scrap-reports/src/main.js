@@ -11,6 +11,7 @@ import { sendReportsSummary } from './notify/telegramSummary.js';
 import { isAlreadyStored, setTelegramMessageId, uploadPdf } from './persist/supabaseUpload.js';
 import { datePartsFromIso, parsePublishedDate } from './util/dates.js';
 import { slugify } from './util/slug.js';
+import { EventBus } from './lib/eventBus.js';
 
 await Actor.init();
 
@@ -25,6 +26,16 @@ const {
     forceRedownload = false,
     telegramChatId,
 } = input;
+
+const bus = new EventBus({
+    workflow: 'platts_scrap_reports',
+    traceId: input.trace_id,
+    parentRunId: input.parent_run_id,
+});
+
+await bus.emit('cron_started', {
+    detail: { apify_run_id: Actor.config?.actorRunId ?? null },
+});
 
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = telegramChatId || process.env.TELEGRAM_CHAT_ID;
@@ -178,8 +189,23 @@ async function run() {
 
 try {
     await run();
-} finally {
+    await bus.emit('cron_finished', {
+        detail: { summary_type: summary?.type ?? 'unknown' },
+    });
+} catch (err) {
+    await bus.emit('cron_crashed', {
+        label: `${err.name}: ${String(err.message || '').slice(0, 100)}`,
+        detail: {
+            exc_type: err.name,
+            exc_str: String(err).slice(0, 500),
+        },
+        level: 'error',
+    });
     await ctx.close();
     await browser.close();
-    await Actor.exit();
+    await Actor.fail(err.message || String(err));
+} finally {
+    try { await ctx.close(); } catch {}
+    try { await browser.close(); } catch {}
 }
+await Actor.exit();

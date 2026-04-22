@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.integrations.sheets_client import SheetsClient
 from execution.integrations.uazapi_client import UazapiClient
-from execution.core.event_bus import with_event_bus
+from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 from execution.core.progress_reporter import ProgressReporter
@@ -22,6 +22,8 @@ SHEET_NAME = "Página1"
 @with_event_bus("market_news")
 def main():
     logger = WorkflowLogger("SendNews")
+    bus = get_current_bus()
+    bus.emit("step", label="Iniciando send_news")
     parser = argparse.ArgumentParser()
     parser.add_argument("--message", help="Message text to send")
     parser.add_argument("--file", help="Path to text file containing message")
@@ -55,6 +57,7 @@ def main():
 
         # 1. Fetch Contacts
         logger.info("Fetching contacts...")
+        bus.emit("step", label="Buscando contatos")
         try:
             sheets = SheetsClient()
             contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME)
@@ -85,6 +88,7 @@ def main():
 
         progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
 
+        bus.emit("step", label=f"Enviando WhatsApp para {len(delivery_contacts)} contatos")
         reporter = DeliveryReporter(
             workflow=workflow_name,
             send_fn=uazapi.send_message,

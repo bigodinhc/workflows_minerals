@@ -17,7 +17,9 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from execution.core import state_store
-from execution.core.event_bus import with_event_bus
+import time as _time
+
+from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.sentry_init import init_sentry
 from execution.integrations.apify_client import ApifyClient
 
@@ -36,6 +38,9 @@ async def _run_with_progress(args, chat_id: int, run_input: dict) -> int:
     """Async reports body instrumented with ProgressReporter step() calls."""
     from aiogram import Bot
     from execution.core.progress_reporter import ProgressReporter
+
+    bus = get_current_bus()
+    bus.emit("step", label="Iniciando platts_reports")
 
     bot = Bot(token=os.environ["TELEGRAM_BOT_TOKEN"])
     sb = None
@@ -66,7 +71,10 @@ async def _run_with_progress(args, chat_id: int, run_input: dict) -> int:
         # ── PHASE 1: trigger Apify actor ──────────────────────────────────────
         await reporter.step("Actor started", f"{ACTOR_ID} triggered")
 
+        bus.emit("step", label="Actor Apify triggered")
+        t0 = _time.time()
         dataset_id, items = await asyncio.to_thread(_run_apify_sync, ApifyClient(), run_input)
+        bus.emit("api_call", label="apify.reports.run", detail={"duration_ms": round((_time.time() - t0) * 1000), "rows": len(items) if items else 0})
 
         # ── PHASE 2: dataset received ─────────────────────────────────────────
         await reporter.step("Dataset received", f"{len(items)} item(s) from actor")
@@ -88,6 +96,7 @@ async def _run_with_progress(args, chat_id: int, run_input: dict) -> int:
         errors_count = len(errors)
 
         # ── PHASE 3: PDFs downloaded ──────────────────────────────────────────
+        bus.emit("step", label=f"PDFs baixados: {downloaded_count}, erros: {errors_count}")
         await reporter.step(
             "PDFs downloaded",
             f"{downloaded_count} downloaded, {skipped_count} skipped, {errors_count} errors",

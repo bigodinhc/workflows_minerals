@@ -18,7 +18,9 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from execution.core import state_store
-from execution.core.event_bus import with_event_bus
+import time as _time
+
+from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.sentry_init import init_sentry
 from execution.curation import router
@@ -68,6 +70,9 @@ async def _run_with_progress(args, logger, chat_id: int, today_br: str, date_iso
     """Async ingestion body instrumented with ProgressReporter step() calls."""
     from aiogram import Bot
     from execution.core.progress_reporter import ProgressReporter
+
+    bus = get_current_bus()
+    bus.emit("step", label="Iniciando platts_ingestion")
 
     bot = Bot(token=os.environ["TELEGRAM_BOT_TOKEN"])
     sb = None
@@ -123,11 +128,14 @@ async def _run_with_progress(args, logger, chat_id: int, today_br: str, date_iso
                 "summary": {"totalArticles": 2},
             }]
         else:
+            bus.emit("step", label="Disparando Apify actor")
             logger.info(f"Running Apify Actor: {ACTOR_ID}")
             client = ApifyClient()
+            t0 = _time.time()
             dataset_id, items = await asyncio.to_thread(
                 _run_apify_sync, client, run_input,
             )
+            bus.emit("api_call", label="apify.run", detail={"duration_ms": round((_time.time() - t0) * 1000), "rows": len(items) if items else 0})
 
         # ── PHASE 2: flatten dataset ───────────────────────────────────────────
         articles = _flatten_dataset(items)
@@ -142,6 +150,7 @@ async def _run_with_progress(args, logger, chat_id: int, today_br: str, date_iso
             return
 
         # ── PHASE 3: route (dedup + stage) ────────────────────────────────────
+        bus.emit("step", label="Processando dedup + Supabase")
         counters, staged = await asyncio.to_thread(
             router.route_items,
             items=articles,

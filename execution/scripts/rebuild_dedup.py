@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from execution.core.event_bus import with_event_bus
+from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.curation.id_gen import generate_id
 
 
@@ -85,9 +85,14 @@ def main():
     parser.add_argument("--execute", action="store_true", help="Apply changes (default is dry-run)")
     args = parser.parse_args()
 
+    bus = get_current_bus()
+    bus.emit("step", label="Iniciando rebuild_dedup")
+
     from execution.curation import redis_client
     client = redis_client._get_client()
-    rebuild(client, dry_run=not args.execute)
+    dry = not args.execute
+    bus.emit("step", label=f"Iniciando rebuild (dry_run={dry})")
+    rebuild(client, dry_run=dry)
 
 
 if __name__ == "__main__":

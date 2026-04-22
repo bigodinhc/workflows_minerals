@@ -1,321 +1,332 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-04-17
+**Analysis Date:** 2026-04-22
 
 ## Naming Patterns
 
-**Files:**
-- Python: `snake_case.py` - modules, scripts, test files (e.g., `dispatch.py`, `pipeline.py`, `test_mini_auth.py`)
-- TypeScript/React: `camelCase.ts`, `camelCase.tsx`, `PascalCase.tsx` for components (e.g., `useApi.ts`, `GlassCard.tsx`)
-- Tests: `test_*.py` (pytest convention) or `*.test.tsx`, `*.test.ts` (vitest convention in mini-app)
+**Modules:**
+- `snake_case` filenames: `callback_data.py`, `contacts_repo.py`, `delivery_reporter.py`
+- Logical organization by domain: `routers/callbacks_*.py`, `core/delivery_reporter.py`, `integrations/contacts_repo.py`
+
+**Classes:**
+- `PascalCase`: `Contact`, `ContactsRepo`, `RoleMiddleware`, `ContactNotFoundError`, `WorkflowLogger`
+- Exception classes follow domain: `ContactNotFoundError`, `InvalidPhoneError`, `ContactAlreadyExistsError`
 
 **Functions:**
-- Python: `snake_case` - all function definitions follow snake_case strictly
-- TypeScript: `camelCase` for functions, async functions, hooks
-- React Components: `PascalCase` for exported components (e.g., `function GlassCard(...)`)
+- `snake_case`: `list_active()`, `get_by_phone()`, `normalize_phone()`, `build_approval_keyboard()`
+- Async handlers: `async def on_contact_toggle()`, `async def on_bulk_prompt()`
+- Private functions: `_get_client()`, `_row_to_contact()`, `_parse_ts()`, `_user_key()`
 
 **Variables:**
-- Python: `snake_case` - all variables and constants follow snake_case (e.g., `_STAGING_TTL_SECONDS`, `_client`, `fake_redis`)
-- TypeScript: `camelCase` for variables, properties, parameters
-- Python constants: `UPPER_SNAKE_CASE` for module-level constants (e.g., `_STAGING_TTL_SECONDS = 48 * 60 * 60`)
+- `snake_case` for all: `draft_id`, `chat_id`, `message_id`, `phone_uazapi`, `total_pages`
+- Constants in `UPPERCASE`: `ADMIN_CHAT_ID`, `DEFAULT_SUBSCRIPTIONS`, `TELEGRAM_BOT_TOKEN`
 
-**Types:**
-- Python: Type hints in function signatures using `typing` module - `Optional[T]`, `dict`, `list`, dataclasses with `@dataclass`
-  - Example: `def get_staging(item_id: str) -> Optional[dict]:`
-  - Dataclass usage: `@dataclass class Contact:` (in `execution/core/delivery_reporter.py`)
-- TypeScript: Interface declarations for props and types (e.g., `interface GlassCardProps { children: React.ReactNode }`)
-- TypeScript: Inline types with `type` keyword for exported utility types (e.g., `type Stats = { health_pct: number }`)
+**Type Hints:**
+- `Optional[T]` for nullable values: `Optional[str]`, `Optional[dict]`
+- Return type hints on all functions: `def get_user(chat_id: int) -> Optional[dict]:`
+- Union types with `|` operator (Python 3.10+): `Client | None`, `list | tuple`
 
 ## Code Style
 
 **Formatting:**
-- Python: No automatic formatter configured (ruff/Black not detected in configs)
-- TypeScript: TypeScript strict mode enabled via `tsconfig.json` (`strict: true`)
-  - `noUnusedLocals: true`, `noUnusedParameters: true`, `noFallthroughCasesInSwitch: true`
-  - No ESLint config detected; relies on TypeScript compiler checks
-- Python convention: 4-space indentation (standard Python)
-- TypeScript convention: 2-space indentation (Vite/modern JS default)
+- No explicit formatter config found (black, ruff, or autopep8 not in pyproject.toml)
+- 4-space indentation (Python standard)
+- Line length: no hard limit enforced; code ranges 80-100 chars in examples
+- Imports at top of file with standard Python ordering
 
-**Linting:**
-- Python: No linter config detected (no `.pylintrc`, `.flake8`, `ruff.toml`)
-- TypeScript: TypeScript compiler in strict mode acts as linter
-- No ESLint/Prettier configs found; code relies on editor defaults
+**Future Annotations:**
+- All modules with type hints use `from __future__ import annotations` at top:
+  ```python
+  """Module docstring."""
+  from __future__ import annotations
+  
+  import os
+  import logging
+  from typing import Optional
+  ```
+
+**Docstring Style:**
+- Module-level docstrings describe purpose: `"""User store: Redis-backed CRUD for Telegram bot users."""`
+- Class docstrings explain responsibility: `"""User pressed 'Rejeitar' — optionally sends a reason."""`
+- Function docstrings include Args/Raises when non-obvious:
+  ```python
+  def add(
+      self,
+      name: str,
+      phone_raw: str,
+      *,
+      send_welcome: Callable[[str], None],
+  ) -> Contact:
+      """Add a contact after validating the phone and dispatching a welcome.
+      
+      Flow: normalize → duplicate pre-check → send_welcome → insert.
+      
+      Raises:
+        InvalidPhoneError: if the phone cannot be normalized.
+        ContactAlreadyExistsError: if phone_uazapi already present.
+        RuntimeError: if `send_welcome` raises.
+      """
+  ```
 
 ## Import Organization
 
 **Order:**
-1. Future imports (`from __future__ import annotations`) - always first in Python files
-2. Standard library imports (`asyncio`, `json`, `logging`, `os`, `time`, `sys`)
-3. Third-party imports (`aiohttp`, `aiogram`, `anthropic`, `pytest`, `redis`)
-4. Local/relative imports (`from bot.config import ...`, `import contact_admin`)
+1. `from __future__ import annotations` (always first)
+2. Standard library: `os`, `logging`, `json`, `asyncio`
+3. Third-party: `aiogram`, `phonenumbers`, `structlog`
+4. Local relative: `from bot.config import ...`, `from execution.integrations import ...`
 
-**Examples:**
-
-Python (`webhook/dispatch.py`):
+**Pattern - Local imports to avoid circular deps:**
 ```python
-from __future__ import annotations
-
-import asyncio
-import json
-import logging
-
-import aiohttp
-import requests
-
-from bot.config import get_bot, UAZAPI_URL, UAZAPI_TOKEN, GOOGLE_CREDENTIALS_JSON, SHEET_ID
-from bot.keyboards import build_approval_keyboard
-from execution.core.delivery_reporter import DeliveryReporter, build_contact_from_row
-from execution.integrations.sheets_client import SheetsClient
+@callbacks_contacts_router.callback_query(ContactToggle.filter())
+async def on_contact_toggle(query: CallbackQuery, callback_data: ContactToggle):
+    # Local import avoids circular dep with commands.py.
+    from bot.routers.commands import _render_list_view
 ```
 
-TypeScript (`webhook/mini-app/src/pages/Home.tsx`):
-```typescript
-import { useApi } from "../hooks/useApi";
-import { GlassCard } from "../components/GlassCard";
-import { RingChart } from "../components/RingChart";
-import type { Stats, WorkflowsResponse, Workflow } from "../lib/types";
+**Path aliases:**
+- Relative imports within package: `from bot.config import ...`
+- Absolute imports across packages: `from execution.integrations.contacts_repo import Contact`
+- sys.path manipulation in conftest.py to support test imports:
+  ```python
+  sys.path.insert(0, str(_REPO_ROOT / "webhook"))
+  ```
+
+## Data Models
+
+**Dataclasses preferred over plain dicts:**
+```python
+@dataclass(frozen=True)
+class Contact:
+    id: str
+    name: str
+    phone_raw: str
+    phone_uazapi: str
+    status: str             # 'ativo' | 'inativo'
+    created_at: datetime
+    updated_at: datetime
+
+    def is_active(self) -> bool:
+        return self.status == "ativo"
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d["created_at"] = self.created_at.isoformat()
+        d["updated_at"] = self.updated_at.isoformat()
+        return d
 ```
 
-**Path Aliases:**
-- Not used (no `paths` config in `tsconfig.json` or `baseUrl`)
-- Relative imports common: `../hooks/`, `../components/`, `../lib/`
+**Frozen dataclasses for immutability:** `@dataclass(frozen=True)` prevents accidental mutation.
+
+**CallbackData for type-safe button data:**
+```python
+class ContactToggle(CallbackData, prefix="tgl"):
+    phone: str
+
+class ContactBulk(CallbackData, prefix="bulk"):
+    """First tap on bulk activate/deactivate."""
+    status: str       # 'ativo' | 'inativo'
+    search: str = ""
+```
+Replaces manual string parsing; auto-serializes to callback_data strings.
 
 ## Error Handling
 
-**Patterns:**
-
-Python:
-- Try/except blocks wrapping async operations and API calls
-- Specific exception types when possible (e.g., `anthropic.APIConnectionError`, `anthropic.AuthenticationError`)
-- Fallback to broad `Exception` for external APIs with unpredictable failures
-- Logging errors with `logger.error(f"message: {e}")` before re-raising
-
-Example from `webhook/pipeline.py`:
+**Custom Exception hierarchy:**
 ```python
-try:
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
-    message = await client.messages.create(...)
-    return message.content[0].text
-except anthropic.APIConnectionError as e:
-    logger.error(f"Anthropic connection error: {e}")
-    raise
-except anthropic.AuthenticationError as e:
-    logger.error(f"Anthropic auth error (bad key?): {e}")
-    raise
-except Exception as e:
-    logger.error(f"Anthropic error ({type(e).__name__}): {e}")
-    raise
+class ContactNotFoundError(Exception):
+    """No contact matches the given phone/id."""
+
+class InvalidPhoneError(ValueError):
+    """normalize_phone rejected the input."""
+
+class ContactAlreadyExistsError(Exception):
+    def __init__(self, existing: "Contact"):
+        self.existing = existing
+        super().__init__(f"Contact {existing.name!r} already exists")
 ```
 
-- For HTTP/external service errors: catch by status code or exception type, log details, return boolean or raise
-- Telegram API Markdown escaping: Special handling in error messages to escape special characters
-
-TypeScript/aiohttp:
-- HTTP handlers raise specific exceptions (`web.HTTPUnauthorized`, `web.HTTPForbidden`)
-- Promise-based error handling with async/await and try/catch
-
-Example from `webhook/routes/mini_auth.py`:
+**Try/except pattern with logging:**
 ```python
 try:
-    data = safe_parse_webapp_init_data(TELEGRAM_BOT_TOKEN, init_data)
-except ValueError:
-    raise web.HTTPUnauthorized(text="Invalid initData signature")
+    repo = ContactsRepo()
+    contact = await asyncio.to_thread(repo.toggle, callback_data.phone)
+except ContactNotFoundError as e:
+    await query.answer(f"❌ {str(e)[:100]}")
+    return
+except Exception as e:
+    logger.error(f"toggle_contact failed: {e}")
+    await query.answer("❌ Erro")
+    return
+```
+
+**Re-raising with context:**
+```python
+try:
+    send_welcome(canonical)
+except Exception as e:
+    raise RuntimeError(f"welcome send failed: {e}") from e
 ```
 
 ## Logging
 
-**Framework:** Python `logging` module (built-in) — all modules use `logger = logging.getLogger(__name__)`
+**Framework:** `logging` module (standard library)
 
-**Patterns:**
-- Module-level logger: `logger = logging.getLogger(__name__)` (in `webhook/dispatch.py`, `webhook/pipeline.py`, `webhook/bot/config.py`)
-- Log levels used: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
-- Info-level for workflow progress (e.g., `logger.info(f"Writer done ({len(writer_output)} chars)")`)
-- Warning-level for retries/backoff (e.g., `logger.warning(f"Google Sheets API error {e}. Retrying in {sleep_time}s...")`)
-- Error-level for exceptions and failures (e.g., `logger.error(f"Failed to fetch contacts after {max_retries} attempts: {e}")`)
-- Structured logging via `WorkflowLogger` class in `execution/core/logger.py` for JSON logs with workflow/run context
-
-Example from `execution/core/logger.py`:
+**Pattern:**
 ```python
-class WorkflowLogger:
-    """Structured logger for workflow execution with JSON output."""
-    def _log(self, level: str, message: str, data: Optional[dict] = None):
-        entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "workflow": self.workflow,
-            "run_id": self.run_id,
-            "step": self.step,
-            "level": level,
-            "message": message,
-            "data": data or {}
-        }
+logger = logging.getLogger(__name__)
+```
+
+**Usage levels:**
+- `logger.error()`: unrecoverable failures (human action needed)
+- `logger.warning()`: soft failures, degraded mode, missing optional config
+- `logger.info()`: state transitions, sentry_initialized
+- `logger.debug()`: role authorization checks, trace-level detail
+
+**Example:**
+```python
+logger.error(f"toggle_contact failed: {e}")
+logger.warning(f"state_store: redis connection failed: {exc}")
+logger.debug(f"Role '{role}' not in {self.allowed_roles} for chat_id={from_user.id}")
+```
+
+**Structured logging (WorkflowLogger):**
+```python
+from execution.core.logger import WorkflowLogger
+
+logger = WorkflowLogger("my_workflow")
+logger.info("Processing started", {"items": 10})
+logger.error("Send failed", {"error": str(e), "contact": phone})
+```
+Writes JSON logs to `.tmp/logs/{workflow}/{run_id}.json` for post-run analysis.
+
+## Async/Await Patterns
+
+**Async handlers in routers:**
+```python
+@callbacks_contacts_router.callback_query(ContactToggle.filter())
+async def on_contact_toggle(query: CallbackQuery, callback_data: ContactToggle):
+    try:
+        repo = ContactsRepo()
+        contact = await asyncio.to_thread(repo.toggle, callback_data.phone)
+    except Exception as e:
+        logger.error(f"toggle_contact failed: {e}")
+        await query.answer("❌ Erro")
+```
+
+**Running sync code in thread pool:**
+```python
+contact = await asyncio.to_thread(repo.toggle, callback_data.phone)
+contact = await asyncio.to_thread(
+    repo.list_all, search=search, page=1, per_page=10_000,
+)
+```
+Avoids blocking the Telegram update loop on Supabase client operations.
+
+**No `asyncio.create_task()` without supervision:**
+Handlers use `await` to ensure completion before responding.
+
+## Repository Pattern
+
+**Dependency injection:**
+```python
+class ContactsRepo:
+    def __init__(self, client=None):
+        if client is not None:
+            self.client = client
+        else:
+            from supabase import create_client
+            url = os.environ.get("SUPABASE_URL")
+            key = os.environ.get("SUPABASE_KEY")
+            if not url or not key:
+                raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
+            self.client = create_client(url, key)
+```
+Constructor accepts optional `client` for testing; defaults to real Supabase client.
+
+**Method cohesion:**
+- Read methods: `list_active()`, `list_all()`, `get_by_phone()`
+- Write methods: `add()`, `toggle()`, `bulk_set_status()`
+- All I/O through self.client (chainable query builder)
+
+## Middleware Pattern
+
+**Type-safe role-based auth:**
+```python
+class RoleMiddleware(BaseMiddleware):
+    def __init__(self, allowed_roles: Set[str]):
+        self.allowed_roles = allowed_roles
+        super().__init__()
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        from_user = getattr(event, "from_user", None)
+        if from_user is None:
+            return await handler(event, data)
+
+        role = get_user_role(from_user.id)
+        if role not in self.allowed_roles:
+            logger.debug(f"Role '{role}' not in {self.allowed_roles} for chat_id={from_user.id}")
+            return None
+
+        data["user_role"] = role
+        return await handler(event, data)
+```
+
+**Router registration:**
+```python
+callbacks_contacts_router = Router(name="callbacks_contacts")
+callbacks_contacts_router.callback_query.middleware(
+    RoleMiddleware(allowed_roles={"admin"})
+)
+```
+
+## Configuration Management
+
+**Environment-based singletons:**
+```python
+_bot: Bot | None = None
+_dp: Dispatcher | None = None
+_storage: RedisStorage | None = None
+
+def get_storage() -> RedisStorage:
+    global _storage
+    if _storage is None:
+        _storage = RedisStorage.from_url(REDIS_URL)
+    return _storage
+
+def get_bot() -> Bot:
+    global _bot
+    if _bot is None:
+        _bot = Bot(token=TELEGRAM_BOT_TOKEN, ...)
+    return _bot
+```
+
+**Eager env var loading at module level:**
+```python
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+REDIS_URL = os.getenv("REDIS_URL", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")  # Raises if missing at instantiation
 ```
 
 ## Comments
 
-**When to Comment:**
-- Before complex functions or flows (e.g., "─── Google Sheets (contacts) ───" before `_get_contacts_sync()`)
-- For non-obvious business logic (e.g., Telegram Markdown escaping requirements)
-- For workarounds or known limitations
+**When to comment:**
+- **Non-obvious flows:** "Local import avoids circular dep with commands.py"
+- **Complex business logic:** "Duplicate pre-check — avoid sending welcome to someone on the list"
+- **Enum mapping:** PT labels for error categories
+- Avoid restating what code obviously does: `x = 5  # set x to 5` is noise
 
-**Docstrings/Comments Style:**
-
-Python:
-- Triple-quoted docstrings for functions and classes
-- Format: Single-line summary, blank line, optional description, Args/Returns sections
-- Example from `execution/core/logger.py`:
-  ```python
-  def __init__(self, workflow: str, run_id: Optional[str] = None):
-      """
-      Initialize logger for a workflow.
-      
-      Args:
-          workflow: Name of the workflow/directive
-          run_id: Optional run ID (auto-generated if not provided)
-      """
-  ```
-
-- Module-level docstrings with overview and usage examples (e.g., `webhook/dispatch.py` starts with module docstring)
-
-TypeScript/React:
-- JSDoc-style comments for components (e.g., `interface GlassCardProps { children: React.ReactNode; className?: string; }`)
-- Inline comments for complex logic
-- No strict DocString enforcement detected
-
-## Function Design
-
-**Size:** Typically 30–100 lines for async operations, 10–50 lines for pure functions
-- Shorter functions preferred; async functions naturally longer due to await/error handling
-- Examples: `validate_init_data()` (30 lines), `call_claude()` (25 lines), `send_whatsapp()` (20 lines)
-
-**Parameters:**
-- Python: Named parameters with type hints; optional params use defaults
-- TypeScript: Props as single object parameter for React components (destructured in function signature)
-- Example (TypeScript): `function GlassCard({ children, className = "" }: GlassCardProps)`
-
-**Return Values:**
-- Python async: Return the result directly, raise exceptions on failure
-- TypeScript: Return typed objects (interfaces), use nullish values for missing data
-- Example: `async def get_staging(item_id: str) -> Optional[dict]:` returns None if not found
-
-## Module Design
-
-**Exports:**
-
-Python:
-- Functions/classes exported implicitly (no `__all__` unless re-exporting from submodules)
-- Example from `execution/core/prompts/__init__.py`:
-  ```python
-  from execution.core.prompts.writer import WRITER_SYSTEM
-  from execution.core.prompts.critique import CRITIQUE_SYSTEM
-  __all__ = ["WRITER_SYSTEM", "CRITIQUE_SYSTEM", "CURATOR_SYSTEM", "ADJUSTER_SYSTEM"]
-  ```
-
-TypeScript:
-- Named exports for functions, components, interfaces (e.g., `export function useApi<T>(...)`)
-- `export default` for page components (e.g., `export default function Home(...)`)
-
-**Barrel Files:**
-- Used in `execution/core/prompts/__init__.py` to aggregate agent system prompts
-- Used in mini-app for potential component grouping (not extensive)
-
-## Async Patterns
-
-**Python (asyncio + aiohttp + Aiogram):**
-- Async function definition: `async def function_name():`
-- Await calls: `await call_claude(...)`, `await asyncio.to_thread(_get_contacts_sync())`, `await session.post(...)`
-- Background task creation: `asyncio.create_task(coro)` with cleanup callback (in `webhook/bot/main.py`)
-- Async context managers: `async with aiohttp.ClientSession() as session:`, `async with session.post(...) as resp:`
-
-Example from `webhook/pipeline.py`:
+**Comment style:**
 ```python
-async def run_3_agents(raw_text: str, on_phase_start=None) -> str:
-    async def _notify(phase_name):
-        if on_phase_start is None:
-            return
-        result = on_phase_start(phase_name)
-        if asyncio.iscoroutine(result):
-            await result
-    
-    await _notify("Writer")
-    writer_output = await call_claude(WRITER_SYSTEM, user_prompt)
+# ── Toggle ──           # Section headers with dashes
+# Single-line explanation of intent or gotcha
 ```
-
-**TypeScript (React + SWR for data fetching):**
-- React hooks with side effects: `useEffect`, `useState`, `useSWR`
-- Example from `webhook/mini-app/src/hooks/useApi.ts`:
-  ```typescript
-  export function useApi<T>(path: string | null, config?: SWRConfiguration<T>) {
-    const { initData } = useTelegram();
-    return useSWR<T>(
-      path && initData ? path : null,
-      (url: string) => apiFetch<T>(url, initData),
-      { revalidateOnFocus: false, ...config }
-    );
-  }
-  ```
-
-## Type Hints
-
-**Python:**
-- Type hints used extensively in function signatures and variable declarations
-- `from typing import Optional, Union, Callable, Iterable, Dict, List`
-- Example: `def archive(item_id: str, date: str, chat_id: int) -> Optional[dict]:`
-- Dataclass-based typing for structured data (e.g., `@dataclass class Contact:`)
-- No MyPy configuration detected; type hints are informational/self-documenting
-
-**TypeScript:**
-- TypeScript strict mode enforces type checking at compile time (`strict: true` in `tsconfig.json`)
-- Generics used for reusable components/hooks (e.g., `function useApi<T>(...)`)
-- Interface-based prop typing for React components
-
-## Configuration & Secrets
-
-**Environment variables:**
-- Read via `os.getenv(name, default)` in Python (e.g., `TELEGRAM_BOT_TOKEN`, `REDIS_URL`, `ANTHROPIC_API_KEY`)
-- `.env` file exists and is gitignored; critical for local development
-- Secrets passed to GitHub Actions via `${{ secrets.VARIABLE_NAME }}`
-- Example from `webhook/bot/config.py`:
-  ```python
-  TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-  REDIS_URL = os.getenv("REDIS_URL", "")
-  ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
-  ```
-
-**Secrets handling:**
-- Never hardcoded in source; always from environment
-- Partial logging of secrets (e.g., `UAZAPI_TOKEN[:8] + '...'`) for non-sensitive confirmation
-- JSON secrets (e.g., `GOOGLE_CREDENTIALS_JSON`) loaded from env and parsed inline
-
-## Commit Message Conventions
-
-**Format:** `<type>: <description>`
-
-Types observed:
-- `feat:` - new feature (e.g., "feat(bot): broadcast message — send free-form text direct to WhatsApp")
-- `fix:` - bug fix (e.g., "fix(broadcast): use StateFilter(None) on catch-all to prevent 3-agent activation")
-- `refactor:` - code refactoring without behavior change (e.g., "refactor(bot): remove catch-all text handler")
-
-**Style:**
-- Lowercase type and description
-- Parenthetical scope: `type(scope): description`
-- Description uses em-dashes (—) to separate rationale
-- Specific and actionable (e.g., "prevent 3-agent activation" not "fix bug")
-
-## Code Quality Markers
-
-**No mutations:**
-- Python dataclasses used for immutable data (via `@dataclass`)
-- Dictionaries copied before modification: `item = dict(item)` before setting fields
-
-**Docstring requirement:**
-- Module-level docstrings present in most workflow files
-- Function docstrings for public/async APIs
-- Not enforced uniformly across all utilities
-
-**Line length:**
-- Python: No strict limit detected; typical 80–120 characters
-- TypeScript: No enforced limit; matches editor defaults (~100 chars)
 
 ---
 
-*Convention analysis: 2026-04-17*
+*Convention analysis: 2026-04-22*

@@ -106,9 +106,17 @@ class ContactsRepo:
         else:
             from supabase import create_client
             url = os.environ.get("SUPABASE_URL")
-            key = os.environ.get("SUPABASE_KEY")
+            # Accept SUPABASE_SERVICE_ROLE_KEY (webhook/Railway convention) or
+            # SUPABASE_KEY (legacy script-side). Matches execution/core/event_bus.py.
+            key = (
+                os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+                or os.environ.get("SUPABASE_KEY")
+            )
             if not url or not key:
-                raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
+                raise ValueError(
+                    "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
+                    "(or SUPABASE_KEY) must be set"
+                )
             self.client = create_client(url, key)
 
     # ---- Reads ----

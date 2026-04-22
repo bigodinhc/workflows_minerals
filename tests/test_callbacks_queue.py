@@ -298,7 +298,7 @@ async def test_on_queue_bulk_prompt_discard_shows_confirmation(mock_callback_que
     await on_queue_bulk_prompt(query, QueueBulkPrompt(action="discard"))
 
     call = bot.edit_message_text.await_args
-    assert "Descartar 1 items?" in call.args[0]
+    assert "Descartar 1 item?" in call.args[0]
 
 
 @pytest.mark.asyncio

@@ -157,8 +157,8 @@ async def on_queue_sel_none(query: CallbackQuery, callback_data: QueueSelNone):
 # ── Bulk action flow ──
 
 _BULK_ACTION_VERBS = {
-    "archive": ("Arquivar", "arquivados"),
-    "discard": ("Descartar", "descartados"),
+    "archive": "Arquivar",
+    "discard": "Descartar",
 }
 
 
@@ -187,8 +187,9 @@ async def on_queue_bulk_prompt(query: CallbackQuery, callback_data: QueueBulkPro
     if not selected:
         await query.answer("Nada selecionado")
         return
-    verb_title, _ = _BULK_ACTION_VERBS[callback_data.action]
-    prompt = f"{verb_title} {len(selected)} items?"
+    verb_title = _BULK_ACTION_VERBS[callback_data.action]
+    noun = "item" if len(selected) == 1 else "items"
+    prompt = f"{verb_title} {len(selected)} {noun}?"
     await query.answer("")
     await get_bot().edit_message_text(
         prompt,
@@ -219,6 +220,7 @@ async def on_queue_bulk_confirm(query: CallbackQuery, callback_data: QueueBulkCo
         except Exception as exc:
             logger.error(f"bulk_archive failed: {exc}")
             await query.answer("⚠️ Erro ao arquivar")
+            await _rerender(query, page=1)
             return
         ok = len(result["archived"])
         bad = len(result["failed"])
@@ -234,6 +236,7 @@ async def on_queue_bulk_confirm(query: CallbackQuery, callback_data: QueueBulkCo
         except Exception as exc:
             logger.error(f"bulk_discard failed: {exc}")
             await query.answer("⚠️ Erro ao descartar")
+            await _rerender(query, page=1)
             return
         toast = f"✅ {int(deleted)} descartados"
 

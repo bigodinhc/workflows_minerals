@@ -184,7 +184,8 @@ def _format_queue_select(total: int, selected: set, time_info: str,
                          page_items: list[dict], total_pages: int,
                          page: int) -> tuple[str, dict]:
     selected_count = len(selected)
-    text = f"*🗂️ STAGING · {selected_count} selecionados de {total}{time_info}*"
+    noun = "selecionado" if selected_count == 1 else "selecionados"
+    text = f"*🗂️ STAGING · {selected_count} {noun} de {total}{time_info}*"
     keyboard: list[list[dict]] = []
     for item in page_items:
         item_id = item.get("id") or ""

@@ -287,7 +287,19 @@ def test_queue_select_mode_header_shows_selection_count(fake_redis):
         "stagedAt": "2026-04-15T11:00:00Z",
     }))
     text, _ = format_queue_page(page=1, mode="select", selected={"a"})
-    assert "1 selecionados de 2" in text
+    assert "1 selecionado de 2" in text
+
+
+def test_queue_select_mode_header_uses_plural_for_multiple(fake_redis):
+    import json
+    from webhook.query_handlers import format_queue_page
+    for i in range(3):
+        fake_redis.set(f"platts:staging:i{i}", json.dumps({
+            "id": f"i{i}", "title": f"T{i}", "type": "news",
+            "stagedAt": f"2026-04-15T1{i}:00:00Z",
+        }))
+    text, _ = format_queue_page(page=1, mode="select", selected={"i0", "i1"})
+    assert "2 selecionados de 3" in text
 
 
 def test_queue_select_mode_items_render_checkboxes(fake_redis):
@@ -326,6 +338,13 @@ def test_queue_select_mode_has_action_rows(fake_redis):
     assert "📦 Arquivar 1" in all_texts
     assert "🗑️ Descartar 1" in all_texts
     assert "🔙 Sair" in all_texts
+    # Bottom rows (order-sensitive): ..items.., Todos/Nenhum, Bulk, Sair
+    # With 1 item + no pagination: [item, todos_nenhum, bulk, sair] = 4 rows
+    assert rows[-1][0]["text"] == "🔙 Sair"
+    assert rows[-2][0]["callback_data"] == "q_bulk:archive"
+    assert rows[-2][1]["callback_data"] == "q_bulk:discard"
+    assert rows[-3][0]["callback_data"] == "q_all"
+    assert rows[-3][1]["callback_data"] == "q_none"
 
 
 def test_queue_select_mode_counts_zero_when_no_selection(fake_redis):
@@ -362,3 +381,30 @@ def test_queue_empty_keeps_old_output(fake_redis):
     text, markup = format_queue_page(page=1)
     assert text == "*🗂️ STAGING*\n\nNenhum item aguardando."
     assert markup is None
+
+
+def test_queue_select_callbacks_match_factory_prefixes(fake_redis):
+    """Lock in that hardcoded strings in format_queue_page match the
+    CallbackData factories — a rename of the factory prefix will fail here
+    instead of silently making buttons dead."""
+    import json
+    from webhook.query_handlers import format_queue_page
+    from bot.callback_data import (
+        QueueModeToggle, QueueSelToggle, QueueSelAll, QueueSelNone, QueueBulkPrompt,
+    )
+    fake_redis.set("platts:staging:x", json.dumps({
+        "id": "x", "title": "T", "type": "news",
+        "stagedAt": "2026-04-15T10:00:00Z",
+    }))
+    # Normal-mode entry button
+    _, normal = format_queue_page(page=1)
+    assert normal["inline_keyboard"][0][0]["callback_data"] == QueueModeToggle(action="enter").pack()
+    # Select-mode buttons
+    _, select = format_queue_page(page=1, mode="select", selected=set())
+    callbacks = {b["callback_data"] for row in select["inline_keyboard"] for b in row}
+    assert QueueSelToggle(item_id="x").pack() in callbacks
+    assert QueueSelAll().pack() in callbacks
+    assert QueueSelNone().pack() in callbacks
+    assert QueueBulkPrompt(action="archive").pack() in callbacks
+    assert QueueBulkPrompt(action="discard").pack() in callbacks
+    assert QueueModeToggle(action="exit").pack() in callbacks

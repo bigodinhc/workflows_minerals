@@ -134,7 +134,7 @@ class EventBus:
             "parent_run_id": self.parent_run_id,
             "level": level,
             "event": event,
-            "label": label or None,
+            "label": label or event,
             "detail": detail or None,
         }
         for sink in self._sinks:

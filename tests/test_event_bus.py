@@ -714,3 +714,46 @@ def test_get_current_bus_isolated_across_nested_calls(monkeypatch):
         ("inner", "inner"),
         ("outer-after", "outer"),
     ]
+
+
+def test_emit_without_label_uses_event_name_as_label():
+    """event_log.label is NOT NULL in Supabase. When a caller emits an event
+    without an explicit label (e.g., lifecycle events cron_started/
+    cron_finished emitted by the @with_event_bus decorator), the event name
+    itself must populate the label field. Otherwise the _SupabaseSink insert
+    throws 'null value in column label violates not-null constraint' and the
+    event silently drops from the timeline."""
+    from execution.core.event_bus import EventBus
+
+    captured = []
+
+    class _CaptureSink:
+        def emit(self, event_dict):
+            captured.append(event_dict)
+
+    bus = EventBus(workflow="test")
+    bus._sinks = [_CaptureSink()]
+    bus.emit("cron_started")  # no explicit label
+
+    assert len(captured) == 1
+    assert captured[0]["event"] == "cron_started"
+    assert captured[0]["label"] == "cron_started"  # fallback
+
+
+def test_emit_with_explicit_label_keeps_it():
+    """Regression guard: explicit labels must not be overwritten by the event
+    name fallback."""
+    from execution.core.event_bus import EventBus
+
+    captured = []
+
+    class _CaptureSink:
+        def emit(self, event_dict):
+            captured.append(event_dict)
+
+    bus = EventBus(workflow="test")
+    bus._sinks = [_CaptureSink()]
+    bus.emit("step", label="fetching data")
+
+    assert captured[0]["event"] == "step"
+    assert captured[0]["label"] == "fetching data"

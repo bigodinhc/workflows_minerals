@@ -411,8 +411,8 @@ def test_check_sent_flag_returns_false_when_absent(fake_redis):
 
 
 def test_check_sent_flag_returns_true_when_present(fake_redis):
-    from execution.core.state_store import check_sent_flag, set_sent_flag
-    set_sent_flag("daily_report:sent:TEST:2026-04-22", ttl_seconds=60)
+    from execution.core.state_store import check_sent_flag
+    fake_redis.set("daily_report:sent:TEST:2026-04-22", "1", ex=60)
     assert check_sent_flag("daily_report:sent:TEST:2026-04-22") is True
 
 

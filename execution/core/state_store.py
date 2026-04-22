@@ -140,6 +140,7 @@ def record_empty(workflow: str, reason: str) -> None:
 
 
 _CRASH_DEDUP_TTL_SECONDS = 300  # 5 min: dedup same-workflow crashes recorded twice
+_STREAK_THRESHOLD = 3
 
 
 def record_crash(workflow: str, exc_text: str) -> None:
@@ -275,9 +276,6 @@ def release_inflight(key: str) -> None:
         client.delete(key)
     except Exception as exc:
         logger.warning(f"state_store.release_inflight failed: {exc}")
-
-
-_STREAK_THRESHOLD = 3
 
 
 def _send_streak_alert(workflow: str, streak: int, failures: list) -> None:

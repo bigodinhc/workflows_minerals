@@ -339,6 +339,57 @@ def test_with_event_bus_calls_init_sentry(monkeypatch):
     assert "baltic_ingestion" in calls[0]
 
 
+def test_with_event_bus_records_crash_to_state_store(monkeypatch, capsys):
+    """When the wrapped function raises, the decorator should also update
+    state_store.record_crash(workflow, exc_text) so the watchdog knows the
+    run was attempted (even if the script failed before progress.fail ran).
+    Closes the gap between event_bus and state_store tracking for
+    'rodou = tentou rodar' semantics."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    crash_calls = []
+    from execution.core import state_store
+    monkeypatch.setattr(state_store, "record_crash", lambda wf, exc_text: crash_calls.append((wf, exc_text)))
+
+    from execution.core.event_bus import with_event_bus
+
+    @with_event_bus("test_wf")
+    def broken_main():
+        raise ValueError("synthetic boom")
+
+    with pytest.raises(ValueError, match="synthetic boom"):
+        broken_main()
+
+    assert len(crash_calls) == 1
+    wf, exc_text = crash_calls[0]
+    assert wf == "test_wf"
+    assert "ValueError" in exc_text
+    assert "synthetic boom" in exc_text
+
+
+def test_with_event_bus_record_crash_exception_does_not_propagate(monkeypatch):
+    """If state_store.record_crash itself raises, the decorator should still
+    re-raise the ORIGINAL exception (not the record_crash one)."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    from execution.core import state_store
+    def broken_record(wf, exc_text):
+        raise RuntimeError("state_store unavailable")
+    monkeypatch.setattr(state_store, "record_crash", broken_record)
+
+    from execution.core.event_bus import with_event_bus
+
+    @with_event_bus("test_wf")
+    def broken_main():
+        raise ValueError("original")
+
+    # Must still raise the ORIGINAL ValueError, not the RuntimeError from record_crash
+    with pytest.raises(ValueError, match="original"):
+        broken_main()
+
+
 def test_events_channel_sink_sends_warn_immediately(monkeypatch):
     """warn/error events flush immediately, no buffering."""
     monkeypatch.delenv("SUPABASE_URL", raising=False)

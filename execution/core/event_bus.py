@@ -330,6 +330,15 @@ def with_event_bus(workflow: str):
                     detail={"exc_type": type(exc).__name__, "exc_str": str(exc)[:500]},
                     level="error",
                 )
+                # Update state_store so the watchdog knows "tentou rodar e crashou"
+                # even if the script failed before progress_reporter.fail could fire
+                # (e.g., import-time exceptions, config-load failures).
+                # Deduped inside record_crash when progress.fail also runs.
+                try:
+                    from execution.core import state_store
+                    state_store.record_crash(workflow, f"{type(exc).__name__}: {exc}")
+                except Exception:
+                    pass
                 # Capture WITH the last breadcrumbs already on the Sentry scope
                 try:
                     import sentry_sdk

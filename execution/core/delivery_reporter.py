@@ -319,6 +319,12 @@ def build_contact_from_row(row: dict) -> Optional[Contact]:
     return Contact(name=name, phone=phone)
 
 
+def build_delivery_contact(contact) -> Contact:
+    """Adapter: convert a contacts_repo.Contact into a DeliveryReporter.Contact.
+    Accepts any object with `name` and `phone_uazapi` attributes (duck typed)."""
+    return Contact(name=contact.name, phone=contact.phone_uazapi)
+
+
 class DeliveryReporter:
     """Shared delivery tracker for WhatsApp workflows."""
 

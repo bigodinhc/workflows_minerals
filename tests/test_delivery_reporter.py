@@ -916,3 +916,21 @@ def test_skipped_circuit_break_category_has_no_action_hint():
     already surfaces the hint."""
     from execution.core.delivery_reporter import SendErrorCategory, _CATEGORY_HINT
     assert _CATEGORY_HINT.get(SendErrorCategory.SKIPPED_CIRCUIT_BREAK) is None
+
+
+from datetime import datetime, timezone
+from execution.integrations.contacts_repo import Contact as RepoContact
+from execution.core.delivery_reporter import build_delivery_contact, Contact as DeliveryContact
+
+
+def test_build_delivery_contact_from_repo_contact():
+    repo_c = RepoContact(
+        id="x", name="Alice", phone_raw="+5511987654321",
+        phone_uazapi="5511987654321", status="ativo",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    dc = build_delivery_contact(repo_c)
+    assert isinstance(dc, DeliveryContact)
+    assert dc.name == "Alice"
+    assert dc.phone == "5511987654321"

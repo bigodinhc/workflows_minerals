@@ -1,4 +1,4 @@
-"""Agent system prompts for the 3-agent pipeline (Writer → Critique → Curator)."""
+"""Agent system prompts: Writer → Critique → Curator pipeline + post-send Adjuster."""
 from execution.core.prompts.writer import WRITER_SYSTEM
 from execution.core.prompts.critique import CRITIQUE_SYSTEM
 from execution.core.prompts.curator import CURATOR_SYSTEM

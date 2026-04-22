@@ -241,6 +241,7 @@ def main():
             logger.error("TELEGRAM_CHAT_ID or TELEGRAM_WEBHOOK_URL not set.")
             sys.exit(1)
 
+        bus = get_current_bus()
         run_input = {
             "username": os.getenv("PLATTS_USERNAME", ""),
             "password": os.getenv("PLATTS_PASSWORD", ""),
@@ -254,6 +255,9 @@ def main():
             "concurrency": 2,
             "dedupArticles": True,
         }
+        if bus is not None:
+            run_input["trace_id"] = bus.trace_id
+            run_input["parent_run_id"] = bus.run_id
         if args.target_date:
             run_input["targetDate"] = args.target_date
             run_input["dateFormat"] = "BR"

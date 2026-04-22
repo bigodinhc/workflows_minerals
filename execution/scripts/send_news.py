@@ -8,16 +8,13 @@ import argparse
 # Add project root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
-from execution.integrations.sheets_client import SheetsClient
+from execution.integrations.contacts_repo import ContactsRepo
 from execution.integrations.uazapi_client import UazapiClient
 from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.logger import WorkflowLogger
-from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
+from execution.core.delivery_reporter import DeliveryReporter, build_delivery_contact
 from execution.core.progress_reporter import ProgressReporter
 
-# Config (Same as other workflows)
-SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
-SHEET_NAME = "Página1"
 
 @with_event_bus("market_news")
 def main():
@@ -59,8 +56,8 @@ def main():
         logger.info("Fetching contacts...")
         bus.emit("step", label="Buscando contatos")
         try:
-            sheets = SheetsClient()
-            contacts = sheets.get_contacts(SHEET_ID, SHEET_NAME)
+            contacts_repo = ContactsRepo()
+            contacts = contacts_repo.list_active()
         except Exception as e:
             logger.critical(f"Failed to fetch contacts: {e}")
             progress.finish_empty("falha na ingestao")
@@ -74,7 +71,7 @@ def main():
         # 2. Send via DeliveryReporter
         uazapi = UazapiClient()
 
-        delivery_contacts = [bc for c in contacts if (bc := build_contact_from_row(c))]
+        delivery_contacts = [build_delivery_contact(c) for c in contacts]
 
         if not delivery_contacts:
             logger.warning("No valid delivery contacts after filtering.")

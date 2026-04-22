@@ -1,6 +1,7 @@
 """Tests for webhook.contact_admin module."""
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 import pytest
 
 # Make webhook importable as a package root
@@ -19,6 +20,22 @@ from contact_admin import (
     render_list_message,
     build_list_keyboard,
 )
+from execution.integrations.contacts_repo import Contact
+
+_NOW = datetime.now(timezone.utc)
+
+
+def _contact(id: str, name: str, phone: str, status: str = "ativo") -> Contact:
+    """Helper: build a minimal Contact dataclass for keyboard tests."""
+    return Contact(
+        id=id,
+        name=name,
+        phone_raw=phone,
+        phone_uazapi=phone,
+        status=status,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
 
 
 # ── parse_add_input ──
@@ -199,28 +216,31 @@ def test_render_list_message_empty_without_search():
 
 
 # ── build_list_keyboard ──
+# Contacts are now Contact dataclass instances (not dicts).
+# status "ativo" -> checkmark, "inativo" -> cross.
+# Layout: N contact rows, optional nav row (when total_pages > 1), bulk-action row.
 
 def test_build_list_keyboard_has_toggle_buttons():
     contacts = [
-        {"ProfileName": "A", "From": "whatsapp:+5511111", "ButtonPayload": "Big"},
-        {"ProfileName": "B", "From": "whatsapp:+5511222", "ButtonPayload": "Inactive"},
+        _contact("a", "A", "5511111", status="ativo"),
+        _contact("b", "B", "5511222", status="inativo"),
     ]
     kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None)
     rows = kb["inline_keyboard"]
     # First 2 rows = contact toggles
     assert rows[0][0]["callback_data"] == "tgl:5511111"
-    assert "✅" in rows[0][0]["text"]  # Big = active
+    assert "✅" in rows[0][0]["text"]  # ativo = active
     assert "A" in rows[0][0]["text"]
     assert rows[1][0]["callback_data"] == "tgl:5511222"
-    assert "❌" in rows[1][0]["text"]  # Inactive
+    assert "❌" in rows[1][0]["text"]  # inativo
 
 
 def test_build_list_keyboard_includes_nav_when_multiple_pages():
-    contacts = [{"ProfileName": "A", "From": "whatsapp:+111", "ButtonPayload": "Big"}]
+    contacts = [_contact("a", "A", "111", status="ativo")]
     kb = build_list_keyboard(contacts, page=2, total_pages=5, search=None)
     rows = kb["inline_keyboard"]
-    # Last row = navigation
-    nav = rows[-1]
+    # Row order: contact, nav, bulk. Nav is second-to-last.
+    nav = rows[-2]
     callbacks = [b["callback_data"] for b in nav]
     assert "pg:1" in callbacks  # prev
     assert "pg:3" in callbacks  # next
@@ -228,19 +248,22 @@ def test_build_list_keyboard_includes_nav_when_multiple_pages():
 
 
 def test_build_list_keyboard_nav_with_search():
-    contacts = [{"ProfileName": "A", "From": "whatsapp:+111", "ButtonPayload": "Big"}]
+    contacts = [_contact("a", "A", "111", status="ativo")]
     kb = build_list_keyboard(contacts, page=2, total_pages=3, search="joao")
-    nav = kb["inline_keyboard"][-1]
+    # nav is second-to-last; last is bulk row
+    nav = kb["inline_keyboard"][-2]
     callbacks = [b["callback_data"] for b in nav]
     assert "pg:1:joao" in callbacks
     assert "pg:3:joao" in callbacks
 
 
 def test_build_list_keyboard_no_nav_when_single_page():
-    contacts = [{"ProfileName": "A", "From": "whatsapp:+111", "ButtonPayload": "Big"}]
+    contacts = [_contact("a", "A", "111", status="ativo")]
     kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None)
-    # Only 1 row (the single contact), no nav row
-    assert len(kb["inline_keyboard"]) == 1
+    # No nav row when total_pages == 1.
+    # Rows: 1 contact toggle + 1 bulk-action row = 2 total; no pg: callback.
+    callbacks = [btn["callback_data"] for row in kb["inline_keyboard"] for btn in row]
+    assert not any(c.startswith("pg:") for c in callbacks), "nav row should be absent"
 
 
 def test_build_list_keyboard_empty_contacts():

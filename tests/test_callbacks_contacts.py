@@ -1,20 +1,39 @@
 """Characterization tests — contact admin callbacks."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from bot.callback_data import ContactToggle, ContactPage
 from bot.routers.callbacks_contacts import on_contact_toggle, on_contact_page
+from execution.integrations.contacts_repo import Contact, ContactNotFoundError
+
+_NOW = datetime.now(timezone.utc)
+
+
+def _contact(name: str, status: str) -> Contact:
+    return Contact(
+        id="test-id",
+        name=name,
+        phone_raw="5511999",
+        phone_uazapi="5511999",
+        status=status,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
 
 
 @pytest.mark.asyncio
 async def test_contact_toggle_activate_shows_ativado_toast(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100, message_id=200)
-    # to_thread(sheets.toggle_contact, SHEET_ID, phone) → (name, new_status)
-    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=("João", "Big")))
+    returned_contact = _contact("João", "ativo")
+    mocker.patch(
+        "bot.routers.callbacks_contacts.ContactsRepo",
+        return_value=MagicMock(),
+    )
+    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=returned_contact))
     render = mocker.patch("bot.routers.commands._render_list_view", new=AsyncMock())
-    mocker.patch("bot.routers.callbacks_contacts.SheetsClient")
 
     await on_contact_toggle(query, ContactToggle(phone="+5511999"))
 
@@ -25,9 +44,13 @@ async def test_contact_toggle_activate_shows_ativado_toast(mock_callback_query, 
 @pytest.mark.asyncio
 async def test_contact_toggle_deactivate_shows_desativado_toast(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100, message_id=200)
-    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=("Maria", "")))
+    returned_contact = _contact("Maria", "inativo")
+    mocker.patch(
+        "bot.routers.callbacks_contacts.ContactsRepo",
+        return_value=MagicMock(),
+    )
+    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=returned_contact))
     mocker.patch("bot.routers.commands._render_list_view", new=AsyncMock())
-    mocker.patch("bot.routers.callbacks_contacts.SheetsClient")
 
     await on_contact_toggle(query, ContactToggle(phone="+5511888"))
 
@@ -35,14 +58,23 @@ async def test_contact_toggle_deactivate_shows_desativado_toast(mock_callback_qu
 
 
 @pytest.mark.asyncio
-async def test_contact_toggle_value_error_shows_short_error(mock_callback_query, mocker):
+async def test_contact_toggle_not_found_shows_short_error(mock_callback_query, mocker):
+    """ContactNotFoundError from repo.toggle → handler emits ❌ toast (truncated)."""
     query = mock_callback_query(chat_id=100)
-    mocker.patch("asyncio.to_thread", new=AsyncMock(side_effect=ValueError("invalid phone")))
-    mocker.patch("bot.routers.callbacks_contacts.SheetsClient")
+    mocker.patch(
+        "bot.routers.callbacks_contacts.ContactsRepo",
+        return_value=MagicMock(),
+    )
+    mocker.patch(
+        "asyncio.to_thread",
+        new=AsyncMock(side_effect=ContactNotFoundError("no contact with phone bad")),
+    )
 
     await on_contact_toggle(query, ContactToggle(phone="bad"))
 
-    query.answer.assert_awaited_with("❌ invalid phone")
+    args = query.answer.await_args[0]
+    assert args[0].startswith("❌")
+    assert "no contact with phone bad" in args[0]
 
 
 @pytest.mark.asyncio

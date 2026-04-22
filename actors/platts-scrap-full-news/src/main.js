@@ -29,6 +29,7 @@ import { collectArticleContent } from './extract/articlePage.js';
 import { isDateWithinFilter } from './util/dates.js';
 import { saveDebugArtifacts } from './util/debug.js';
 import { createLimiter } from './util/semaphore.js';
+import { EventBus } from './lib/eventBus.js';
 
 await Actor.init();
 
@@ -60,6 +61,16 @@ const {
     targetDate = null,
     debugArtifacts = false,
 } = input;
+
+const bus = new EventBus({
+    workflow: 'platts_scrap_full_news',
+    traceId: input.trace_id,
+    parentRunId: input.parent_run_id,
+});
+
+await bus.emit('cron_started', {
+    detail: { apify_run_id: Actor.config?.actorRunId ?? null },
+});
 
 const articleOptions = { collectImages, includeRawHtml, includeTables };
 
@@ -333,6 +344,23 @@ const crawler = new PlaywrightCrawler({
     },
 });
 
-await crawler.run(['about:blank']);
-log.info('🏁 Fim!');
-await Actor.exit();
+try {
+    await crawler.run(['about:blank']);
+    log.info('🏁 Fim!');
+    await bus.emit('cron_finished', {
+        detail: { ok: true },
+    });
+    await Actor.exit();
+} catch (err) {
+    const errName = err?.name ?? 'UnknownError';
+    const errMsg = err?.message ?? String(err ?? '');
+    await bus.emit('cron_crashed', {
+        label: `${errName}: ${errMsg.slice(0, 100)}`,
+        detail: {
+            exc_type: errName,
+            exc_str: String(err ?? '').slice(0, 500),
+        },
+        level: 'error',
+    });
+    await Actor.fail(errMsg || String(err ?? 'unknown error'));
+}

@@ -11,6 +11,7 @@ from bot.routers.callbacks_queue import on_queue_page, on_queue_open
 @pytest.mark.asyncio
 async def test_on_queue_page_happy_path_edits_message(mock_callback_query, mocker):
     query = mock_callback_query(chat_id=100, message_id=200)
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=False)
     mocker.patch(
         "bot.routers.callbacks_queue.query_handlers.format_queue_page",
         return_value=("queue body text", {"inline_keyboard": []}),
@@ -30,6 +31,7 @@ async def test_on_queue_page_happy_path_edits_message(mock_callback_query, mocke
 @pytest.mark.asyncio
 async def test_on_queue_page_format_error_returns_silently(mock_callback_query, mocker):
     query = mock_callback_query()
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=False)
     mocker.patch(
         "bot.routers.callbacks_queue.query_handlers.format_queue_page",
         side_effect=RuntimeError("boom"),
@@ -77,3 +79,85 @@ async def test_on_queue_open_redis_error_answers_warning(mock_callback_query, mo
     await on_queue_open(query, QueueOpen(item_id="x"))
 
     query.answer.assert_awaited_with("⚠️ Redis indisponível")
+
+
+@pytest.mark.asyncio
+async def test_on_queue_mode_enter_activates_select_mode(mock_callback_query, mocker):
+    from bot.callback_data import QueueModeToggle
+    from bot.routers.callbacks_queue import on_queue_mode
+
+    enter_mock = mocker.patch("webhook.queue_selection.enter_mode")
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=False)
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    bot = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+
+    query = mock_callback_query(chat_id=42, message_id=99)
+    await on_queue_mode(query, QueueModeToggle(action="enter"))
+
+    enter_mock.assert_called_once_with(42)
+    bot.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_queue_mode_exit_clears_state(mock_callback_query, mocker):
+    from bot.callback_data import QueueModeToggle
+    from bot.routers.callbacks_queue import on_queue_mode
+
+    exit_mock = mocker.patch("webhook.queue_selection.exit_mode")
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=False)
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    bot = AsyncMock()
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_mode(query, QueueModeToggle(action="exit"))
+
+    exit_mock.assert_called_once_with(42)
+
+
+@pytest.mark.asyncio
+async def test_on_queue_page_uses_select_mode_when_active(mock_callback_query, mocker):
+    from bot.callback_data import QueuePage
+    from bot.routers.callbacks_queue import on_queue_page
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a"})
+    format_mock = mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    bot = AsyncMock()
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+
+    await on_queue_page(mock_callback_query(chat_id=42), QueuePage(page=2))
+
+    kwargs = format_mock.call_args.kwargs
+    assert kwargs["mode"] == "select"
+    assert kwargs["selected"] == {"a"}
+
+
+@pytest.mark.asyncio
+async def test_on_queue_page_uses_normal_mode_when_inactive(mock_callback_query, mocker):
+    from bot.callback_data import QueuePage
+    from bot.routers.callbacks_queue import on_queue_page
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=False)
+    format_mock = mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    bot = AsyncMock()
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+
+    await on_queue_page(mock_callback_query(chat_id=42), QueuePage(page=1))
+
+    kwargs = format_mock.call_args.kwargs
+    assert kwargs["mode"] == "normal"

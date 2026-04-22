@@ -295,6 +295,35 @@ def test_adjuster_preserves_header():
     assert "MINERALS TRADING" in ADJUSTER_SYSTEM
 
 
+def test_adjuster_preserves_template():
+    """v3: Adjuster preserves template-implicit structure."""
+    from execution.core.prompts.adjuster import ADJUSTER_SYSTEM
+    lower = ADJUSTER_SYSTEM.lower()
+    assert "template" in lower
+    assert "não mova" in lower or "não mover" in lower or "preserve" in lower
+
+
+def test_adjuster_preserves_watch():
+    """v3: Adjuster preserves Watch: line if present."""
+    from execution.core.prompts.adjuster import ADJUSTER_SYSTEM
+    assert "Watch:" in ADJUSTER_SYSTEM
+
+
+def test_adjuster_preserves_date():
+    """v3: Adjuster does not change the header date unless asked."""
+    from execution.core.prompts.adjuster import ADJUSTER_SYSTEM
+    lower = ADJUSTER_SYSTEM.lower()
+    assert "data" in lower
+    assert "pílula" in lower or "ativo" in lower
+
+
+def test_adjuster_has_explicit_request_escape():
+    """v3: 'salvo pedido explícito' escape clause on preservation rules."""
+    from execution.core.prompts.adjuster import ADJUSTER_SYSTEM
+    lower = ADJUSTER_SYSTEM.lower()
+    assert "pedido explícito" in lower or "salvo pedido" in lower
+
+
 def test_all_prompts_importable_from_package():
     """Verify __init__.py re-exports all 4 constants."""
     from execution.core.prompts import (

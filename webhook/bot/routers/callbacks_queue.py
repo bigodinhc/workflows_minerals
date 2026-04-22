@@ -12,10 +12,14 @@ from aiogram import Router
 from aiogram.types import CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
 
-from bot.callback_data import QueuePage, QueueOpen, QueueModeToggle
+from bot.callback_data import (
+    QueuePage, QueueOpen, QueueModeToggle,
+    QueueSelToggle, QueueSelAll, QueueSelNone,
+)
 from bot.config import get_bot
 from bot.middlewares.auth import RoleMiddleware
 import query_handlers
+import redis_queries
 from execution.curation import redis_client as curation_redis
 from execution.curation import telegram_poster
 from webhook import queue_selection
@@ -98,4 +102,51 @@ async def on_queue_mode(query: CallbackQuery, callback_data: QueueModeToggle):
     else:
         queue_selection.exit_mode(chat_id)
         await query.answer("Saiu do modo seleção")
+    await _rerender(query, page=1)
+
+
+# ── Item selection ──
+
+@callbacks_queue_router.callback_query(QueueSelToggle.filter())
+async def on_queue_sel_toggle(query: CallbackQuery, callback_data: QueueSelToggle):
+    chat_id = query.message.chat.id
+    if not queue_selection.is_select_mode(chat_id):
+        await query.answer("Seleção expirou, entre no modo novamente")
+        return
+    try:
+        queue_selection.toggle(chat_id, callback_data.item_id)
+    except Exception as exc:
+        logger.error(f"queue_sel_toggle redis error: {exc}")
+        await query.answer("⚠️ Redis indisponível")
+        return
+    await query.answer("")
+    await _rerender(query, page=1)
+
+
+@callbacks_queue_router.callback_query(QueueSelAll.filter())
+async def on_queue_sel_all(query: CallbackQuery, callback_data: QueueSelAll):
+    chat_id = query.message.chat.id
+    if not queue_selection.is_select_mode(chat_id):
+        await query.answer("Seleção expirou, entre no modo novamente")
+        return
+    try:
+        items = redis_queries.list_staging(limit=200)
+    except Exception as exc:
+        logger.error(f"queue_sel_all redis error: {exc}")
+        await query.answer("⚠️ Redis indisponível")
+        return
+    ids = [i["id"] for i in items if i.get("id")]
+    queue_selection.select_all(chat_id, ids)
+    await query.answer(f"{len(ids)} selecionados")
+    await _rerender(query, page=1)
+
+
+@callbacks_queue_router.callback_query(QueueSelNone.filter())
+async def on_queue_sel_none(query: CallbackQuery, callback_data: QueueSelNone):
+    chat_id = query.message.chat.id
+    if not queue_selection.is_select_mode(chat_id):
+        await query.answer("Seleção expirou, entre no modo novamente")
+        return
+    queue_selection.clear(chat_id)
+    await query.answer("Seleção limpa")
     await _rerender(query, page=1)

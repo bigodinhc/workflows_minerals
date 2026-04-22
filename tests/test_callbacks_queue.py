@@ -244,3 +244,167 @@ async def test_on_queue_sel_none_clears_selection(mock_callback_query, mocker):
     await on_queue_sel_none(mock_callback_query(chat_id=42), QueueSelNone())
 
     clear_mock.assert_called_once_with(42)
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_prompt_empty_selection_toasts(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkPrompt
+    from bot.routers.callbacks_queue import on_queue_bulk_prompt
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value=set())
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_prompt(query, QueueBulkPrompt(action="archive"))
+
+    query.answer.assert_awaited_with("Nada selecionado")
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_prompt_archive_shows_confirmation(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkPrompt
+    from bot.routers.callbacks_queue import on_queue_bulk_prompt
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a", "b", "c"})
+    bot = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+
+    query = mock_callback_query(chat_id=42, message_id=99)
+    await on_queue_bulk_prompt(query, QueueBulkPrompt(action="archive"))
+
+    bot.edit_message_text.assert_awaited_once()
+    call = bot.edit_message_text.await_args
+    assert "Arquivar 3 items?" in call.args[0]
+    markup = call.kwargs["reply_markup"]
+    texts = [b["text"] for row in markup["inline_keyboard"] for b in row]
+    assert "✅ Sim" in texts
+    assert "❌ Cancelar" in texts
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_prompt_discard_shows_confirmation(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkPrompt
+    from bot.routers.callbacks_queue import on_queue_bulk_prompt
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a"})
+    bot = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_prompt(query, QueueBulkPrompt(action="discard"))
+
+    call = bot.edit_message_text.await_args
+    assert "Descartar 1 items?" in call.args[0]
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_confirm_archive_executes_then_exits(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkConfirm
+    from bot.routers.callbacks_queue import on_queue_bulk_confirm
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a", "b"})
+    exit_mock = mocker.patch("webhook.queue_selection.exit_mode")
+    to_thread = mocker.patch(
+        "asyncio.to_thread",
+        new=AsyncMock(return_value={"archived": ["a", "b"], "failed": []}),
+    )
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    bot = AsyncMock()
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_confirm(query, QueueBulkConfirm(action="archive"))
+
+    to_thread.assert_awaited_once()
+    query.answer.assert_awaited_with("✅ 2 arquivados")
+    exit_mock.assert_called_once_with(42)
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_confirm_archive_partial_reports_both_counts(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkConfirm
+    from bot.routers.callbacks_queue import on_queue_bulk_confirm
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a", "b", "c"})
+    mocker.patch("webhook.queue_selection.exit_mode")
+    mocker.patch(
+        "asyncio.to_thread",
+        new=AsyncMock(return_value={"archived": ["a", "b"], "failed": ["c"]}),
+    )
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=AsyncMock())
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_confirm(query, QueueBulkConfirm(action="archive"))
+
+    query.answer.assert_awaited_with("✅ 2 arquivados, 1 falhou (expirado ou já removido)")
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_confirm_discard_executes(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkConfirm
+    from bot.routers.callbacks_queue import on_queue_bulk_confirm
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a", "b"})
+    mocker.patch("webhook.queue_selection.exit_mode")
+    to_thread = mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=2))
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=AsyncMock())
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_confirm(query, QueueBulkConfirm(action="discard"))
+
+    to_thread.assert_awaited_once()
+    query.answer.assert_awaited_with("✅ 2 descartados")
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_confirm_empty_selection_toasts(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkConfirm
+    from bot.routers.callbacks_queue import on_queue_bulk_confirm
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value=set())
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_confirm(query, QueueBulkConfirm(action="archive"))
+
+    query.answer.assert_awaited_with("Seleção expirou, entre no modo novamente")
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_cancel_rerenders_select_mode(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkCancel
+    from bot.routers.callbacks_queue import on_queue_bulk_cancel
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a"})
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    bot = AsyncMock()
+    bot.edit_message_text = AsyncMock()
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_cancel(query, QueueBulkCancel())
+
+    query.answer.assert_awaited_with("Cancelado")
+    bot.edit_message_text.assert_awaited_once()

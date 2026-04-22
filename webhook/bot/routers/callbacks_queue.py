@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 
 from aiogram import Router
 from aiogram.types import CallbackQuery
@@ -15,6 +16,7 @@ from aiogram.exceptions import TelegramBadRequest
 from bot.callback_data import (
     QueuePage, QueueOpen, QueueModeToggle,
     QueueSelToggle, QueueSelAll, QueueSelNone,
+    QueueBulkPrompt, QueueBulkConfirm, QueueBulkCancel,
 )
 from bot.config import get_bot
 from bot.middlewares.auth import RoleMiddleware
@@ -149,4 +151,98 @@ async def on_queue_sel_none(query: CallbackQuery, callback_data: QueueSelNone):
         return
     queue_selection.clear(chat_id)
     await query.answer("Seleção limpa")
+    await _rerender(query, page=1)
+
+
+# ── Bulk action flow ──
+
+_BULK_ACTION_VERBS = {
+    "archive": ("Arquivar", "arquivados"),
+    "discard": ("Descartar", "descartados"),
+}
+
+
+def _confirm_markup(action: str) -> dict:
+    return {
+        "inline_keyboard": [[
+            {
+                "text": "✅ Sim",
+                "callback_data": QueueBulkConfirm(action=action).pack(),
+            },
+            {
+                "text": "❌ Cancelar",
+                "callback_data": QueueBulkCancel().pack(),
+            },
+        ]]
+    }
+
+
+@callbacks_queue_router.callback_query(QueueBulkPrompt.filter())
+async def on_queue_bulk_prompt(query: CallbackQuery, callback_data: QueueBulkPrompt):
+    chat_id = query.message.chat.id
+    if not queue_selection.is_select_mode(chat_id):
+        await query.answer("Seleção expirou, entre no modo novamente")
+        return
+    selected = queue_selection.get_selection(chat_id)
+    if not selected:
+        await query.answer("Nada selecionado")
+        return
+    verb_title, _ = _BULK_ACTION_VERBS[callback_data.action]
+    prompt = f"{verb_title} {len(selected)} items?"
+    await query.answer("")
+    await get_bot().edit_message_text(
+        prompt,
+        chat_id=chat_id,
+        message_id=query.message.message_id,
+        reply_markup=_confirm_markup(callback_data.action),
+    )
+
+
+@callbacks_queue_router.callback_query(QueueBulkConfirm.filter())
+async def on_queue_bulk_confirm(query: CallbackQuery, callback_data: QueueBulkConfirm):
+    chat_id = query.message.chat.id
+    if not queue_selection.is_select_mode(chat_id):
+        await query.answer("Seleção expirou, entre no modo novamente")
+        return
+    selected = queue_selection.get_selection(chat_id)
+    if not selected:
+        await query.answer("Seleção expirou, entre no modo novamente")
+        return
+    ids = sorted(selected)  # deterministic order for bulk op
+
+    if callback_data.action == "archive":
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            result = await asyncio.to_thread(
+                curation_redis.bulk_archive, ids, date, chat_id,
+            )
+        except Exception as exc:
+            logger.error(f"bulk_archive failed: {exc}")
+            await query.answer("⚠️ Erro ao arquivar")
+            return
+        ok = len(result["archived"])
+        bad = len(result["failed"])
+        if ok and bad:
+            toast = f"✅ {ok} arquivados, {bad} falhou (expirado ou já removido)"
+        elif ok:
+            toast = f"✅ {ok} arquivados"
+        else:
+            toast = "⚠️ Nenhum item arquivado (todos expiraram ou foram removidos)"
+    else:  # discard
+        try:
+            deleted = await asyncio.to_thread(curation_redis.bulk_discard, ids)
+        except Exception as exc:
+            logger.error(f"bulk_discard failed: {exc}")
+            await query.answer("⚠️ Erro ao descartar")
+            return
+        toast = f"✅ {int(deleted)} descartados"
+
+    queue_selection.exit_mode(chat_id)
+    await query.answer(toast)
+    await _rerender(query, page=1)
+
+
+@callbacks_queue_router.callback_query(QueueBulkCancel.filter())
+async def on_queue_bulk_cancel(query: CallbackQuery, callback_data: QueueBulkCancel):
+    await query.answer("Cancelado")
     await _rerender(query, page=1)

@@ -88,6 +88,11 @@ log.info('=====================================');
 
 if (!username || !password) {
     await Actor.pushData({ type: 'error', message: 'Credenciais necessárias' });
+    await bus.emit('cron_crashed', {
+        label: 'ConfigError: username or password not provided',
+        detail: { exc_type: 'ConfigError', exc_str: 'username or password not provided' },
+        level: 'error',
+    });
     await Actor.exit();
 }
 

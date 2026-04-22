@@ -163,6 +163,25 @@ def get_all_status(workflows: list) -> dict:
     return {wf: get_status(wf) for wf in workflows}
 
 
+def try_claim_alert_key(key: str, ttl_seconds: int) -> bool:
+    """Atomic Redis SET NX EX. Returns True if the caller claimed the key
+    (should fire the alert), False if the key already existed (someone else
+    alerted). Degrades permissive: returns True on any Redis failure so an
+    alert still fires rather than silently swallowed.
+
+    Use for idempotent alert suppression (e.g., watchdog missing-cron
+    notifications that must fire exactly once per miss)."""
+    client = _get_client()
+    if client is None:
+        return True
+    try:
+        result = client.set(key, "1", nx=True, ex=ttl_seconds)
+        return result is not None and result is not False
+    except Exception as exc:
+        logger.warning(f"state_store.try_claim_alert_key failed: {exc}")
+        return True
+
+
 _STREAK_THRESHOLD = 3
 
 

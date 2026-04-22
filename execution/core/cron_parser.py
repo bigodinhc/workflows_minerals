@@ -69,3 +69,58 @@ def parse_next_run(workflow: str, workflows_dir: str = ".github/workflows") -> O
     if earliest.tzinfo is None:
         earliest = earliest.replace(tzinfo=timezone.utc)
     return earliest.astimezone(_BRT)
+
+
+def parse_previous_run(workflow: str, workflows_dir: str = ".github/workflows") -> Optional[datetime]:
+    """Return the most recent scheduled run of `workflow` that has already
+    passed (relative to `now` in UTC), or None if not parseable. Mirrors
+    parse_next_run but walks BACKWARD via croniter.get_prev.
+
+    Returns a UTC-aware datetime (unlike parse_next_run which converts to BRT).
+    The watchdog consumes UTC so it can compare against its own UTC `now`.
+    """
+    path = os.path.join(workflows_dir, f"{workflow}.yml")
+    if not os.path.exists(path):
+        return None
+    try:
+        import yaml
+    except Exception as exc:
+        logger.warning(f"cron_parser: pyyaml not installed: {exc}")
+        return None
+    try:
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
+    except Exception as exc:
+        logger.warning(f"cron_parser: failed to parse {path}: {exc}")
+        return None
+    if not isinstance(data, dict):
+        return None
+    on_section = data.get("on") or data.get(True)
+    if not isinstance(on_section, dict):
+        return None
+    schedule = on_section.get("schedule")
+    if not isinstance(schedule, list) or not schedule:
+        return None
+    try:
+        from croniter import croniter
+    except Exception as exc:
+        logger.warning(f"cron_parser: croniter not installed: {exc}")
+        return None
+    now_utc = _utc_now()
+    prev_runs = []
+    for entry in schedule:
+        cron_expr = entry.get("cron") if isinstance(entry, dict) else None
+        if not cron_expr:
+            continue
+        try:
+            it = croniter(cron_expr, now_utc)
+            prev_runs.append(it.get_prev(datetime))
+        except Exception as exc:
+            logger.warning(f"cron_parser: bad cron {cron_expr!r}: {exc}")
+            continue
+    if not prev_runs:
+        return None
+    latest = max(prev_runs)
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=timezone.utc)
+    return latest  # UTC, unlike parse_next_run which returns BRT

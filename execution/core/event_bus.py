@@ -12,6 +12,7 @@ Phase 2 (later): _EventsChannelSink for firehose.
 import atexit
 import functools
 import json
+from contextvars import ContextVar
 import logging
 import os
 import secrets
@@ -62,6 +63,21 @@ def _build_telegram_client():
     except Exception as exc:
         logger.warning("telegram client init failed: %s", exc)
         return None
+
+
+_active_bus: ContextVar[Optional["EventBus"]] = ContextVar("active_event_bus", default=None)
+
+
+def get_current_bus() -> Optional["EventBus"]:
+    """Return the EventBus active for the current @with_event_bus context,
+    or None if called outside a decorated function.
+
+    Scripts and helpers use this to emit step/api_call events without
+    threading the bus through call signatures. state_store.record_* uses
+    it to tag last-run state with the event_bus run_id for /tail.
+
+    Callers must tolerate None (outside decorator, or in tests)."""
+    return _active_bus.get()
 
 
 class EventBus:
@@ -320,34 +336,38 @@ def with_event_bus(workflow: str):
                 logger.warning("init_sentry failed in decorator: %s", exc)
 
             bus = EventBus(workflow=workflow)
-            bus.emit("cron_started")
+            token = _active_bus.set(bus)
             try:
-                result = func(*args, **kwargs)
-            except BaseException as exc:
-                bus.emit(
-                    "cron_crashed",
-                    label=f"{type(exc).__name__}: {str(exc)[:100]}",
-                    detail={"exc_type": type(exc).__name__, "exc_str": str(exc)[:500]},
-                    level="error",
-                )
-                # Update state_store so the watchdog knows "tentou rodar e crashou"
-                # even if the script failed before progress_reporter.fail could fire
-                # (e.g., import-time exceptions, config-load failures).
-                # Deduped inside record_crash when progress.fail also runs.
+                bus.emit("cron_started")
                 try:
-                    from execution.core import state_store
-                    state_store.record_crash(workflow, f"{type(exc).__name__}: {exc}")
-                except Exception:
-                    pass
-                # Capture WITH the last breadcrumbs already on the Sentry scope
-                try:
-                    import sentry_sdk
-                    if sentry_sdk is not None:
-                        sentry_sdk.capture_exception(exc)
-                except Exception:
-                    pass
-                raise
-            bus.emit("cron_finished")
-            return result
+                    result = func(*args, **kwargs)
+                except BaseException as exc:
+                    bus.emit(
+                        "cron_crashed",
+                        label=f"{type(exc).__name__}: {str(exc)[:100]}",
+                        detail={"exc_type": type(exc).__name__, "exc_str": str(exc)[:500]},
+                        level="error",
+                    )
+                    # Update state_store so the watchdog knows "tentou rodar e crashou"
+                    # even if the script failed before progress_reporter.fail could fire
+                    # (e.g., import-time exceptions, config-load failures).
+                    # Deduped inside record_crash when progress.fail also runs.
+                    try:
+                        from execution.core import state_store
+                        state_store.record_crash(workflow, f"{type(exc).__name__}: {exc}")
+                    except Exception:
+                        pass
+                    # Capture WITH the last breadcrumbs already on the Sentry scope
+                    try:
+                        import sentry_sdk
+                        if sentry_sdk is not None:
+                            sentry_sdk.capture_exception(exc)
+                    except Exception:
+                        pass
+                    raise
+                bus.emit("cron_finished")
+                return result
+            finally:
+                _active_bus.reset(token)
         return wrapper
     return decorator

@@ -9,6 +9,7 @@ import asyncio
 import os
 import sys
 import argparse
+import time as _time
 from datetime import datetime, date
 
 # Adjust path to allow imports from root
@@ -221,10 +222,9 @@ def main():
 
         # 3. Fetch Data
         bus.emit("step", label="Baixando dados Platts")
-        import time as _time
-        t0 = _time.time()
         platts = PlattsClient()
         # We use today for fetching. The client handles prev day calculation.
+        t0 = _time.time()
         report_items = platts.get_report_data(datetime.combine(today, datetime.min.time()))
         bus.emit("api_call", label="platts.get_report_data",
                  detail={"duration_ms": int((_time.time() - t0) * 1000), "rows": len(report_items) if report_items else 0})

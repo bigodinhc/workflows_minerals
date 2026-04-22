@@ -8,6 +8,7 @@ import asyncio
 import os
 import sys
 import argparse
+import time as _time
 from datetime import datetime
 
 # Adjust path to allow imports from root
@@ -112,13 +113,12 @@ def main():
         
         # 1. Fetch Prices (LSEG)
         bus.emit("step", label="Conectando ao LSEG")
-        import time as _time
-        t0 = _time.time()
         logger.info("Connecting to LSEG...")
         lseg = LSEGClient()
         lseg.connect()
 
         logger.info("Fetching latest futures data...")
+        t0 = _time.time()
         prices = lseg.get_futures_data()
         bus.emit("api_call", label="lseg.get_futures_data",
                  detail={"duration_ms": int((_time.time() - t0) * 1000), "rows": len(prices) if prices else 0})

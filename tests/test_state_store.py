@@ -403,3 +403,94 @@ def test_record_crash_dedup_skips_write_even_with_bus_active(fake_redis, monkeyp
         event_bus._active_bus.reset(token)
 
     assert fake_redis.get("wf:last_run:dedup_wf") is None     # no second write occurred
+
+
+def test_check_sent_flag_returns_false_when_absent(fake_redis):
+    from execution.core.state_store import check_sent_flag
+    assert check_sent_flag("daily_report:sent:TEST:2026-04-22") is False
+
+
+def test_check_sent_flag_returns_true_when_present(fake_redis):
+    from execution.core.state_store import check_sent_flag, set_sent_flag
+    set_sent_flag("daily_report:sent:TEST:2026-04-22", ttl_seconds=60)
+    assert check_sent_flag("daily_report:sent:TEST:2026-04-22") is True
+
+
+def test_check_sent_flag_returns_false_when_redis_unavailable(monkeypatch):
+    """Permissive degrade: treat 'unknown' as 'not sent' so workflow proceeds."""
+    from execution.core import state_store
+    monkeypatch.setattr(state_store, "_get_client", lambda: None)
+    assert state_store.check_sent_flag("any") is False
+
+
+def test_check_sent_flag_returns_false_when_redis_raises(monkeypatch):
+    from execution.core import state_store
+
+    class FlakyRedis:
+        def exists(self, key):
+            raise RuntimeError("connection lost")
+
+    monkeypatch.setattr(state_store, "_get_client", lambda: FlakyRedis())
+    assert state_store.check_sent_flag("any") is False
+
+
+def test_set_sent_flag_writes_key_with_ttl(fake_redis):
+    from execution.core.state_store import set_sent_flag
+    set_sent_flag("daily_report:sent:TEST:2026-04-22", ttl_seconds=3600)
+    assert fake_redis.get("daily_report:sent:TEST:2026-04-22") == "1"
+    ttl = fake_redis.ttl("daily_report:sent:TEST:2026-04-22")
+    assert 3595 <= ttl <= 3600
+
+
+def test_set_sent_flag_overwrites_existing(fake_redis):
+    from execution.core.state_store import set_sent_flag
+    fake_redis.set("daily_report:sent:TEST:2026-04-22", "0", ex=60)
+    set_sent_flag("daily_report:sent:TEST:2026-04-22", ttl_seconds=3600)
+    assert fake_redis.get("daily_report:sent:TEST:2026-04-22") == "1"
+
+
+def test_set_sent_flag_noop_when_redis_unavailable(monkeypatch):
+    from execution.core import state_store
+    monkeypatch.setattr(state_store, "_get_client", lambda: None)
+    # Must not raise
+    state_store.set_sent_flag("any", ttl_seconds=60)
+
+
+def test_set_sent_flag_noop_when_redis_raises(monkeypatch):
+    from execution.core import state_store
+
+    class FlakyRedis:
+        def set(self, key, value, ex=None):
+            raise RuntimeError("connection lost")
+
+    monkeypatch.setattr(state_store, "_get_client", lambda: FlakyRedis())
+    state_store.set_sent_flag("any", ttl_seconds=60)  # Must not raise
+
+
+def test_release_inflight_deletes_key(fake_redis):
+    from execution.core.state_store import release_inflight
+    fake_redis.set("daily_report:inflight:TEST:2026-04-22", "1", ex=60)
+    release_inflight("daily_report:inflight:TEST:2026-04-22")
+    assert fake_redis.get("daily_report:inflight:TEST:2026-04-22") is None
+
+
+def test_release_inflight_is_idempotent_on_missing_key(fake_redis):
+    from execution.core.state_store import release_inflight
+    release_inflight("daily_report:inflight:TEST:missing")  # Must not raise
+
+
+def test_release_inflight_noop_when_redis_unavailable(monkeypatch):
+    from execution.core import state_store
+    monkeypatch.setattr(state_store, "_get_client", lambda: None)
+    state_store.release_inflight("any")  # Must not raise
+
+
+def test_release_inflight_noop_when_redis_raises(monkeypatch):
+    from execution.core import state_store
+
+    class FlakyRedis:
+        def delete(self, key):
+            raise RuntimeError("connection lost")
+
+    monkeypatch.setattr(state_store, "_get_client", lambda: FlakyRedis())
+    state_store.release_inflight("any")  # Must not raise

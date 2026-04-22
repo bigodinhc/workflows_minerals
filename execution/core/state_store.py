@@ -227,6 +227,56 @@ def try_claim_alert_key(key: str, ttl_seconds: int) -> bool:
         return True
 
 
+def check_sent_flag(key: str) -> bool:
+    """Read-only existence check for a sent flag. Returns True iff the key
+    exists in Redis.
+
+    Permissive on Redis failure: returns False so the caller proceeds as if
+    not yet sent. If the workflow subsequently succeeds, a fresh sent flag
+    is written. If Redis stays down, the next run takes the same path — no
+    silent duplicate delivery (we'd prefer an operator-visible duplicate to
+    a silent skip)."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        return client.exists(key) > 0
+    except Exception as exc:
+        logger.warning(f"state_store.check_sent_flag failed: {exc}")
+        return False
+
+
+def set_sent_flag(key: str, ttl_seconds: int) -> None:
+    """Unconditional SET EX — marks a workflow as successfully completed for
+    its window. Call only after the guarded operation has fully succeeded.
+    Non-raising. Overwrites any existing key (use when the caller owns the
+    key's lifecycle; if you need atomic 'first-writer-wins' semantics, use
+    try_claim_alert_key instead)."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        client.set(key, "1", ex=ttl_seconds)
+    except Exception as exc:
+        logger.warning(f"state_store.set_sent_flag failed: {exc}")
+
+
+def release_inflight(key: str) -> None:
+    """Explicit release of an in-flight lock (DEL). Complements
+    try_claim_alert_key used as a short-TTL mutex: the TTL is the crash
+    safety net, but normal happy-path exit releases the lock immediately
+    so the next run doesn't have to wait.
+
+    Idempotent: harmless if the key already expired. Non-raising."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        client.delete(key)
+    except Exception as exc:
+        logger.warning(f"state_store.release_inflight failed: {exc}")
+
+
 _STREAK_THRESHOLD = 3
 
 

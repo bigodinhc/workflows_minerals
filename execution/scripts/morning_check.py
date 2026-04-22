@@ -75,6 +75,10 @@ REPORT_TYPE = "MORNING_REPORT"
 _INFLIGHT_LOCK_TTL_SEC = 20 * 60   # 20 min — covers max observed broadcast duration
 _SENT_FLAG_TTL_SEC = 48 * 3600     # 48 h — one reporting day + buffer
 
+# Minimum Platts symbols expected before broadcasting
+_MIN_ITEMS_EXPECTED = 10
+_TOTAL_SYMBOLS_CONFIGURED = 26
+
 
 def normalize_text(text):
     if not text: return ""
@@ -258,15 +262,12 @@ def _run_pipeline(args):
             sys.exit(0)  # Exit success — GitHub Action doesn't fail, next run retries
 
         # ── PHASE 2b: incomplete data — no lock, no flag ─────────────────────
-        MIN_ITEMS_EXPECTED = 10  # Threshold - should collect at least 10 symbols
-        TOTAL_SYMBOLS = 26  # Total configured in SYMBOLS_DETAILS
+        logger.info(f"Items collected: {len(report_items)}/{_TOTAL_SYMBOLS_CONFIGURED}")
 
-        logger.info(f"Items collected: {len(report_items)}/{TOTAL_SYMBOLS}")
-
-        if len(report_items) < MIN_ITEMS_EXPECTED:
-            logger.warning(f"⚠️ INCOMPLETE DATA: Only {len(report_items)}/{TOTAL_SYMBOLS} items collected!")
-            logger.warning(f"   Threshold is {MIN_ITEMS_EXPECTED}. Skipping send, will retry on next scheduled run.")
-            progress.finish_empty(f"dados incompletos ({len(report_items)}/{TOTAL_SYMBOLS})")
+        if len(report_items) < _MIN_ITEMS_EXPECTED:
+            logger.warning(f"⚠️ INCOMPLETE DATA: Only {len(report_items)}/{_TOTAL_SYMBOLS_CONFIGURED} items collected!")
+            logger.warning(f"   Threshold is {_MIN_ITEMS_EXPECTED}. Skipping send, will retry on next scheduled run.")
+            progress.finish_empty(f"dados incompletos ({len(report_items)}/{_TOTAL_SYMBOLS_CONFIGURED})")
             sys.exit(0)  # Exit gracefully — next scheduled action will retry
 
         if args.dry_run:

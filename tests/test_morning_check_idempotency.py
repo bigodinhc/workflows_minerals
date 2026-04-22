@@ -14,19 +14,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Stub heavy dependencies that are not installed in the test environment.
-# platts_client imports pandas + spgci at module level; we inject lightweight
-# MagicMock stand-ins before morning_check is first imported so the import
-# chain resolves without errors.
-# ---------------------------------------------------------------------------
-_STUBS = ["pandas", "spgci"]
-for _mod in _STUBS:
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()  # type: ignore[assignment]
-
-
 # ── FIXTURES ─────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True, scope="module")
+def _stub_heavy_deps():
+    """Inject MagicMock stubs for pandas/spgci so platts_client can be
+    imported in environments where those deps aren't installed. Clean up
+    after the module's tests finish so we don't leak stubs into other
+    test modules that might legitimately import pandas."""
+    injected = []
+    for mod in ("pandas", "spgci"):
+        if mod not in sys.modules:
+            sys.modules[mod] = MagicMock()  # type: ignore[assignment]
+            injected.append(mod)
+    yield
+    for mod in injected:
+        del sys.modules[mod]
+
 
 @pytest.fixture
 def spy_state_store(monkeypatch):

@@ -93,3 +93,20 @@ class OnboardingStart(CallbackData, prefix="onboard"):
 class BroadcastConfirm(CallbackData, prefix="bcast"):
     action: str  # send, cancel
     draft_id: str = ""
+
+
+class ContactBulk(CallbackData, prefix="bulk"):
+    """First tap on bulk activate/deactivate. Shows confirmation prompt."""
+    status: str       # 'ativo' | 'inativo'
+    search: str = ""
+
+
+class ContactBulkConfirm(CallbackData, prefix="bulkok"):
+    """Second tap — user confirmed the bulk action."""
+    status: str       # 'ativo' | 'inativo'
+    search: str = ""
+
+
+class ContactBulkCancel(CallbackData, prefix="bulkno"):
+    """Cancel the pending bulk action."""
+    pass

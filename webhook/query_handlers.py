@@ -136,7 +136,9 @@ def _format_staged_time(iso_date: str) -> str:
     if not iso_date:
         return ""
     try:
-        dt = datetime.fromisoformat(iso_date).astimezone(_BRT)
+        # Python 3.9's fromisoformat rejects the 'Z' UTC suffix; normalize first.
+        normalized = iso_date[:-1] + "+00:00" if iso_date.endswith("Z") else iso_date
+        dt = datetime.fromisoformat(normalized).astimezone(_BRT)
         return dt.strftime("%H:%M")
     except (ValueError, TypeError):
         return ""

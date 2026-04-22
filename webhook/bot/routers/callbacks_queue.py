@@ -33,8 +33,13 @@ callbacks_queue_router.callback_query.middleware(RoleMiddleware(allowed_roles={"
 
 
 def _current_mode(chat_id: int) -> tuple[str, set[str]]:
-    if queue_selection.is_select_mode(chat_id):
-        return "select", queue_selection.get_selection(chat_id)
+    """Return (mode, selection). Falls back to ('normal', empty) if Redis fails,
+    so a transient outage degrades gracefully instead of 500ing handlers."""
+    try:
+        if queue_selection.is_select_mode(chat_id):
+            return "select", queue_selection.get_selection(chat_id)
+    except Exception as exc:
+        logger.error(f"queue_selection redis error: {exc}")
     return "normal", set()
 
 
@@ -191,12 +196,16 @@ async def on_queue_bulk_prompt(query: CallbackQuery, callback_data: QueueBulkPro
     noun = "item" if len(selected) == 1 else "items"
     prompt = f"{verb_title} {len(selected)} {noun}?"
     await query.answer("")
-    await get_bot().edit_message_text(
-        prompt,
-        chat_id=chat_id,
-        message_id=query.message.message_id,
-        reply_markup=_confirm_markup(callback_data.action),
-    )
+    try:
+        await get_bot().edit_message_text(
+            prompt,
+            chat_id=chat_id,
+            message_id=query.message.message_id,
+            reply_markup=_confirm_markup(callback_data.action),
+        )
+    except TelegramBadRequest as exc:
+        # Most common cause: 'message is not modified' on rapid double-taps.
+        logger.warning(f"queue bulk prompt edit failed: {exc}")
 
 
 @callbacks_queue_router.callback_query(QueueBulkConfirm.filter())
@@ -224,10 +233,12 @@ async def on_queue_bulk_confirm(query: CallbackQuery, callback_data: QueueBulkCo
             return
         ok = len(result["archived"])
         bad = len(result["failed"])
+        ok_word = "arquivado" if ok == 1 else "arquivados"
+        bad_verb = "falhou" if bad == 1 else "falharam"
         if ok and bad:
-            toast = f"✅ {ok} arquivados, {bad} falhou (expirado ou já removido)"
+            toast = f"✅ {ok} {ok_word}, {bad} {bad_verb} (expirado ou já removido)"
         elif ok:
-            toast = f"✅ {ok} arquivados"
+            toast = f"✅ {ok} {ok_word}"
         else:
             toast = "⚠️ Nenhum item arquivado (todos expiraram ou foram removidos)"
     else:  # discard
@@ -238,7 +249,8 @@ async def on_queue_bulk_confirm(query: CallbackQuery, callback_data: QueueBulkCo
             await query.answer("⚠️ Erro ao descartar")
             await _rerender(query, page=1)
             return
-        toast = f"✅ {int(deleted)} descartados"
+        n = int(deleted)
+        toast = f"✅ {n} {'descartado' if n == 1 else 'descartados'}"
 
     queue_selection.exit_mode(chat_id)
     await query.answer(toast)

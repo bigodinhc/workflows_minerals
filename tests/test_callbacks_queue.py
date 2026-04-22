@@ -408,3 +408,48 @@ async def test_on_queue_bulk_cancel_rerenders_select_mode(mock_callback_query, m
 
     query.answer.assert_awaited_with("Cancelado")
     bot.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_confirm_archive_singular_uses_singular_toast(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkConfirm
+    from bot.routers.callbacks_queue import on_queue_bulk_confirm
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a"})
+    mocker.patch("webhook.queue_selection.exit_mode")
+    mocker.patch(
+        "asyncio.to_thread",
+        new=AsyncMock(return_value={"archived": ["a"], "failed": []}),
+    )
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=AsyncMock())
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_confirm(query, QueueBulkConfirm(action="archive"))
+
+    query.answer.assert_awaited_with("✅ 1 arquivado")
+
+
+@pytest.mark.asyncio
+async def test_on_queue_bulk_confirm_discard_singular_uses_singular_toast(mock_callback_query, mocker):
+    from bot.callback_data import QueueBulkConfirm
+    from bot.routers.callbacks_queue import on_queue_bulk_confirm
+
+    mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
+    mocker.patch("webhook.queue_selection.get_selection", return_value={"a"})
+    mocker.patch("webhook.queue_selection.exit_mode")
+    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=1))
+    mocker.patch(
+        "bot.routers.callbacks_queue.query_handlers.format_queue_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+    mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=AsyncMock())
+
+    query = mock_callback_query(chat_id=42)
+    await on_queue_bulk_confirm(query, QueueBulkConfirm(action="discard"))
+
+    query.answer.assert_awaited_with("✅ 1 descartado")

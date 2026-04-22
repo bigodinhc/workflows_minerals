@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -10,6 +11,8 @@ import pytest
 
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "webhook"))
+
+from execution.integrations.contacts_repo import Contact, ContactNotFoundError
 
 
 class FakeRequest:
@@ -26,10 +29,20 @@ def _patch_auth():
     return patch("routes.mini_api.validate_init_data", new_callable=AsyncMock, return_value=mock_data)
 
 
+_NOW = datetime.now(timezone.utc)
+
+
+def _contact(name, phone, status="ativo"):
+    return Contact(
+        id=f"id-{phone}", name=name, phone_raw=phone, phone_uazapi=phone,
+        status=status, created_at=_NOW, updated_at=_NOW,
+    )
+
+
 FAKE_CONTACTS = [
-    {"ProfileName": "Joao Silva", "Evolution-api": "5511999001122", "ButtonPayload": "Big"},
-    {"ProfileName": "Maria Santos", "Evolution-api": "5511999003344", "ButtonPayload": "Inactive"},
-    {"ProfileName": "Pedro Costa", "Evolution-api": "5511999005566", "ButtonPayload": "Big"},
+    _contact("Joao Silva", "5511999001122", "ativo"),
+    _contact("Maria Santos", "5511999003344", "inativo"),
+    _contact("Pedro Costa", "5511999005566", "ativo"),
 ]
 
 
@@ -37,10 +50,10 @@ FAKE_CONTACTS = [
 async def test_get_contacts():
     from routes.mini_api import get_contacts
     request = FakeRequest(query={"page": "1"})
-    mock_sheets = MagicMock()
-    mock_sheets.list_contacts.return_value = (FAKE_CONTACTS, 1)
+    mock_repo = MagicMock()
+    mock_repo.list_all.return_value = (FAKE_CONTACTS, 1)
     with _patch_auth():
-        with patch("routes.mini_api.SheetsClient", return_value=mock_sheets):
+        with patch("routes.mini_api.ContactsRepo", return_value=mock_repo):
             response = await get_contacts(request)
     data = json.loads(response.body)
     assert len(data["contacts"]) == 3
@@ -55,11 +68,11 @@ async def test_get_contacts():
 async def test_get_contacts_with_search():
     from routes.mini_api import get_contacts
     filtered = [FAKE_CONTACTS[0]]
-    mock_sheets = MagicMock()
-    mock_sheets.list_contacts.return_value = (filtered, 1)
+    mock_repo = MagicMock()
+    mock_repo.list_all.return_value = (filtered, 1)
     request = FakeRequest(query={"search": "Joao", "page": "1"})
     with _patch_auth():
-        with patch("routes.mini_api.SheetsClient", return_value=mock_sheets):
+        with patch("routes.mini_api.ContactsRepo", return_value=mock_repo):
             response = await get_contacts(request)
     data = json.loads(response.body)
     assert len(data["contacts"]) == 1
@@ -69,11 +82,11 @@ async def test_get_contacts_with_search():
 @pytest.mark.asyncio
 async def test_toggle_contact():
     from routes.mini_api import toggle_contact
-    mock_sheets = MagicMock()
-    mock_sheets.toggle_contact.return_value = ("Joao Silva", "Inactive")
+    mock_repo = MagicMock()
+    mock_repo.toggle.return_value = _contact("Joao Silva", "5511999001122", "inativo")
     request = FakeRequest(match_info={"phone": "5511999001122"})
     with _patch_auth():
-        with patch("routes.mini_api.SheetsClient", return_value=mock_sheets):
+        with patch("routes.mini_api.ContactsRepo", return_value=mock_repo):
             response = await toggle_contact(request)
     data = json.loads(response.body)
     assert data["name"] == "Joao Silva"
@@ -83,10 +96,10 @@ async def test_toggle_contact():
 @pytest.mark.asyncio
 async def test_toggle_contact_not_found():
     from routes.mini_api import toggle_contact
-    mock_sheets = MagicMock()
-    mock_sheets.toggle_contact.side_effect = ValueError("Not found")
+    mock_repo = MagicMock()
+    mock_repo.toggle.side_effect = ContactNotFoundError("Not found")
     request = FakeRequest(match_info={"phone": "0000000000"})
     with _patch_auth():
-        with patch("routes.mini_api.SheetsClient", return_value=mock_sheets):
+        with patch("routes.mini_api.ContactsRepo", return_value=mock_repo):
             response = await toggle_contact(request)
     assert response.status == 404

@@ -42,10 +42,15 @@ FAKE_GITHUB_RUNS = {
     "total_count": 47,
 }
 
-FAKE_CONTACTS = [
-    {"ProfileName": "A", "ButtonPayload": "Big"},
-    {"ProfileName": "B", "ButtonPayload": "Big"},
-    {"ProfileName": "C", "ButtonPayload": "Inactive"},
+from datetime import datetime, timezone as _tz
+from execution.integrations.contacts_repo import Contact as _Contact
+_N = datetime.now(_tz.utc)
+# Only active contacts are returned by ContactsRepo.list_active (DB filter).
+FAKE_ACTIVE_CONTACTS = [
+    _Contact(id="a", name="A", phone_raw="1", phone_uazapi="1",
+             status="ativo", created_at=_N, updated_at=_N),
+    _Contact(id="b", name="B", phone_raw="2", phone_uazapi="2",
+             status="ativo", created_at=_N, updated_at=_N),
 ]
 
 FAKE_STAGING = [{"id": f"item_{i}"} for i in range(12)]
@@ -69,13 +74,13 @@ def _mock_github(response_data=None):
 @pytest.mark.asyncio
 async def test_get_stats():
     from routes.mini_api import get_stats
-    mock_sheets = MagicMock()
-    mock_sheets.list_contacts.return_value = (FAKE_CONTACTS, 1)
+    mock_repo = MagicMock()
+    mock_repo.list_active.return_value = FAKE_ACTIVE_CONTACTS
     request = FakeRequest()
     with _patch_auth(), _mock_github():
         with patch("routes.mini_api.redis_queries") as mock_rq:
             mock_rq.list_staging.return_value = FAKE_STAGING
-            with patch("routes.mini_api.SheetsClient", return_value=mock_sheets):
+            with patch("routes.mini_api.ContactsRepo", return_value=mock_repo):
                 response = await get_stats(request)
     data = json.loads(response.body)
     assert data["health_pct"] == 80  # 4 of 5 workflows OK
@@ -89,8 +94,8 @@ async def test_get_stats():
 @pytest.mark.asyncio
 async def test_get_stats_github_failure():
     from routes.mini_api import get_stats
-    mock_sheets = MagicMock()
-    mock_sheets.list_contacts.return_value = ([], 1)
+    mock_repo = MagicMock()
+    mock_repo.list_active.return_value = []
     mock_resp = AsyncMock()
     mock_resp.status = 500
     mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
@@ -104,7 +109,7 @@ async def test_get_stats_github_failure():
         with patch("routes.mini_api.aiohttp.ClientSession", return_value=mock_session):
             with patch("routes.mini_api.redis_queries") as mock_rq:
                 mock_rq.list_staging.return_value = []
-                with patch("routes.mini_api.SheetsClient", return_value=mock_sheets):
+                with patch("routes.mini_api.ContactsRepo", return_value=mock_repo):
                     response = await get_stats(request)
     data = json.loads(response.body)
     assert data["health_pct"] == 0
@@ -115,8 +120,8 @@ async def test_get_stats_github_failure():
 @pytest.mark.asyncio
 async def test_get_stats_all_services_fail():
     from routes.mini_api import get_stats
-    mock_sheets = MagicMock()
-    mock_sheets.list_contacts.side_effect = Exception("Sheets down")
+    mock_repo = MagicMock()
+    mock_repo.list_active.side_effect = Exception("Supabase down")
     mock_resp = AsyncMock()
     mock_resp.status = 500
     mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
@@ -130,7 +135,7 @@ async def test_get_stats_all_services_fail():
         with patch("routes.mini_api.aiohttp.ClientSession", return_value=mock_session):
             with patch("routes.mini_api.redis_queries") as mock_rq:
                 mock_rq.list_staging.side_effect = Exception("Redis down")
-                with patch("routes.mini_api.SheetsClient", return_value=mock_sheets):
+                with patch("routes.mini_api.ContactsRepo", return_value=mock_repo):
                     response = await get_stats(request)
     assert response.status == 200
     data = json.loads(response.body)

@@ -15,9 +15,10 @@ from aiohttp import web
 import redis_queries
 from execution.curation import redis_client
 from reports_nav import _get_supabase
-from execution.integrations.sheets_client import SheetsClient
+from execution.integrations.contacts_repo import (
+    ContactsRepo, ContactNotFoundError,
+)
 
-_SHEET_ID = "1tU3Izdo21JichTXg15bc1paWUiN8XioJYZUPpbIUgL0"
 from routes.mini_auth import validate_init_data
 from workflow_trigger import (
     WORKFLOW_CATALOG,
@@ -396,12 +397,7 @@ async def download_report(request: web.Request) -> web.Response:
 # ── Contacts endpoints ───────────────────────────────────────────────
 
 
-def _phone_from_contact(contact: dict) -> str:
-    for col in ("Evolution-api", "n8n-evo", "From"):
-        val = contact.get(col, "")
-        if val:
-            return str(val).strip()
-    return ""
+# _phone_from_contact is gone — Contact dataclass exposes .phone_uazapi directly.
 
 
 @routes.get("/api/mini/contacts")
@@ -411,9 +407,9 @@ async def get_contacts(request: web.Request) -> web.Response:
     page = int(request.query.get("page", "1"))
 
     try:
-        sheets = SheetsClient()
+        repo = ContactsRepo()
         contacts, total_pages = await asyncio.to_thread(
-            sheets.list_contacts, _SHEET_ID, search=search, page=page, per_page=20,
+            repo.list_all, search=search, page=page, per_page=20,
         )
     except Exception as exc:
         logger.error(f"contacts query error: {exc}")
@@ -421,9 +417,9 @@ async def get_contacts(request: web.Request) -> web.Response:
 
     result = [
         {
-            "name": c.get("ProfileName", ""),
-            "phone": _phone_from_contact(c),
-            "active": str(c.get("ButtonPayload", "")).strip() == "Big",
+            "name": c.name,
+            "phone": c.phone_uazapi,
+            "active": c.status == "ativo",
         }
         for c in contacts
     ]
@@ -440,20 +436,18 @@ async def toggle_contact(request: web.Request) -> web.Response:
     phone = request.match_info["phone"]
 
     try:
-        sheets = SheetsClient()
-        name, new_status = await asyncio.to_thread(
-            sheets.toggle_contact, _SHEET_ID, phone,
-        )
-    except ValueError as exc:
+        repo = ContactsRepo()
+        contact = await asyncio.to_thread(repo.toggle, phone)
+    except ContactNotFoundError as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except Exception as exc:
         logger.error(f"toggle contact error: {exc}")
         return web.json_response({"error": "Toggle failed"}, status=500)
 
     return web.json_response({
-        "name": name,
-        "phone": phone,
-        "active": new_status == "Big",
+        "name": contact.name,
+        "phone": contact.phone_uazapi,
+        "active": contact.is_active(),
     })
 
 
@@ -491,13 +485,11 @@ async def _fetch_workflow_health() -> dict:
 
 
 async def _fetch_contacts_active() -> int:
-    """Count active contacts from Google Sheets."""
+    """Count active contacts from Supabase."""
     try:
-        sheets = SheetsClient()
-        contacts, _ = await asyncio.to_thread(
-            sheets.list_contacts, _SHEET_ID, page=1, per_page=10_000,
-        )
-        return sum(1 for c in contacts if str(c.get("ButtonPayload", "")).strip() == "Big")
+        repo = ContactsRepo()
+        contacts = await asyncio.to_thread(repo.list_active)
+        return len(contacts)
     except Exception as exc:
         logger.error("contacts count error: %s", exc)
         return 0

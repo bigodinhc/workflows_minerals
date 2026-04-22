@@ -916,3 +916,71 @@ def test_skipped_circuit_break_category_has_no_action_hint():
     already surfaces the hint."""
     from execution.core.delivery_reporter import SendErrorCategory, _CATEGORY_HINT
     assert _CATEGORY_HINT.get(SendErrorCategory.SKIPPED_CIRCUIT_BREAK) is None
+
+
+# ─── P1-light: delivery_summary event emission ──────────────────────────────
+
+def test_dispatch_emits_delivery_summary_to_active_bus(monkeypatch):
+    from execution.core import event_bus as eb
+    emits = []
+    class FakeBus:
+        def emit(self, event, label="", detail=None, level="info"):
+            emits.append({"event": event, "label": label, "detail": detail, "level": level})
+    monkeypatch.setattr(eb, "get_current_bus", lambda: FakeBus())
+    send_fn = MagicMock()
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name=f"U{i}", phone=f"11{i}") for i in range(5)]
+    reporter.dispatch(contacts, message="hi")
+    summaries = [e for e in emits if e["event"] == "delivery_summary"]
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert s["level"] == "info"
+    assert "5/5" in s["label"]
+    assert s["detail"] == {"total": 5, "success": 5, "failure": 0}
+
+
+def test_dispatch_emits_delivery_summary_with_warn_on_failure(monkeypatch):
+    from execution.core import event_bus as eb
+    emits = []
+    class FakeBus:
+        def emit(self, event, label="", detail=None, level="info"):
+            emits.append({"event": event, "label": label, "detail": detail, "level": level})
+    monkeypatch.setattr(eb, "get_current_bus", lambda: FakeBus())
+    call_count = {"n": 0}
+    def send_fn(phone, text):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("boom")
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name=f"U{i}", phone=f"11{i}") for i in range(3)]
+    reporter.dispatch(contacts, message="hi")
+    summaries = [e for e in emits if e["event"] == "delivery_summary"]
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert s["level"] == "warn"
+    assert "2/3" in s["label"]
+    assert "1 falha" in s["label"]
+    assert s["detail"] == {"total": 3, "success": 2, "failure": 1}
+
+
+def test_dispatch_noop_when_no_bus_active(monkeypatch):
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "get_current_bus", lambda: None)
+    send_fn = MagicMock()
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name="A", phone="111")]
+    report = reporter.dispatch(contacts, message="hi")
+    assert report.success_count == 1
+
+
+def test_dispatch_bus_emit_exception_does_not_break_dispatch(monkeypatch):
+    from execution.core import event_bus as eb
+    class BrokenBus:
+        def emit(self, *a, **kw):
+            raise RuntimeError("telemetry down")
+    monkeypatch.setattr(eb, "get_current_bus", lambda: BrokenBus())
+    send_fn = MagicMock()
+    reporter = DeliveryReporter(workflow="test", send_fn=send_fn, notify_telegram=False)
+    contacts = [Contact(name="A", phone="111")]
+    report = reporter.dispatch(contacts, message="hi")
+    assert report.success_count == 1

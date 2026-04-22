@@ -234,3 +234,92 @@ async def test_tail_formats_events_with_timestamps_and_emojis(monkeypatch, fake_
     assert "RuntimeError" in reply
     # Error level renders with 🚨 or similar
     assert "🚨" in reply or "error" in reply.lower()
+
+
+@pytest.mark.asyncio
+async def test_tail_level_filter_passes_to_query(monkeypatch, fake_supabase_events):
+    """/tail <wf> --level=warn must add .eq('level', 'warn') to the query."""
+    from bot.routers import commands
+
+    monkeypatch.setattr(
+        "execution.core.state_store.get_status",
+        lambda wf: {"status": "success", "run_id": "abc12345"},
+    )
+    mock_client, mock_chain = fake_supabase_events(rows=[
+        {"ts": "2026-04-21T09:00:08+00:00", "level": "warn", "event": "api_call", "label": "rate-limited", "detail": None},
+    ])
+    monkeypatch.setattr(commands, "_get_supabase_client", lambda: mock_client)
+
+    message = MagicMock()
+    message.reply = AsyncMock()
+    command = MagicMock()
+    command.args = "morning_check --level=warn"
+
+    await commands.cmd_tail(message, command)
+
+    # All three .eq calls issued: workflow, run_id, level
+    mock_chain.eq.assert_any_call("workflow", "morning_check")
+    mock_chain.eq.assert_any_call("run_id", "abc12345")
+    mock_chain.eq.assert_any_call("level", "warn")
+
+
+@pytest.mark.asyncio
+async def test_tail_level_filter_with_explicit_run_id(monkeypatch, fake_supabase_events):
+    """Flag works regardless of positional arg order."""
+    from bot.routers import commands
+
+    mock_client, mock_chain = fake_supabase_events(rows=[])
+    monkeypatch.setattr(commands, "_get_supabase_client", lambda: mock_client)
+
+    message = MagicMock()
+    message.reply = AsyncMock()
+    command = MagicMock()
+    command.args = "morning_check r8f3abc12 --level=error"
+
+    await commands.cmd_tail(message, command)
+
+    mock_chain.eq.assert_any_call("run_id", "r8f3abc12")
+    mock_chain.eq.assert_any_call("level", "error")
+
+
+@pytest.mark.asyncio
+async def test_tail_invalid_level_shows_error(monkeypatch):
+    """--level=foo (not info/warn/error) must reject with a clear message."""
+    from bot.routers.commands import cmd_tail
+
+    message = MagicMock()
+    message.reply = AsyncMock()
+    command = MagicMock()
+    command.args = "morning_check --level=critical"
+
+    await cmd_tail(message, command)
+
+    reply = message.reply.call_args[0][0]
+    assert "inválido" in reply.lower() or "invalid" in reply.lower()
+    assert "critical" in reply.lower()
+    # Must NOT have tried to query supabase
+    assert "supabase" not in reply.lower()
+
+
+@pytest.mark.asyncio
+async def test_tail_level_filter_no_positional_shows_help(monkeypatch):
+    """`/tail --level=warn` (no workflow) should show help, not crash."""
+    from bot.routers.commands import cmd_tail
+
+    message = MagicMock()
+    message.reply = AsyncMock()
+    command = MagicMock()
+    command.args = "--level=warn"
+
+    await cmd_tail(message, command)
+
+    reply = message.reply.call_args[0][0]
+    assert "/tail" in reply  # help text
+
+
+@pytest.mark.asyncio
+async def test_tail_help_mentions_level_flag():
+    from bot.routers.commands import _tail_help
+
+    help_text = _tail_help()
+    assert "--level" in help_text

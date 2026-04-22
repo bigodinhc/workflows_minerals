@@ -434,9 +434,43 @@ class DeliveryReporter:
             results=results,
         )
         self._emit_stdout_report(report)
+        self._emit_delivery_summary_event(report)
         if self.notify_telegram:
             self._send_telegram_summary(report)
         return report
+
+    @staticmethod
+    def _emit_delivery_summary_event(report: "DeliveryReport") -> None:
+        """Emit a single `delivery_summary` event to the active EventBus so the
+        events channel card shows the dispatch outcome (not just 'Enviando...'
+        frozen in ⏳). No-op when no bus is active (tests, isolated scripts).
+
+        Intentionally does NOT emit per-contact ticks — that would exceed the
+        Telegram edit-rate per message and leak contact PII to the firehose."""
+        try:
+            from execution.core.event_bus import get_current_bus
+        except Exception:
+            return
+        bus = get_current_bus()
+        if bus is None:
+            return
+        level = "warn" if report.failure_count > 0 else "info"
+        label = f"{report.success_count}/{report.total} enviadas"
+        if report.failure_count > 0:
+            label += f", {report.failure_count} falha{'s' if report.failure_count > 1 else ''}"
+        try:
+            bus.emit(
+                "delivery_summary",
+                label=label,
+                detail={
+                    "total": report.total,
+                    "success": report.success_count,
+                    "failure": report.failure_count,
+                },
+                level=level,
+            )
+        except Exception:
+            pass  # bus.emit already swallows sink failures; belt-and-suspenders
 
     def _emit_stdout_report(self, report: DeliveryReport) -> None:
         """Print structured JSON report delimited by markers for dashboard parsing."""

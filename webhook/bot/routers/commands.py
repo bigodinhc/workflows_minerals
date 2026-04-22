@@ -23,26 +23,15 @@ from bot.middlewares.auth import RoleMiddleware
 import contact_admin
 import query_handlers
 from status_builder import build_status_message, ALL_WORKFLOWS
-from reports_nav import reports_show_types
+from reports_nav import reports_show_types, _get_supabase as _get_supabase_client
 from execution.integrations.sheets_client import SheetsClient
 
 logger = logging.getLogger(__name__)
 
+# ── Constants ──
 
-def _get_supabase_client():
-    """Return a supabase-py Client, or None if credentials/lib missing.
-    Extracted so tests can monkeypatch."""
-    import os
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
-    if not url or not key:
-        return None
-    try:
-        from supabase import create_client
-        return create_client(url, key)
-    except Exception as exc:
-        logger.warning(f"/tail: supabase init failed: {exc}")
-        return None
+_TAIL_LIMIT = 30
+_LABEL_TRUNCATE = 80
 
 
 # ── Public router (no auth) ──
@@ -105,18 +94,11 @@ async def cmd_tail(message: Message, command: CommandObject):
         return
 
     try:
-        events = (
-            client.table("event_log")
-            .select("ts, level, event, label, detail")
-            .eq("workflow", workflow)
-            .eq("run_id", run_id)
-            .order("ts", desc=False)
-            .limit(30)
-            .execute()
-        )
+        events = await asyncio.to_thread(_query_event_log_sync, client, workflow, run_id)
     except Exception as exc:
         logger.error(f"/tail event_log query failed: {exc}")
-        await message.reply(f"⚠️ Erro ao consultar event_log: {str(exc)[:100]}")
+        err_text = str(exc)[:100].replace("`", "'")
+        await message.reply(f"⚠️ Erro ao consultar event\\_log: `{err_text}`")
         return
 
     rows = events.data or []
@@ -129,11 +111,23 @@ async def cmd_tail(message: Message, command: CommandObject):
     await message.reply(_format_tail(workflow, run_id, rows))
 
 
+def _query_event_log_sync(client, workflow, run_id):
+    return (
+        client.table("event_log")
+        .select("ts, level, event, label, detail")
+        .eq("workflow", workflow)
+        .eq("run_id", run_id)
+        .order("ts", desc=False)
+        .limit(_TAIL_LIMIT)
+        .execute()
+    )
+
+
 def _tail_help() -> str:
     return (
         "📜 *Uso do /tail*\n\n"
-        "`/tail <workflow>` — últimos 30 eventos do run mais recente\n"
-        "`/tail <workflow> <run_id>` — últimos 30 eventos de um run específico\n\n"
+        f"`/tail <workflow>` — últimos {_TAIL_LIMIT} eventos do run mais recente\n"
+        f"`/tail <workflow> <run_id>` — últimos {_TAIL_LIMIT} eventos de um run específico\n\n"
         f"Workflows: {', '.join(ALL_WORKFLOWS)}"
     )
 
@@ -149,7 +143,7 @@ def _format_tail(workflow: str, run_id: str, rows: list) -> str:
         label = row.get("label") or ""
         line = f"{hhmmss} {emoji} {event}"
         if label:
-            line += f" — {label[:80]}"
+            line += f" — {label[:_LABEL_TRUNCATE]}"
         lines.append(line)
     return "\n".join(lines)
 

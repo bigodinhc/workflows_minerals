@@ -51,6 +51,7 @@ async def test_tail_unknown_workflow_shows_error(monkeypatch):
 
     reply = message.reply.call_args[0][0]
     assert "desconhecido" in reply.lower() or "unknown" in reply.lower()
+    assert "morning_check" in reply  # available workflows are listed in the error
 
 
 @pytest.mark.asyncio
@@ -80,6 +81,8 @@ async def test_tail_resolves_default_run_id_from_state_store(monkeypatch, fake_s
     # Assert supabase was queried with the right workflow + run_id
     mock_chain.eq.assert_any_call("workflow", "morning_check")
     mock_chain.eq.assert_any_call("run_id", "abc12345")
+    mock_chain.limit.assert_called_once_with(30)
+    mock_chain.order.assert_called_once_with("ts", desc=False)
 
     reply = message.reply.call_args[0][0]
     assert "morning_check" in reply

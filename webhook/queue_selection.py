@@ -38,7 +38,7 @@ def is_select_mode(chat_id: int) -> bool:
 
 def enter_mode(chat_id: int) -> None:
     client = redis_client._get_client()
-    pipe = client.pipeline()
+    pipe = client.pipeline(transaction=True)
     pipe.set(_mode_key(chat_id), _MODE_VALUE, ex=_TTL_SECONDS)
     pipe.delete(_selected_key(chat_id))
     pipe.execute()
@@ -46,7 +46,7 @@ def enter_mode(chat_id: int) -> None:
 
 def exit_mode(chat_id: int) -> None:
     client = redis_client._get_client()
-    pipe = client.pipeline()
+    pipe = client.pipeline(transaction=True)
     pipe.delete(_mode_key(chat_id))
     pipe.delete(_selected_key(chat_id))
     pipe.execute()
@@ -62,23 +62,24 @@ def toggle(chat_id: int, item_id: str) -> bool:
     """Toggle item_id in the selection. Returns True if now selected."""
     client = redis_client._get_client()
     selected_key = _selected_key(chat_id)
-    if client.sismember(selected_key, item_id):
-        pipe = client.pipeline()
-        pipe.srem(selected_key, item_id)
+    # SADD returns 1 if newly added, 0 if already present — atomic.
+    added = client.sadd(selected_key, item_id)
+    if added:
+        pipe = client.pipeline(transaction=True)
         _refresh_ttl(pipe, chat_id)
         pipe.execute()
-        return False
-    pipe = client.pipeline()
-    pipe.sadd(selected_key, item_id)
+        return True
+    pipe = client.pipeline(transaction=True)
+    pipe.srem(selected_key, item_id)
     _refresh_ttl(pipe, chat_id)
     pipe.execute()
-    return True
+    return False
 
 
 def select_all(chat_id: int, item_ids: list[str]) -> None:
     client = redis_client._get_client()
     selected_key = _selected_key(chat_id)
-    pipe = client.pipeline()
+    pipe = client.pipeline(transaction=True)
     pipe.delete(selected_key)
     if item_ids:
         pipe.sadd(selected_key, *item_ids)
@@ -88,7 +89,7 @@ def select_all(chat_id: int, item_ids: list[str]) -> None:
 
 def clear(chat_id: int) -> None:
     client = redis_client._get_client()
-    pipe = client.pipeline()
+    pipe = client.pipeline(transaction=True)
     pipe.delete(_selected_key(chat_id))
     _refresh_ttl(pipe, chat_id)
     pipe.execute()

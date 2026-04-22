@@ -316,7 +316,16 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
         )
 
         if args.dry_run:
+            # Preview-only: emit nothing to IronMarket, send no WhatsApp.
+            # The IronMarket POST is a live HTTP call against a prod Railway
+            # endpoint, so this early-return is load-bearing — do not move it
+            # below the POST.
             print(json.dumps(data, indent=2))
+            message = format_whatsapp_message(data)
+            print("\n--- WHATSAPP PREVIEW ---\n")
+            print(message)
+            await reporter.finish()
+            return
 
         # ── PHASE 5: ingest to IronMarket + send WhatsApp ─────────────────────
         bus.emit("step", label="Enviando para IronMarket")
@@ -329,12 +338,6 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             logger.error(f"IronMarket Ingestion Failed: {err}")
 
         message = format_whatsapp_message(data)
-
-        if args.dry_run:
-            print("\n--- WHATSAPP PREVIEW ---\n")
-            print(message)
-            await reporter.finish()
-            return
 
         bus.emit("step", label="Enviando WhatsApp")
         contacts_repo = ContactsRepo()

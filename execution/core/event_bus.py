@@ -9,14 +9,12 @@ telemetry.
 Phase 1 (this module): stdout + Supabase + Sentry + main-chat sinks.
 Phase 2 (later): _EventsChannelSink for firehose.
 """
-import atexit
 import functools
 import json
 import logging
 import os
 import secrets
 import sys
-import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -24,6 +22,13 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 _VALID_LEVELS = frozenset({"info", "warn", "error"})
+
+# Workflows that should NEVER publish to the Telegram events channel.
+# Their alerts still flow through _MainChatSink (warn/error, cron_crashed,
+# cron_missed). Used for meta-monitoring jobs that run on a tight cadence
+# and would otherwise flood the firehose with no-op cards — e.g. watchdog
+# runs every 5 min and only has signal when it detects a missed cron.
+_EVENTS_CHANNEL_DENYLIST = frozenset({"watchdog"})
 
 
 def _generate_run_id() -> str:
@@ -33,11 +38,6 @@ def _generate_run_id() -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _monotonic() -> float:
-    """Monkeypatch seam for tests that need to simulate time passage."""
-    return time.monotonic()
 
 
 def _get_supabase_client():
@@ -110,7 +110,7 @@ class EventBus:
         if chat_id and token:
             sinks.append(_MainChatSink(chat_id=chat_id))
         events_channel_id = os.getenv("TELEGRAM_EVENTS_CHANNEL_ID")
-        if events_channel_id and token:
+        if events_channel_id and token and self.workflow not in _EVENTS_CHANNEL_DENYLIST:
             client = _build_telegram_client()
             if client is not None:
                 sinks.append(_EventsChannelSink(chat_id=events_channel_id, client=client))
@@ -233,86 +233,103 @@ class _MainChatSink:
         return "\n".join(lines)
 
 
+_WORKFLOW_TITLES = {
+    "morning_check": ("📈", "Morning Check (Platts)"),
+    "daily_report": ("📊", "Daily SGX"),
+    "baltic_ingestion": ("🚢", "Baltic Ingestion"),
+    "market_news": ("📰", "Market News"),
+    "rationale_news": ("🧠", "Rationale News"),
+    "platts_ingestion": ("📥", "Platts Ingestion"),
+    "platts_reports": ("📄", "Platts Reports"),
+    "rebuild_dedup": ("🔧", "Rebuild Dedup"),
+    "watchdog": ("🐕", "Watchdog"),
+}
+
+
+def _card_title_for(workflow: str) -> str:
+    """Return '<emoji> <Pretty Name>' for a workflow. Falls back to 🛠️ + upper-case
+    workflow name for any workflow not in the mapping."""
+    emoji, name = _WORKFLOW_TITLES.get(
+        workflow, ("🛠️", workflow.upper().replace("_", " ")),
+    )
+    return f"{emoji} {name}"
+
+
 class _EventsChannelSink:
-    """Firehose sink: sends every emitted event to a dedicated Telegram channel.
+    """Live-card sink: one Telegram message per run, edited as events arrive.
 
-    Unlike _MainChatSink (which only fires for warn/error/crashed/missed), this
-    sink relays info events too — a complete audit trail the operator can silence
-    and review on demand.
+    First event of a run sends a new message and captures message_id. Every
+    subsequent event re-renders the accumulated timeline and edits that same
+    message in place. Past lines render with ✅; the current (last) line shows
+    ⏳ for in-progress or ⚠️/🚨 for warn/error. Terminal events (cron_finished
+    → ✅, cron_crashed → 🚨) finalize the last line.
 
-    Throttling:
-    - warn/error events flush immediately (latency parity with _MainChatSink).
-    - info events batch in 1-second windows OR at 20 events, whichever first.
-    - End-of-run flush via atexit so a short-lived script doesn't lose its tail.
+    One sink instance is created per EventBus — so one run_id per instance.
+    No cross-run state management needed.
 
-    Rate-limit posture: Telegram allows ~30 msg/sec/chat. With the 1s window we
-    emit ≤1 msg/sec for info bursts, leaving headroom for warn/error spikes.
+    Rate-limit posture: Telegram allows ~1 edit/sec per message under
+    throttling. Scripts emit ~5-8 events over 2-3 minutes (<0.1/sec); well
+    within limits.
     """
-
-    _BATCH_WINDOW_SECONDS = 1.0
-    _MAX_BUFFER = 20  # flush when buffered info reaches this count
 
     def __init__(self, chat_id: str, client):
         self._chat_id = chat_id
         self._client = client
-        self._buffer: list = []
-        self._last_flush = _monotonic()
-        # Register flush at interpreter exit so short scripts don't drop events
-        atexit.register(self._flush_on_exit)
+        self._message_id: Optional[int] = None
+        self._events: list = []
 
     def emit(self, event_dict: dict) -> None:
-        level = event_dict.get("level", "info")
-        if level in ("warn", "error"):
-            # Preserve ordering: flush any buffered info first, then send this one
-            self._flush()
-            self._send_one([event_dict])
-            return
-        # Info: buffer then maybe flush
-        self._buffer.append(event_dict)
-        if len(self._buffer) >= self._MAX_BUFFER:
-            self._flush()
-            return
-        now = _monotonic()
-        if (now - self._last_flush) >= self._BATCH_WINDOW_SECONDS:
-            self._flush()
-
-    def _flush(self) -> None:
-        if not self._buffer:
-            return
-        batch = self._buffer
-        self._buffer = []
-        self._last_flush = _monotonic()
-        self._send_one(batch)
-
-    def _flush_on_exit(self) -> None:
+        self._events.append(event_dict)
+        text = self._render(self._events)
         try:
-            self._flush()
-        except Exception:
-            pass  # atexit handlers must not raise
-
-    def _send_one(self, events: list) -> None:
-        text = self._format(events)
-        try:
-            self._client.send_message(text=text, chat_id=self._chat_id, parse_mode=None)
+            if self._message_id is None:
+                self._message_id = self._client.send_message(
+                    text=text, chat_id=self._chat_id, parse_mode=None,
+                )
+            else:
+                self._client.edit_message_text(
+                    chat_id=self._chat_id,
+                    message_id=self._message_id,
+                    new_text=text,
+                    parse_mode=None,
+                )
         except Exception as exc:
-            logger.warning(f"_EventsChannelSink send failed: {exc}")
+            logger.warning(f"_EventsChannelSink send/edit failed: {exc}")
 
     @staticmethod
-    def _format(events: list) -> str:
-        lines = []
-        level_emoji = {"info": "ℹ️", "warn": "⚠️", "error": "🚨"}
-        for ev in events:
+    def _render(events: list) -> str:
+        if not events:
+            return ""
+        workflow = events[0].get("workflow") or "?"
+        lines = [_card_title_for(workflow), ""]
+        total = len(events)
+        for i, ev in enumerate(events):
+            is_last = (i == total - 1)
             ts = ev.get("ts") or ""
             hhmmss = ts[11:19] if len(ts) >= 19 else ts
-            wf = ev.get("workflow") or "?"
             ev_name = ev.get("event") or "?"
-            emoji = level_emoji.get(ev.get("level", "info"), "•")
+            emoji = _EventsChannelSink._emoji_for(ev, is_last=is_last)
             label = ev.get("label") or ""
-            line = f"{hhmmss} {emoji} {wf}.{ev_name}"
+            line = f"{hhmmss} {emoji} {ev_name}"
             if label:
                 line += f" — {label[:80]}"
             lines.append(line)
         return "\n".join(lines)
+
+    @staticmethod
+    def _emoji_for(ev: dict, is_last: bool) -> str:
+        event = ev.get("event")
+        level = ev.get("level", "info")
+        if event == "cron_crashed":
+            return "🚨"
+        if event == "cron_finished":
+            return "✅"
+        if level == "error":
+            return "🚨"
+        if level == "warn":
+            return "⚠️"
+        # info-level step/api_call: past lines are done, last is in-progress
+        return "⏳" if is_last else "✅"
 
 
 def with_event_bus(workflow: str):

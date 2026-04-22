@@ -392,131 +392,222 @@ def test_with_event_bus_record_crash_exception_does_not_propagate(monkeypatch):
         broken_main()
 
 
-def test_events_channel_sink_sends_warn_immediately(monkeypatch):
-    """warn/error events flush immediately, no buffering."""
+class _FakeTelegramClient:
+    """Captures send_message / edit_message_text calls with auto-incrementing message_ids."""
+
+    def __init__(self):
+        self.sends: list = []
+        self.edits: list = []
+        self._next_id = 100
+
+    def send_message(self, text, chat_id=None, **kwargs):
+        self.sends.append({"text": text, "chat_id": chat_id})
+        mid = self._next_id
+        self._next_id += 1
+        return mid
+
+    def edit_message_text(self, chat_id, message_id, new_text, **kwargs):
+        self.edits.append({"text": new_text, "chat_id": chat_id, "message_id": message_id})
+        return True
+
+
+def _wire_events_channel(monkeypatch, fake_client):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
     monkeypatch.setenv("TELEGRAM_EVENTS_CHANNEL_ID", "-1001234567890")
-
-    sent_messages = []
-
-    class FakeTelegramClient:
-        def send_message(self, text, chat_id=None, **kwargs):
-            sent_messages.append({"text": text, "chat_id": chat_id})
-            return 1
-
     from execution.core import event_bus as eb
-    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
+    monkeypatch.setattr(eb, "_build_telegram_client", lambda: fake_client)
+    return eb
+
+
+def test_events_channel_sink_sends_new_message_on_first_event(monkeypatch):
+    """First event of a run → send_message; message_id captured for future edits."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
 
     bus = eb.EventBus(workflow="wf_a")
-    bus.emit("step", label="warning thing", level="warn")
+    bus.emit("step", label="first step", level="info")
 
-    assert len(sent_messages) == 1
-    assert sent_messages[0]["chat_id"] == "-1001234567890"
-    assert "wf_a" in sent_messages[0]["text"]
-    assert "step" in sent_messages[0]["text"]
+    assert len(fake.sends) == 1
+    assert fake.edits == []
+    assert fake.sends[0]["chat_id"] == "-1001234567890"
+    # Unknown workflow → fallback title 🛠️ WF A
+    assert "WF A" in fake.sends[0]["text"]
+    assert "first step" in fake.sends[0]["text"]
 
 
-def test_events_channel_sink_buffers_info_until_threshold(monkeypatch):
-    """info events accumulate until the 20-event threshold or 1s window."""
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
-    monkeypatch.setenv("TELEGRAM_EVENTS_CHANNEL_ID", "-1001234567890")
+def test_events_channel_sink_uses_friendly_title_for_known_workflow(monkeypatch):
+    """Known workflow renders with its pretty title at the top of the card."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
 
-    sent_messages = []
+    bus = eb.EventBus(workflow="daily_report")
+    bus.emit("step", label="starting", level="info")
 
-    class FakeTelegramClient:
-        def send_message(self, text, chat_id=None, **kwargs):
-            sent_messages.append({"text": text, "chat_id": chat_id})
-            return 1
+    first_line = fake.sends[0]["text"].split("\n")[0]
+    assert "Daily SGX" in first_line
+    assert "📊" in first_line
 
-    from execution.core import event_bus as eb
-    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
 
-    # Freeze time so the batch window doesn't expire
-    fake_time = [1000.0]
-    monkeypatch.setattr(eb, "_monotonic", lambda: fake_time[0])
+def test_events_channel_sink_falls_back_title_when_workflow_unknown(monkeypatch):
+    """Unknown workflow → 🛠️ emoji + upper-cased name as title."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="some_new_workflow")
+    bus.emit("step", label="x", level="info")
+
+    first_line = fake.sends[0]["text"].split("\n")[0]
+    assert "🛠️" in first_line
+    assert "SOME NEW WORKFLOW" in first_line
+
+
+def test_events_channel_sink_edits_same_message_on_subsequent_events(monkeypatch):
+    """Second+ events edit the message created by the first — one card per run."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
 
     bus = eb.EventBus(workflow="wf_b")
-    # Emit 5 info events — under threshold; should NOT have flushed yet
-    for i in range(5):
-        bus.emit("step", label=f"step_{i}", level="info")
+    bus.emit("step", label="step one", level="info")
+    bus.emit("step", label="step two", level="info")
+    bus.emit("step", label="step three", level="info")
 
-    assert sent_messages == []
+    assert len(fake.sends) == 1  # only one send, for the first event
+    assert len(fake.edits) == 2   # two edits for events 2 and 3
+    # All edits target the same message_id that send_message returned
+    expected_mid = 100  # fake client starts at 100
+    assert all(e["message_id"] == expected_mid for e in fake.edits)
+    # Final edit contains all three labels
+    final_text = fake.edits[-1]["text"]
+    assert "step one" in final_text
+    assert "step two" in final_text
+    assert "step three" in final_text
 
-    # Emit 15 more — now at 20; should flush exactly once
-    for i in range(5, 20):
-        bus.emit("step", label=f"step_{i}", level="info")
 
-    assert len(sent_messages) == 1
-    assert "step_0" in sent_messages[0]["text"]
-    assert "step_19" in sent_messages[0]["text"]
+def test_events_channel_sink_renders_past_lines_as_done_and_last_as_in_progress(monkeypatch):
+    """After N info events, earlier lines show ✅ and the last shows ⏳.
 
-
-def test_events_channel_sink_flushes_on_time_window(monkeypatch):
-    """info events flush when 1s elapses since last flush, even below threshold."""
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
-    monkeypatch.setenv("TELEGRAM_EVENTS_CHANNEL_ID", "-1001234567890")
-
-    sent_messages = []
-
-    class FakeTelegramClient:
-        def send_message(self, text, chat_id=None, **kwargs):
-            sent_messages.append({"text": text, "chat_id": chat_id})
-            return 1
-
-    from execution.core import event_bus as eb
-    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
-
-    fake_time = [1000.0]
-    monkeypatch.setattr(eb, "_monotonic", lambda: fake_time[0])
+    Card layout: lines[0]=title, lines[1]=blank, lines[2..] are events."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
 
     bus = eb.EventBus(workflow="wf_c")
-    bus.emit("step", label="first", level="info")
-    assert sent_messages == []
+    bus.emit("step", label="one", level="info")
+    bus.emit("step", label="two", level="info")
+    bus.emit("step", label="three", level="info")
 
-    # Advance time past the 1s window
-    fake_time[0] += 1.5
-    bus.emit("step", label="second", level="info")
+    final_text = fake.edits[-1]["text"]
+    lines = final_text.split("\n")
+    # title + blank + 3 events = 5
+    assert len(lines) == 5
+    assert "✅" in lines[2]  # past
+    assert "✅" in lines[3]  # past
+    assert "⏳" in lines[4]  # current
+    assert "⏳" not in lines[2]
+    assert "⏳" not in lines[3]
 
-    # Now the emit should have triggered a flush of the pending buffer
-    assert len(sent_messages) == 1
-    assert "first" in sent_messages[0]["text"]
-    assert "second" in sent_messages[0]["text"]
 
-
-def test_events_channel_sink_flushes_pending_info_before_warn(monkeypatch):
-    """A warn event flushes any buffered info FIRST to preserve ordering."""
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
-    monkeypatch.setenv("TELEGRAM_EVENTS_CHANNEL_ID", "-1001234567890")
-
-    sent_messages = []
-
-    class FakeTelegramClient:
-        def send_message(self, text, chat_id=None, **kwargs):
-            sent_messages.append({"text": text, "chat_id": chat_id})
-            return 1
-
-    from execution.core import event_bus as eb
-    monkeypatch.setattr(eb, "_build_telegram_client", lambda: FakeTelegramClient())
-
-    fake_time = [1000.0]
-    monkeypatch.setattr(eb, "_monotonic", lambda: fake_time[0])
+def test_events_channel_sink_finalizes_on_cron_finished(monkeypatch):
+    """cron_finished → last line rendered with ✅, not ⏳."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
 
     bus = eb.EventBus(workflow="wf_d")
-    bus.emit("step", label="buffered_info", level="info")
-    bus.emit("step", label="now_warning", level="warn")
+    bus.emit("step", label="working", level="info")
+    bus.emit("cron_finished", level="info")
 
-    # Expect 2 sends: first the buffered info (flushed), then the warn (immediate)
-    assert len(sent_messages) == 2
-    assert "buffered_info" in sent_messages[0]["text"]
-    assert "now_warning" in sent_messages[1]["text"]
+    final_text = fake.edits[-1]["text"]
+    lines = final_text.split("\n")
+    # title + blank + step + cron_finished
+    assert "✅" in lines[2]              # past step
+    assert "✅" in lines[-1]             # cron_finished renders as ✅
+    assert "⏳" not in final_text         # no more in-progress
+    assert "cron_finished" in final_text
+
+
+def test_events_channel_sink_finalizes_on_cron_crashed(monkeypatch):
+    """cron_crashed → last line rendered with 🚨 regardless of level."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="wf_e")
+    bus.emit("step", label="working", level="info")
+    bus.emit("cron_crashed", label="RuntimeError: boom", level="error")
+
+    final_text = fake.edits[-1]["text"]
+    assert "🚨" in final_text
+    assert "cron_crashed" in final_text
+    assert "RuntimeError" in final_text
+
+
+def test_events_channel_sink_renders_warn_with_warning_emoji(monkeypatch):
+    """A warn-level event (not a terminal lifecycle event) → ⚠️ emoji on that line."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="wf_f")
+    bus.emit("step", label="ok", level="info")
+    bus.emit("api_call", label="uazapi rate-limited", level="warn")
+
+    final_text = fake.edits[-1]["text"]
+    lines = final_text.split("\n")
+    # title + blank + step + warn
+    assert "✅" in lines[2]       # past info is done
+    assert "⚠️" in lines[3]      # warn line uses its own emoji, not ⏳
+
+
+def test_events_channel_sink_sink_exceptions_are_swallowed(monkeypatch):
+    """send_message / edit_message_text raising must not break subsequent emits."""
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+        def send_message(self, **kwargs):
+            self.calls += 1
+            raise RuntimeError("telegram down")
+        def edit_message_text(self, **kwargs):
+            self.calls += 1
+            raise RuntimeError("telegram down")
+
+    fake = FlakyClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="wf_g")
+    # Must not raise
+    bus.emit("step", label="one", level="info")
+    bus.emit("step", label="two", level="info")
+    assert fake.calls == 2  # one send (failed), one edit (failed)
+
+
+def test_events_channel_sink_skipped_for_denylisted_workflow(monkeypatch):
+    """Workflows in _EVENTS_CHANNEL_DENYLIST (e.g. watchdog) must not get
+    an _EventsChannelSink — they run on a tight cadence and would flood the
+    firehose with no-op cards. Main-chat alerts still fire via _MainChatSink
+    when warn/error/cron_missed emits."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="watchdog")
+    bus.emit("cron_started")
+    bus.emit("cron_finished")
+
+    assert fake.sends == []
+    assert fake.edits == []
+    assert not any(type(s).__name__ == "_EventsChannelSink" for s in bus._sinks)
+
+
+def test_events_channel_sink_still_active_for_non_denylisted_workflow(monkeypatch):
+    """Sanity: workflows NOT in the denylist still get the sink as usual."""
+    fake = _FakeTelegramClient()
+    eb = _wire_events_channel(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="daily_report")
+    bus.emit("cron_started")
+
+    assert len(fake.sends) == 1
+    assert any(type(s).__name__ == "_EventsChannelSink" for s in bus._sinks)
 
 
 def test_events_channel_sink_disabled_when_env_missing(monkeypatch, capsys):

@@ -242,8 +242,9 @@ def test_build_list_keyboard_includes_nav_when_multiple_pages():
     # Row order: contact, nav, bulk. Nav is second-to-last.
     nav = rows[-2]
     callbacks = [b["callback_data"] for b in nav]
-    assert "pg:1" in callbacks  # prev
-    assert "pg:3" in callbacks  # next
+    # ContactPage.pack() emits trailing ':' for empty search field
+    assert "pg:1:" in callbacks  # prev
+    assert "pg:3:" in callbacks  # next
     assert "nop" in callbacks  # center indicator
 
 

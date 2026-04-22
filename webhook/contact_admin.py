@@ -146,8 +146,15 @@ def build_list_keyboard(contacts: list, page: int, total_pages: int,
 
     `contacts` is a list of execution.integrations.contacts_repo.Contact
     instances (dataclass with .name, .phone_uazapi, .status, etc.).
+
+    callback_data is generated via CallbackData factories' .pack() so the
+    format stays in sync with the filters registered on the router.
     """
+    # Local imports to avoid cycles when this module is imported at bot start.
+    from bot.callback_data import ContactToggle, ContactPage, ContactBulk
+
     rows = []
+    search_for_pack = search or ""
 
     for c in contacts:
         emoji = "✅" if c.status == "ativo" else "❌"
@@ -157,26 +164,24 @@ def build_list_keyboard(contacts: list, page: int, total_pages: int,
             label = label[:57] + "..."
         rows.append([{
             "text": label,
-            "callback_data": f"tgl:{c.phone_uazapi}",
+            "callback_data": ContactToggle(phone=c.phone_uazapi).pack(),
         }])
 
     # Pagination row (only when >1 page)
     if total_pages > 1:
         prev_page = max(1, page - 1)
         next_page = min(total_pages, page + 1)
-        suffix = f":{search}" if search else ""
         rows.append([
-            {"text": "◀", "callback_data": f"pg:{prev_page}{suffix}"},
+            {"text": "◀", "callback_data": ContactPage(page=prev_page, search=search_for_pack).pack()},
             {"text": f"{page}/{total_pages}", "callback_data": "nop"},
-            {"text": "▶", "callback_data": f"pg:{next_page}{suffix}"},
+            {"text": "▶", "callback_data": ContactPage(page=next_page, search=search_for_pack).pack()},
         ])
 
     # Bulk-action row (always shown when there's at least one contact).
     if contacts:
-        bulk_suffix = f":{search}" if search else ":"
         rows.append([
-            {"text": "✅ Ativar todos", "callback_data": f"bulk:ativo{bulk_suffix}"},
-            {"text": "❌ Desativar todos", "callback_data": f"bulk:inativo{bulk_suffix}"},
+            {"text": "✅ Ativar todos", "callback_data": ContactBulk(status="ativo", search=search_for_pack).pack()},
+            {"text": "❌ Desativar todos", "callback_data": ContactBulk(status="inativo", search=search_for_pack).pack()},
         ])
 
     return {"inline_keyboard": rows}

@@ -75,6 +75,53 @@ def normalize_phone(raw) -> str:
     return e164.lstrip("+")
 
 
+def _normalize_phone_loose(raw) -> str:
+    """Looser variant of normalize_phone: accepts any possible phone (passes
+    phonenumbers.is_possible_number), not just fully-valid modern-format numbers.
+
+    Needed to look up legacy pre-2012 BR mobiles (12 digits) that the migration
+    preserved from the Google Sheet. The /add flow stays strict — this is only
+    used as a fallback in get_by_phone.
+    """
+    if raw is None:
+        raise InvalidPhoneError("phone is empty")
+    s = str(raw).strip()
+    if not s:
+        raise InvalidPhoneError("phone is empty")
+    digits_and_plus = re.sub(r"[^\d+]", "", s)
+    if not digits_and_plus.startswith("+"):
+        digits_and_plus = "+" + digits_and_plus
+    try:
+        parsed = phonenumbers.parse(digits_and_plus, None)
+    except phonenumbers.NumberParseException as e:
+        raise InvalidPhoneError(f"could not parse phone: {e}") from e
+    if not phonenumbers.is_possible_number(parsed):
+        raise InvalidPhoneError("phone length or country code is not possible")
+    e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+    return e164.lstrip("+")
+
+
+def _br_sibling_forms(canonical: str) -> list:
+    """For Brazilian mobiles, return the list of canonical forms that WhatsApp
+    treats as equivalent: pre-2012 (12 digits, no leading 9 after DDD) and
+    post-2012 (13 digits, mandatory 9 after DDD).
+
+    Non-BR numbers return [canonical] unchanged. BR landlines (subscriber
+    starts 2-5) also return unchanged — landlines never had the 9-prefix rule.
+    """
+    if not canonical.startswith("55"):
+        return [canonical]
+    # Post-2012 mobile: 55 + DDD(2) + "9" + 8digits = 13 total, position 4 == "9"
+    if len(canonical) == 13 and canonical[4] == "9":
+        without_9 = canonical[:4] + canonical[5:]  # drop the mandatory 9
+        return [canonical, without_9]
+    # Pre-2012 mobile: 55 + DDD(2) + 8digits starting 6-9 = 12 total
+    if len(canonical) == 12 and canonical[4] in "6789":
+        with_9 = canonical[:4] + "9" + canonical[4:]  # insert the modern 9
+        return [canonical, with_9]
+    return [canonical]
+
+
 # ── Contact model ──
 
 @dataclass(frozen=True)
@@ -153,12 +200,21 @@ class ContactsRepo:
         return [self._row_to_contact(r) for r in (resp.data or [])], total_pages
 
     def get_by_phone(self, phone: str) -> "Contact":
-        """Lookup by phone (accepts any format; normalizes internally)."""
-        canonical = normalize_phone(phone)
+        """Lookup by phone. Accepts strict (post-2012) format AND legacy
+        pre-2012 BR format (12 digits, no leading 9 after DDD). For BR
+        mobiles, searches both forms — WhatsApp treats them as equivalent,
+        so callers shouldn't insert the same human twice."""
+        try:
+            canonical = normalize_phone(phone)
+        except InvalidPhoneError:
+            # Fall back to loose validation for legacy 12-digit BR numbers
+            # that the migration preserved but normalize_phone rejects.
+            canonical = _normalize_phone_loose(phone)
+        candidates = _br_sibling_forms(canonical)
         resp = (
             self.client.table("contacts")
             .select("*")
-            .eq("phone_uazapi", canonical)
+            .in_("phone_uazapi", candidates)
             .limit(1)
             .execute()
         )

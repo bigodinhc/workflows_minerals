@@ -32,6 +32,7 @@ class FakeQuery:
 
     def select(self, *a, **kw): self.calls.append(("select", a, kw)); return self
     def eq(self, *a, **kw):     self.calls.append(("eq", a, kw)); return self
+    def in_(self, *a, **kw):    self.calls.append(("in_", a, kw)); return self
     def ilike(self, *a, **kw):  self.calls.append(("ilike", a, kw)); return self
     def neq(self, *a, **kw):    self.calls.append(("neq", a, kw)); return self
     def order(self, *a, **kw):  self.calls.append(("order", a, kw)); return self
@@ -158,7 +159,13 @@ def test_get_by_phone_normalizes_input(fake_client):
     c = repo.get_by_phone("+55 (11) 98765-4321")
 
     assert c.phone_uazapi == "5511987654321"
-    assert ("eq", ("phone_uazapi", "5511987654321"), {}) in q.calls
+    # 13-digit BR mobile → query includes the 12-digit sibling.
+    in_calls = [call for call in q.calls if call[0] == "in_"]
+    assert len(in_calls) == 1
+    _, (field, candidates), _ = in_calls[0]
+    assert field == "phone_uazapi"
+    assert "5511987654321" in candidates
+    assert "551187654321" in candidates  # pre-2012 sibling
 
 
 def test_get_by_phone_raises_when_missing(fake_client):
@@ -366,3 +373,78 @@ def test_parse_ts_accepts_one_digit_microseconds():
 def test_parse_ts_accepts_z_suffix():
     dt = _parse_ts("2026-04-22T10:00:00Z")
     assert dt.utcoffset().total_seconds() == 0
+
+
+# ── BR 9-digit sibling matching (pre-2012 vs post-2012 mobiles) ──
+
+from execution.integrations.contacts_repo import (
+    _br_sibling_forms, _normalize_phone_loose,
+)
+
+
+def test_br_siblings_13_digit_mobile_generates_12_digit():
+    # 55 + 11 + 9 + 87654321 = post-2012 mobile
+    result = _br_sibling_forms("5511987654321")
+    assert "5511987654321" in result
+    assert "551187654321" in result  # drop the mandatory 9
+    assert len(result) == 2
+
+
+def test_br_siblings_12_digit_pre2012_mobile_generates_13_digit():
+    # 55 + 37 + 99021186 (subscriber starts 9 → pre-2012 mobile)
+    result = _br_sibling_forms("553799021186")
+    assert "553799021186" in result
+    assert "5537999021186" in result  # insert 9 after DDD
+    assert len(result) == 2
+
+
+def test_br_siblings_landline_unchanged():
+    # 55 + 11 + 3 + 3334444 = São Paulo landline (subscriber starts 3)
+    # No sibling — landlines never had the 9-prefix rule.
+    result = _br_sibling_forms("551133334444")
+    assert result == ["551133334444"]
+
+
+def test_br_siblings_non_br_unchanged():
+    result = _br_sibling_forms("14155551234")  # US
+    assert result == ["14155551234"]
+
+
+def test_get_by_phone_13_digit_finds_12_digit_legacy(fake_client):
+    """The key bug fix: /add lookup of a 13-digit BR mobile must also find
+    the same human's legacy 12-digit row in the DB."""
+    # DB contains the legacy row with 12-digit phone_uazapi
+    q = FakeQuery([_row(phone_uazapi="553799021186", name="Antonio Carlos")])
+    _set_next_query(fake_client, q)
+
+    repo = ContactsRepo(client=fake_client)
+    # Caller passes the modern 13-digit form
+    c = repo.get_by_phone("+5537999021186")
+
+    assert c.name == "Antonio Carlos"
+    assert c.phone_uazapi == "553799021186"
+    in_calls = [call for call in q.calls if call[0] == "in_"]
+    assert len(in_calls) == 1
+    _, (field, candidates), _ = in_calls[0]
+    assert "5537999021186" in candidates
+    assert "553799021186" in candidates
+
+
+def test_get_by_phone_accepts_12_digit_legacy_input(fake_client):
+    """Toggle on a migrated legacy contact: input is the 12-digit phone_uazapi
+    stored in the DB. normalize_phone rejects it as invalid, but get_by_phone
+    falls back to loose validation."""
+    q = FakeQuery([_row(phone_uazapi="553799021186", name="Antonio Carlos")])
+    _set_next_query(fake_client, q)
+
+    repo = ContactsRepo(client=fake_client)
+    c = repo.get_by_phone("553799021186")  # legacy form directly
+
+    assert c.name == "Antonio Carlos"
+
+
+def test_get_by_phone_still_rejects_pure_garbage(fake_client):
+    """Fallback to loose must still reject unparseable input."""
+    repo = ContactsRepo(client=fake_client)
+    with pytest.raises(InvalidPhoneError):
+        repo.get_by_phone("abc")

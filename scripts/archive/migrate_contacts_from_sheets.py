@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ARCHIVED 2026-04-22: one-off migration already executed. Kept for audit
+# and reproducibility. Requires GOOGLE_CREDENTIALS_JSON and the deleted
+# sheets_client module to re-run — restore those from git history if needed.
 """One-off migration: Google Sheets → Supabase `contacts` table.
 
 Safe to re-run. Idempotent via ON CONFLICT (phone_uazapi) DO NOTHING.

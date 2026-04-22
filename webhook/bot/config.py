@@ -20,7 +20,6 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 UAZAPI_URL = os.getenv("UAZAPI_URL", "https://mineralstrading.uazapi.com")
 UAZAPI_TOKEN = (os.getenv("UAZAPI_TOKEN") or "").strip()
-GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 WEBHOOK_PATH = "/webhook"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 8080))

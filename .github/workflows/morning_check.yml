@@ -45,7 +45,6 @@ jobs:
         env:
           SPGCI_USERNAME: ${{ secrets.SPGCI_USERNAME }}
           SPGCI_PASSWORD: ${{ secrets.SPGCI_PASSWORD }}
-          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           UAZAPI_URL: ${{ vars.UAZAPI_URL }}
           UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

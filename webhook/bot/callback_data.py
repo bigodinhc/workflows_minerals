@@ -110,3 +110,38 @@ class ContactBulkConfirm(CallbackData, prefix="bulkok"):
 class ContactBulkCancel(CallbackData, prefix="bulkno"):
     """Cancel the pending bulk action."""
     pass
+
+
+class QueueModeToggle(CallbackData, prefix="q_mode"):
+    """Enter or exit select mode from the /queue header."""
+    action: str  # 'enter' | 'exit'
+
+
+class QueueSelToggle(CallbackData, prefix="q_sel"):
+    """Toggle selection of a single item (only valid in select mode)."""
+    item_id: str
+
+
+class QueueSelAll(CallbackData, prefix="q_all"):
+    """Select every staging item across all pages."""
+    pass
+
+
+class QueueSelNone(CallbackData, prefix="q_none"):
+    """Clear the current selection (keeps select mode active)."""
+    pass
+
+
+class QueueBulkPrompt(CallbackData, prefix="q_bulk"):
+    """First tap on archive/discard — shows confirmation."""
+    action: str  # 'archive' | 'discard'
+
+
+class QueueBulkConfirm(CallbackData, prefix="q_bulkok"):
+    """User confirmed — execute the action on current selection."""
+    action: str  # 'archive' | 'discard'
+
+
+class QueueBulkCancel(CallbackData, prefix="q_bulkno"):
+    """Cancel confirmation, return to select-mode view."""
+    pass

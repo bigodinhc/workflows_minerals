@@ -166,3 +166,51 @@ def test_onboarding_start_pack_unpack():
     packed = cb.pack()
     parsed = OnboardingStart.unpack(packed)
     assert parsed is not None
+
+
+def test_queue_mode_toggle_roundtrip():
+    from bot.callback_data import QueueModeToggle
+    data = QueueModeToggle(action="enter")
+    packed = data.pack()
+    assert packed.startswith("q_mode:")
+    assert QueueModeToggle.unpack(packed).action == "enter"
+
+
+def test_queue_sel_toggle_roundtrip():
+    from bot.callback_data import QueueSelToggle
+    data = QueueSelToggle(item_id="abc123")
+    packed = data.pack()
+    assert packed.startswith("q_sel:")
+    assert QueueSelToggle.unpack(packed).item_id == "abc123"
+
+
+def test_queue_sel_all_roundtrip():
+    from bot.callback_data import QueueSelAll
+    packed = QueueSelAll().pack()
+    assert packed == "q_all"
+
+
+def test_queue_sel_none_roundtrip():
+    from bot.callback_data import QueueSelNone
+    packed = QueueSelNone().pack()
+    assert packed == "q_none"
+
+
+def test_queue_bulk_prompt_roundtrip():
+    from bot.callback_data import QueueBulkPrompt
+    packed = QueueBulkPrompt(action="archive").pack()
+    assert packed.startswith("q_bulk:")
+    assert QueueBulkPrompt.unpack(packed).action == "archive"
+
+
+def test_queue_bulk_confirm_roundtrip():
+    from bot.callback_data import QueueBulkConfirm
+    packed = QueueBulkConfirm(action="discard").pack()
+    assert packed.startswith("q_bulkok:")
+    assert QueueBulkConfirm.unpack(packed).action == "discard"
+
+
+def test_queue_bulk_cancel_roundtrip():
+    from bot.callback_data import QueueBulkCancel
+    packed = QueueBulkCancel().pack()
+    assert packed == "q_bulkno"

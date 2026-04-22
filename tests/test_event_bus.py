@@ -9,6 +9,7 @@ def test_event_bus_generates_run_id_when_none_provided(monkeypatch):
     # Disable all optional sinks so the test is deterministic
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("TRACE_ID", raising=False)
@@ -123,6 +124,7 @@ def test_supabase_sink_inserts_row_when_enabled(monkeypatch):
 def test_supabase_sink_disabled_when_env_missing(monkeypatch, capsys):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
 
     from execution.core.event_bus import EventBus
@@ -532,3 +534,92 @@ def test_events_channel_sink_disabled_when_env_missing(monkeypatch, capsys):
     # Only stdout fires
     out = capsys.readouterr().out
     assert "step" in out  # stdout still gets it
+
+
+def test_get_current_bus_returns_none_outside_decorator():
+    from execution.core.event_bus import get_current_bus
+    assert get_current_bus() is None
+
+
+def test_get_current_bus_returns_active_bus_inside_decorator(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+    from execution.core.event_bus import with_event_bus, get_current_bus
+    seen = {}
+
+    @with_event_bus("test_wf")
+    def fake_main():
+        seen["bus"] = get_current_bus()
+
+    fake_main()
+    assert seen["bus"] is not None
+    assert seen["bus"].workflow == "test_wf"
+
+
+def test_get_current_bus_resets_after_decorator_exits(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+    from execution.core.event_bus import with_event_bus, get_current_bus
+
+    @with_event_bus("test_wf")
+    def fake_main():
+        assert get_current_bus() is not None
+
+    fake_main()
+    assert get_current_bus() is None
+
+
+def test_get_current_bus_resets_even_when_decorator_raises(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+    from execution.core.event_bus import with_event_bus, get_current_bus
+
+    @with_event_bus("test_wf")
+    def boom():
+        raise RuntimeError("oops")
+
+    with pytest.raises(RuntimeError):
+        boom()
+    assert get_current_bus() is None
+
+
+def test_get_current_bus_isolated_across_nested_calls(monkeypatch):
+    """If a decorated function calls another decorated function, the inner
+    bus is active during inner call; outer bus restored afterward."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+    from execution.core.event_bus import with_event_bus, get_current_bus
+    trail = []
+
+    @with_event_bus("inner")
+    def inner():
+        trail.append(("inner", get_current_bus().workflow))
+
+    @with_event_bus("outer")
+    def outer():
+        trail.append(("outer-before", get_current_bus().workflow))
+        inner()
+        trail.append(("outer-after", get_current_bus().workflow))
+
+    outer()
+    assert trail == [
+        ("outer-before", "outer"),
+        ("inner", "inner"),
+        ("outer-after", "outer"),
+    ]

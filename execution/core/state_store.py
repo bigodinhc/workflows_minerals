@@ -45,6 +45,28 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def _current_run_id() -> Optional[str]:
+    """Pull the active EventBus run_id, if any. None outside a decorator.
+
+    Import is lazy to avoid event_bus importing state_store importing
+    event_bus (circular). Callers treat None as 'no run_id to persist'."""
+    try:
+        from execution.core.event_bus import get_current_bus
+    except Exception:
+        return None
+    bus = get_current_bus()
+    return bus.run_id if bus is not None else None
+
+
+def _attach_run_id(payload: dict) -> dict:
+    """Return a new payload dict with 'run_id' merged in iff an EventBus is
+    currently active. Immutable: never mutates the input dict."""
+    run_id = _current_run_id()
+    if run_id is None:
+        return payload
+    return {**payload, "run_id": run_id}
+
+
 def _write_last_run(client, workflow: str, payload: dict) -> None:
     client.set(f"wf:last_run:{workflow}", json.dumps(payload))
 
@@ -61,12 +83,13 @@ def record_success(workflow: str, summary: dict, duration_ms: int) -> None:
     if client is None:
         return
     try:
-        _write_last_run(client, workflow, {
+        payload = _attach_run_id({
             "status": "success",
             "time_iso": _now_iso(),
             "summary": summary,
             "duration_ms": duration_ms,
         })
+        _write_last_run(client, workflow, payload)
         client.delete(f"wf:streak:{workflow}")
     except Exception as exc:
         logger.warning(f"state_store.record_success failed: {exc}")
@@ -80,12 +103,13 @@ def record_failure(workflow: str, summary: dict, duration_ms: int) -> None:
     try:
         now = _now_iso()
         reason = f"0/{summary.get('total', 0)} enviadas"
-        _write_last_run(client, workflow, {
+        payload = _attach_run_id({
             "status": "failure",
             "time_iso": now,
             "summary": summary,
             "duration_ms": duration_ms,
         })
+        _write_last_run(client, workflow, payload)
         _push_failure(client, workflow, reason, now)
         new_streak = client.incr(f"wf:streak:{workflow}")
     except Exception as exc:
@@ -105,11 +129,12 @@ def record_empty(workflow: str, reason: str) -> None:
     if client is None:
         return
     try:
-        _write_last_run(client, workflow, {
+        payload = _attach_run_id({
             "status": "empty",
             "time_iso": _now_iso(),
             "reason": reason,
         })
+        _write_last_run(client, workflow, payload)
     except Exception as exc:
         logger.warning(f"state_store.record_empty failed: {exc}")
 
@@ -140,11 +165,12 @@ def record_crash(workflow: str, exc_text: str) -> None:
         # Fall through — over-alerting beats silent drop
     try:
         now = _now_iso()
-        _write_last_run(client, workflow, {
+        payload = _attach_run_id({
             "status": "crash",
             "time_iso": now,
             "reason": exc_text[:200],
         })
+        _write_last_run(client, workflow, payload)
         _push_failure(client, workflow, f"crash: {exc_text[:120]}", now)
         new_streak = client.incr(f"wf:streak:{workflow}")
     except Exception as exc:

@@ -9,12 +9,13 @@ import asyncio
 import os
 import sys
 import argparse
+import time as _time
 from datetime import datetime, date
 
 # Adjust path to allow imports from root
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
-from execution.core.event_bus import with_event_bus
+from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
 from execution.core.progress_reporter import ProgressReporter
@@ -177,7 +178,8 @@ def build_message(report_items, date_str):
 @with_event_bus("morning_check")
 def main():
     logger = WorkflowLogger("MorningCheck")
-    
+    bus = get_current_bus()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Skip sending and saving state")
     parser.add_argument("--date", type=str, help="Override date (YYYY-MM-DD)", default=None)
@@ -198,6 +200,7 @@ def main():
     date_fmt_br = today.strftime("%d/%m/%Y")
     
     logger.info(f"Starting Morning Check for {date_str}")
+    bus.emit("step", label=f"Iniciando morning_check ({date_str})")
 
     progress = ProgressReporter(
         workflow="morning_check",
@@ -211,15 +214,20 @@ def main():
         sheets = SheetsClient()
 
         if not args.dry_run:
+            bus.emit("step", label="Checando Control Sheet (status diário)")
             if sheets.check_daily_status(SHEET_ID, date_str, REPORT_TYPE):
                 logger.info("Report already sent today. Exiting.")
                 progress.finish_empty("report ja enviado hoje")
                 return
 
         # 3. Fetch Data
+        bus.emit("step", label="Baixando dados Platts")
         platts = PlattsClient()
         # We use today for fetching. The client handles prev day calculation.
+        t0 = _time.time()
         report_items = platts.get_report_data(datetime.combine(today, datetime.min.time()))
+        bus.emit("api_call", label="platts.get_report_data",
+                 detail={"duration_ms": int((_time.time() - t0) * 1000), "rows": len(report_items) if report_items else 0})
 
         if not report_items:
             logger.info("No data available yet from Platts. Will retry later.")
@@ -246,6 +254,7 @@ def main():
             logger.info("------------------------------------")
 
         # 4. Format Message
+        bus.emit("step", label=f"Formatando mensagem ({len(report_items)} items)")
         message = build_message(report_items, date_fmt_br)
 
         logger.info("Message formatted.")
@@ -271,6 +280,7 @@ def main():
             progress.finish_empty("dry-run")
             return
 
+        bus.emit("step", label=f"Enviando WhatsApp para {len(delivery_contacts)} contatos")
         progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
 
         reporter = DeliveryReporter(

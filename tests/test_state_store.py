@@ -278,3 +278,128 @@ def test_record_crash_dedup_records_after_expiry(fake_redis):
     fake_redis.delete("wf:crash_dedup:some_wf")  # simulate 5-min TTL having passed
     record_crash("some_wf", "second")
     assert fake_redis.get("wf:streak:some_wf") == "2"
+
+
+def test_record_success_persists_run_id_when_bus_active(fake_redis, monkeypatch):
+    """When @with_event_bus decorator is active, record_success must tag
+    the last_run payload with the event_bus run_id for /tail resolution."""
+    from execution.core import state_store, event_bus
+
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
+    bus = event_bus.EventBus(workflow="test")
+    token = event_bus._active_bus.set(bus)
+    try:
+        state_store.record_success("test", {"total": 1, "success": 1, "failure": 0}, 100)
+    finally:
+        event_bus._active_bus.reset(token)
+
+    raw = fake_redis.get("wf:last_run:test")
+    data = json.loads(raw)
+    assert data["run_id"] == bus.run_id
+
+
+def test_record_failure_persists_run_id_when_bus_active(fake_redis, monkeypatch):
+    from execution.core import state_store, event_bus
+
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
+    bus = event_bus.EventBus(workflow="test")
+    token = event_bus._active_bus.set(bus)
+    try:
+        state_store.record_failure("test", {"total": 1, "success": 0, "failure": 1}, 100)
+    finally:
+        event_bus._active_bus.reset(token)
+
+    raw = fake_redis.get("wf:last_run:test")
+    data = json.loads(raw)
+    assert data["run_id"] == bus.run_id
+
+
+def test_record_empty_persists_run_id_when_bus_active(fake_redis, monkeypatch):
+    from execution.core import state_store, event_bus
+
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
+    bus = event_bus.EventBus(workflow="test")
+    token = event_bus._active_bus.set(bus)
+    try:
+        state_store.record_empty("test", "no data")
+    finally:
+        event_bus._active_bus.reset(token)
+
+    raw = fake_redis.get("wf:last_run:test")
+    data = json.loads(raw)
+    assert data["run_id"] == bus.run_id
+
+
+def test_record_crash_persists_run_id_when_bus_active(fake_redis, monkeypatch):
+    from execution.core import state_store, event_bus
+
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
+    bus = event_bus.EventBus(workflow="test")
+    token = event_bus._active_bus.set(bus)
+    try:
+        state_store.record_crash("test", "boom")
+    finally:
+        event_bus._active_bus.reset(token)
+
+    raw = fake_redis.get("wf:last_run:test")
+    data = json.loads(raw)
+    assert data["run_id"] == bus.run_id
+
+
+def test_record_success_omits_run_id_when_no_bus(fake_redis):
+    """Outside a decorator, record_success still works — just no run_id field."""
+    from execution.core.state_store import record_success
+
+    record_success("test", {"total": 1, "success": 1, "failure": 0}, 100)
+    raw = fake_redis.get("wf:last_run:test")
+    data = json.loads(raw)
+    assert "run_id" not in data
+
+
+def test_record_crash_dedup_skips_write_even_with_bus_active(fake_redis, monkeypatch):
+    """When dedup hits (same crash observed twice within window), record_crash
+    must early-return BEFORE writing the payload, even when a bus is active.
+    Locks the contract: dedup supersedes run_id persistence."""
+    from execution.core import state_store, event_bus
+
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+
+    bus = event_bus.EventBus(workflow="dedup_wf")
+    token = event_bus._active_bus.set(bus)
+    try:
+        state_store.record_crash("dedup_wf", "first")        # claims dedup key
+        fake_redis.delete("wf:last_run:dedup_wf")             # clear to detect second write
+        state_store.record_crash("dedup_wf", "second")        # should be a no-op
+    finally:
+        event_bus._active_bus.reset(token)
+
+    assert fake_redis.get("wf:last_run:dedup_wf") is None     # no second write occurred

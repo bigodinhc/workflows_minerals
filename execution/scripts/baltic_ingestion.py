@@ -23,7 +23,9 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from execution.core.delivery_reporter import DeliveryReporter, Contact, build_contact_from_row
-from execution.core.event_bus import with_event_bus
+import time as _time
+
+from execution.core.event_bus import with_event_bus, get_current_bus
 from execution.core.logger import WorkflowLogger
 from execution.core.sentry_init import init_sentry
 from execution.integrations.baltic_client import BalticClient
@@ -191,6 +193,9 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
     from aiogram import Bot
     from execution.core.progress_reporter import ProgressReporter
 
+    bus = get_current_bus()
+    bus.emit("step", label="Iniciando baltic_ingestion")
+
     logger = WorkflowLogger("BalticIngestion")
 
     bot = Bot(token=os.environ["TELEGRAM_BOT_TOKEN"])
@@ -234,10 +239,13 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
 
         # ── PHASE 2: fetch email via Graph API ────────────────────────────────
         logger.info("Checking Outlook for Baltic Exchange email...")
+        bus.emit("step", label="Buscando emails (Graph API)")
         baltic = BalticClient()
 
         try:
+            t0 = _time.time()
             msg = await asyncio.to_thread(baltic.find_latest_email)
+            bus.emit("api_call", label="graph.find_latest_email", detail={"duration_ms": round((_time.time() - t0) * 1000)})
         except Exception as e:
             logger.error(f"Failed to fetch emails: {e}")
             await reporter.step(
@@ -313,7 +321,10 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             print(json.dumps(data, indent=2))
 
         # ── PHASE 5: ingest to IronMarket + send WhatsApp ─────────────────────
+        bus.emit("step", label="Enviando para IronMarket")
+        t0 = _time.time()
         success, err = await asyncio.to_thread(ingest_to_ironmarket, data)
+        bus.emit("api_call", label="ironmarket.ingest", detail={"duration_ms": round((_time.time() - t0) * 1000)})
         if success:
             logger.info("Ingested C3 to IronMarket API.")
         else:
@@ -327,6 +338,7 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
             await reporter.finish()
             return
 
+        bus.emit("step", label="Enviando WhatsApp")
         contacts = await asyncio.to_thread(sheets.get_contacts, SHEET_ID, SHEET_NAME_CONTACTS)
         uazapi = UazapiClient()
 

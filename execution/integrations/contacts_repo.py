@@ -188,7 +188,7 @@ class ContactsRepo:
         )
         return [self._row_to_contact(r) for r in (resp.data or [])]
 
-    def list_lists(self) -> "list[ContactList]":
+    def list_lists(self) -> list[ContactList]:
         """Return every contact_list with its current active-member count."""
         lists_resp = (
             self.client.table("contact_lists")
@@ -229,7 +229,7 @@ class ContactsRepo:
             for r in rows
         ]
 
-    def list_by_list_code(self, code: str) -> "list[Contact]":
+    def list_by_list_code(self, code: str) -> list[Contact]:
         """Return active `Contact` rows subscribed to the given list code."""
         membership_resp = (
             self.client.table("contact_list_members")

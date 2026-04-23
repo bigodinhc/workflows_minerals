@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import pytest
-from datetime import datetime
 from unittest.mock import MagicMock
 from execution.integrations.contacts_repo import (
-    ContactsRepo, ContactList, Contact,
+    ContactsRepo, ContactList,
 )
 
 
 class _FakeSupabaseTable:
-    """Minimal chainable fake for supabase-py table builder."""
+    """Minimal chainable fake for supabase-py table builder.
+
+    Supports only .select/.eq/.in_/.order/.execute — no column projection,
+    no .count. Sufficient for list_lists and list_by_list_code.
+    """
     def __init__(self, data):
         self._data = list(data)
 
@@ -79,8 +82,9 @@ def fake_sb(_rows):
 
 
 def test_contact_list_dataclass_is_frozen():
+    import dataclasses
     cl = ContactList(code="x", label="X", member_count=0)
-    with pytest.raises((AttributeError, Exception)):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         cl.code = "y"  # type: ignore
 
 
@@ -92,6 +96,13 @@ def test_list_lists_returns_all_with_member_count(fake_sb):
     assert by_code["minerals_report"].member_count == 2
     assert by_code["solid_fuels"].member_count == 1
     assert by_code["time_interno"].member_count == 0
+
+
+def test_list_lists_returns_results_ordered_by_code(fake_sb):
+    repo = ContactsRepo(client=fake_sb)
+    lists = repo.list_lists()
+    codes = [l.code for l in lists]
+    assert codes == sorted(codes)
 
 
 def test_list_by_list_code_returns_active_members_only(fake_sb):

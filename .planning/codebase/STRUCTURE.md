@@ -5,403 +5,435 @@
 ## Directory Layout
 
 ```
-/Users/bigode/Dev/agentics_workflows/
-├── webhook/                    # Telegram bot + HTTP API server
-│   ├── bot/                    # Aiogram bot application
-│   │   ├── main.py            # aiohttp app entry point, webhook setup
-│   │   ├── config.py          # Bot/Dispatcher/Storage singletons, env vars
-│   │   ├── callback_data.py    # CallbackData factories (typed button data)
-│   │   ├── states.py          # FSM state groups (AddContact, etc.)
-│   │   ├── users.py           # User/chat_id auth checks
-│   │   ├── keyboards.py       # UI builders (inline, reply keyboards)
-│   │   ├── delivery.py        # Telegram message delivery/edit helpers
-│   │   ├── middlewares/       # Auth, error handling
-│   │   │   └── auth.py        # RoleMiddleware for admin/subscriber checks
-│   │   └── routers/           # Message handlers organized by feature
-│   │       ├── commands.py    # /add, /list, /status, /tail, etc.
-│   │       ├── messages.py    # FSM text input handlers (AddContact.waiting_data, etc.)
-│   │       ├── onboarding.py  # /start, approval, subscription FSM
-│   │       ├── callbacks_contacts.py  # Toggle, pagination, bulk operations
-│   │       ├── callbacks_curation.py  # Draft approval, rejection, pipeline
-│   │       ├── callbacks_reports.py   # Report type/year/month/download navigation
-│   │       ├── callbacks_queue.py     # Staging queue navigation
-│   │       ├── callbacks_menu.py      # Main menu switchboard
-│   │       ├── callbacks_workflows.py # Workflow trigger + nop callbacks
-│   │       ├── settings.py    # Subscription panel
-│   │       └── _helpers.py    # Shared handler utilities
-│   ├── dispatch.py            # WhatsApp sending (idempotency, Uazapi)
-│   ├── contact_admin.py       # Contact parsing, state, keyboard building
-│   ├── query_handlers.py      # Query/report builders (history, stats, queue)
-│   ├── workflow_trigger.py    # Workflow manual trigger UI
-│   ├── status_builder.py      # /status command response formatting
-│   ├── reports_nav.py         # Report navigation tree
-│   ├── digest.py              # Message digestion/curation logic
-│   ├── pipeline.py            # Message pipeline stages
-│   ├── metrics.py             # Error/success counters
-│   ├── redis_queries.py       # Redis query helpers (feedback, staging)
-│   ├── routes/                # aiohttp HTTP endpoints
-│   │   ├── api.py            # Main API routes (reports, webhooks)
-│   │   ├── mini_api.py       # Mini-app API routes
-│   │   ├── mini_auth.py      # Mini-app auth
-│   │   ├── mini_static.py    # Mini-app static files
-│   │   └── preview.py        # Draft preview templates
-│   ├── templates/             # Jinja2 templates for preview
-│   └── mini-app/              # Frontend mini-app (embedded in Telegram)
+agentics_workflows/
+├── AGENT.md                  # Mirrored CLAUDE.md/AGENTS.md/GEMINI.md — author's 3-layer arch note
+├── Dockerfile                # Multi-stage: Node-stage builds Mini-App, Python-stage runs bot
+├── railway.json              # Railway deploy config (startCommand: python -m webhook.bot.main)
+├── requirements.txt          # Root Python deps — used by GH Actions runs
+├── package.json              # Root Node deps (apify-client for actor invocation)
+├── pytest.ini                # pytest discovery + asyncio mode
 │
-├── execution/                 # Core business logic, scripts, integrations
-│   ├── core/                  # Shared utilities
-│   │   ├── state_store.py    # Persistent workflow state (JSON in .state/)
-│   │   ├── state.py          # Runtime state model
-│   │   ├── delivery_reporter.py  # WhatsApp delivery aggregation + error categorization
-│   │   ├── progress_reporter.py  # Event emission to event_log table
-│   │   ├── event_bus.py      # Event emission/subscription
-│   │   ├── logger.py         # Structured logging
-│   │   ├── retry.py          # Exponential backoff retry logic
-│   │   ├── runner.py         # Workflow executor
-│   │   ├── cron_parser.py    # Cron expression parsing
-│   │   ├── sentry_init.py    # Error tracking setup
-│   │   └── prompts/          # LLM prompt templates
-│   │       ├── writer.py     # Content writing prompt
-│   │       ├── curator.py    # Content curation prompt
-│   │       ├── adjuster.py   # Draft adjustment prompt
-│   │       └── critique.py   # Critique/review prompt
-│   ├── integrations/         # External service clients
-│   │   ├── contacts_repo.py  # Supabase contacts table (formerly sheets_client.py)
-│   │   ├── supabase_client.py # Supabase initialization
-│   │   ├── sheets_client.py  # Google Sheets (legacy, being phased out)
-│   │   ├── telegram_client.py # Telegram API wrapper
-│   │   ├── uazapi_client.py  # WhatsApp Uazapi wrapper
-│   │   ├── claude_client.py  # Anthropic API wrapper
-│   │   ├── apify_client.py   # Apify (web scraping) client
-│   │   ├── baltic_client.py  # Baltic exchange data client
-│   │   ├── lseg_client.py    # LSEG (Refinitiv) client
-│   │   ├── platts_client.py  # S&P Platts client
-│   │   └── __init__.py       # Shared initialization
-│   ├── curation/             # Content curation workflow
-│   │   ├── rationale_dispatcher.py # Router for curator agent
-│   │   ├── router.py         # Routing logic
-│   │   ├── id_gen.py         # Unique ID generation
-│   │   ├── redis_client.py   # Redis integration for curation
-│   │   └── telegram_poster.py # Telegram message posting
-│   ├── agents/               # AI agents (LLM-backed workers)
-│   │   └── rationale_agent.py # Curator agent
-│   ├── supabase/             # Supabase client initialization
-│   │   └── __init__.py
-│   ├── scripts/              # CLI/cron executable scripts
-│   │   ├── send_daily_report.py   # Morning report broadcast
-│   │   ├── send_news.py           # News broadcast (cron)
-│   │   ├── morning_check.py       # Daily health check
-│   │   ├── baltic_ingestion.py    # Baltic exchange ingest
-│   │   ├── platts_ingestion.py    # S&P Platts ingest
-│   │   ├── platts_reports.py      # Platts reports download
-│   │   ├── rebuild_dedup.py       # Rebuild deduplication index
-│   │   ├── watchdog_cron.py       # Health check daemon
-│   │   ├── manual_ingestion_json.py # Manual data import
-│   │   ├── debug_apify.py         # Debug apify scraper
-│   │   ├── inspect_platts.py      # Inspect Platts data
-│   │   └── __init__.py
-│   └── __init__.py
+├── .github/
+│   └── workflows/            # GH Actions cron + workflow_dispatch YAML
+│       ├── baltic_ingestion.yml
+│       ├── daily_report.yml
+│       ├── market_news.yml
+│       ├── morning_check.yml
+│       ├── platts_reports.yml
+│       └── watchdog.yml
 │
-├── supabase/                 # Database migrations + config
-│   ├── migrations/           # SQL migration files
-│   │   ├── 20260422_contacts.sql     # Contacts table + indexes, triggers, RLS
-│   │   ├── 20260419_event_log_rls.sql # Event log RLS policies
-│   │   └── 20260418_event_log.sql     # Event log table
-│   └── config.json          # Supabase project config
+├── execution/                # Python library + cron scripts (Layer 3)
+│   ├── __init__.py
+│   ├── agents/               # Claude-backed prompt runners
+│   │   └── rationale_agent.py
+│   ├── core/                 # Shared primitives
+│   │   ├── __init__.py
+│   │   ├── agents_progress.py
+│   │   ├── cron_parser.py          # Reads .github/workflows/*.yml for watchdog
+│   │   ├── delivery_reporter.py    # WhatsApp send tracking + circuit breaker
+│   │   ├── event_bus.py            # EventBus + @with_event_bus + sinks
+│   │   ├── logger.py               # WorkflowLogger
+│   │   ├── progress_reporter.py    # Live Telegram progress card
+│   │   ├── prompts/
+│   │   │   ├── adjuster.py
+│   │   │   ├── critique.py
+│   │   │   ├── curator.py
+│   │   │   └── writer.py
+│   │   ├── retry.py                # retry_with_backoff
+│   │   ├── runner.py               # Sub-workflow runner (directive chaining)
+│   │   ├── sentry_init.py          # init_sentry(workflow)
+│   │   ├── state.py                # File-backed StateManager
+│   │   └── state_store.py          # Redis runtime state (new helpers for split-lock)
+│   ├── curation/             # Platts item classification + Redis keyspace (new layer)
+│   │   ├── __init__.py
+│   │   ├── id_gen.py               # generate_id() — stable content hash
+│   │   ├── rationale_dispatcher.py # Stages rationale items for AI drafting
+│   │   ├── redis_client.py         # Curation Redis client: staging/archive/seen/bulk ops
+│   │   ├── router.py               # classify() + route_items()
+│   │   └── telegram_poster.py      # post_for_curation card + _escape_md
+│   ├── integrations/         # External API clients (repository pattern)
+│   │   ├── apify_client.py         # Run actor + forward trace_id
+│   │   ├── baltic_client.py        # Outlook Graph API
+│   │   ├── claude_client.py        # Anthropic PDF extraction
+│   │   ├── contacts_repo.py        # Supabase contacts table
+│   │   ├── lseg_client.py          # SGX futures
+│   │   ├── platts_client.py        # S&P Global Commodity Insights
+│   │   ├── supabase_client.py
+│   │   ├── telegram_client.py
+│   │   └── uazapi_client.py        # WhatsApp gateway
+│   ├── scripts/              # Cron entry points (CLI layer)
+│   │   ├── baltic_ingestion.py     # Split-lock idempotent (new)
+│   │   ├── debug_apify.py
+│   │   ├── inspect_platts.py
+│   │   ├── manual_ingestion_json.py
+│   │   ├── morning_check.py        # Split-lock idempotent (new)
+│   │   ├── platts_ingestion.py
+│   │   ├── platts_reports.py
+│   │   ├── rebuild_dedup.py
+│   │   ├── send_daily_report.py
+│   │   ├── send_news.py
+│   │   └── watchdog_cron.py
+│   └── supabase/             # Legacy migrations dir (stub — new migrations live under supabase/)
 │
-├── dashboard/                # Next.js admin dashboard (TypeScript)
-│   ├── app/                  # Next.js app router
-│   │   ├── api/
-│   │   │   ├── contacts/route.ts  # Contacts API (parallel to Python repo)
-│   │   │   └── ...
-│   │   └── page.tsx          # Dashboard homepage
-│   ├── components/           # React components
-│   ├── lib/                  # Utilities (Supabase client, etc.)
-│   ├── public/               # Static assets
-│   └── package.json
+├── webhook/                  # aiogram v3 Telegram bot + Mini-App server (Railway)
+│   ├── requirements.txt      # Webhook-specific deps (used by Railway Docker build)
+│   ├── pyproject.toml
+│   ├── bot/                  # aiogram bot package (routers + middlewares + helpers)
+│   │   ├── __init__.py
+│   │   ├── callback_data.py        # Typed CallbackData factories (new: 7 Queue* classes)
+│   │   ├── config.py               # Env vars, Bot/Dispatcher/RedisStorage singletons
+│   │   ├── delivery.py             # Bot-side delivery helpers
+│   │   ├── keyboards.py            # build_main_menu_keyboard, ...
+│   │   ├── main.py                 # aiohttp + Aiogram webhook entry point
+│   │   ├── middlewares/
+│   │   │   ├── __init__.py
+│   │   │   └── auth.py             # RoleMiddleware (admin/subscriber gating)
+│   │   ├── routers/                # aiogram Router modules (registered in main.py)
+│   │   │   ├── __init__.py
+│   │   │   ├── _helpers.py         # drafts_*, run_pipeline_and_archive
+│   │   │   ├── callbacks_contacts.py
+│   │   │   ├── callbacks_curation.py
+│   │   │   ├── callbacks_menu.py
+│   │   │   ├── callbacks_queue.py  # /queue nav + bulk actions (new, 9 handlers)
+│   │   │   ├── callbacks_reports.py
+│   │   │   ├── callbacks_workflows.py
+│   │   │   ├── commands.py         # /status, /tail, /queue, /history, /stats, /help
+│   │   │   ├── messages.py         # FSM + catch-all text
+│   │   │   ├── onboarding.py       # /start + approval + subscription
+│   │   │   └── settings.py         # /settings
+│   │   ├── states.py               # FSM: AddContact, NewsInput, AdjustDraft, RejectReason
+│   │   └── users.py                # User registry helpers
+│   ├── contact_admin.py      # Contacts bulk-op logic (consumed by bot + routes)
+│   ├── digest.py             # Markdown digest builder (news/rationale)
+│   ├── dispatch.py           # Draft approval + test-send pipeline
+│   ├── metrics.py            # prometheus_client counters
+│   ├── pipeline.py           # Draft → WhatsApp broadcast pipeline
+│   ├── query_handlers.py     # /queue, /history, /stats formatters (new: select-mode branch)
+│   ├── queue_selection.py    # Per-chat select-mode Redis state (new)
+│   ├── redis_queries.py      # Read-side curation queries + feedback keyspace
+│   ├── reports_nav.py        # /reports navigation
+│   ├── status_builder.py     # /status message builder + ALL_WORKFLOWS
+│   ├── workflow_trigger.py   # GH Actions dispatch_workflow helper
+│   ├── routes/               # aiohttp HTTP routes (non-Telegram)
+│   │   ├── __init__.py
+│   │   ├── api.py                  # /store-draft, /seen-articles, /health, /metrics
+│   │   ├── mini_api.py             # Telegram Mini-App API
+│   │   ├── mini_auth.py            # Mini-App auth
+│   │   ├── mini_static.py          # Mini-App static file serving
+│   │   └── preview.py              # Draft preview HTML (Jinja2)
+│   ├── templates/
+│   │   └── preview.html
+│   └── mini-app/             # Vite + React 19 + Tailwind Mini-App (built by Dockerfile)
+│       ├── package.json
+│       ├── tsconfig.json
+│       └── index.html
 │
-├── tests/                    # Pytest test suite
-│   ├── test_contacts_repo.py # ContactsRepo unit tests (with fake clients)
-│   ├── test_callbacks_contacts.py # Callback handler tests
-│   ├── test_contact_admin.py # Input parsing, state, keyboard tests
-│   ├── test_bot_states.py    # FSM state tests
-│   ├── test_bot_delivery.py  # Message delivery tests
-│   ├── test_dispatch_idempotency.py # Idempotency key logic
-│   ├── test_contacts_bulk_ops.py # Bulk operation tests
-│   ├── test_callbacks_reports.py # Report navigation tests
-│   ├── test_migration_contacts_from_sheets.py # Migration verification
-│   ├── test_delivery_reporter.py # Error categorization tests
-│   ├── test_query_handlers.py # Report query logic
-│   ├── test_bot_callback_data.py # CallbackData serialization
-│   ├── test_progress_reporter.py # Event logging
-│   └── ... (54 total test files)
+├── actors/                   # Apify Node.js scrapers (one Docker image per actor)
+│   ├── platts-news-only/     # Legacy news-only actor
+│   │   └── src/{main.js, routes.js}
+│   ├── platts-scrap-full-news/
+│   │   ├── .actor/{actor,input_schema,dataset_schema,output_schema}.json
+│   │   ├── Dockerfile
+│   │   ├── package.json
+│   │   ├── src/
+│   │   │   ├── auth/login.js
+│   │   │   ├── extract/{articlePage,images,readingPane,tables}.js
+│   │   │   ├── lib/eventBus.js     # JS EventBus (mirror of Python contract)
+│   │   │   ├── main.js             # Actor entry — accepts trace_id, parent_run_id
+│   │   │   ├── routes.js
+│   │   │   ├── sources/{allInsights,ironOreTopic,rmw}.js
+│   │   │   └── util/{dates,debug,semaphore}.js
+│   │   └── tests/eventBus.test.js
+│   ├── platts-scrap-price/
+│   └── platts-scrap-reports/
+│       ├── .actor/...
+│       ├── src/
+│       │   ├── auth/login.js
+│       │   ├── download/capturePdf.js
+│       │   ├── filters/applyFilters.js
+│       │   ├── grid/{extractRows,navigateGrid}.js
+│       │   ├── lib/eventBus.js     # Keep in sync with full-news copy
+│       │   ├── main.js
+│       │   ├── notify/telegramSummary.js
+│       │   ├── persist/{supabaseClient,supabaseUpload}.js
+│       │   └── util/{dates,slug}.js
+│       └── tests/{dates,eventBus,filters,slug}.test.js
 │
-├── scripts/                  # Utility scripts (not imported in app)
-│   ├── migrate_contacts_from_sheets.py # One-time: sheets → supabase
-│   └── ...
+├── dashboard/                # Next.js 16 App Router (Vercel)
+│   ├── package.json
+│   ├── next.config.ts
+│   ├── tsconfig.json
+│   ├── components.json       # shadcn registry config
+│   ├── postcss.config.mjs
+│   ├── eslint.config.mjs
+│   ├── app/
+│   │   ├── layout.tsx
+│   │   ├── page.tsx                # Workflow status + triggers (SWR)
+│   │   ├── globals.css
+│   │   ├── contacts/page.tsx       # Supabase contacts table
+│   │   ├── executions/page.tsx
+│   │   ├── news/page.tsx
+│   │   └── workflows/page.tsx
+│   ├── components/
+│   │   ├── delivery/DeliveryReportView.tsx
+│   │   ├── layout/SideNav.tsx
+│   │   └── ui/                      # shadcn/Radix primitives
+│   │       ├── avatar.tsx, badge.tsx, button.tsx, card.tsx,
+│   │       ├── dropdown-menu.tsx, hover-card.tsx, input.tsx,
+│   │       ├── scroll-area.tsx, separator.tsx, sheet.tsx,
+│   │       ├── skeleton.tsx, table.tsx, textarea.tsx, tooltip.tsx
+│   ├── lib/utils.ts          # cn() class merger
+│   └── public/               # Static SVG assets
 │
-├── actors/                   # Apify actor definitions (web scraping)
-│   ├── platts-scrap-price/   # Platts price scraper
-│   ├── platts-scrap-reports/ # Platts reports scraper
-│   ├── platts-scrap-full-news/ # Full news scraper
-│   └── ...
+├── supabase/
+│   └── migrations/           # Applied manually per supabase/migrations/README.md
+│       ├── 20260418_event_log.sql      # Phase 3 observability table
+│       ├── 20260419_event_log_rls.sql  # Service-role-only writes
+│       └── 20260422_contacts.sql       # Sheets → Supabase migration
 │
-├── directives/               # Prompt templates (reusable)
-│   ├── _templates/           # Template library
-│   └── ...
+├── directives/               # Layer 1 — SOPs for LLM orchestration
+│   ├── README.md
+│   └── _templates/workflow_template.md
 │
-├── data/                     # Static data, configuration
-│   └── ...
+├── docs/
+│   └── superpowers/          # Design docs + plans + retrospective followups
+│       ├── specs/            # Design specs (one per feature)
+│       │   ├── 2026-04-22-bot-queue-bulk-actions-design.md
+│       │   ├── 2026-04-22-idempotency-claim-ordering-fix-design.md
+│       │   ├── 2026-04-22-contacts-supabase-migration-design.md
+│       │   ├── 2026-04-22-observability-trace-id-apify-propagation-design.md
+│       │   ├── 2026-04-21-observability-unified-design.md
+│       │   └── ... (38 more)
+│       ├── plans/            # Implementation plans (phase breakdowns)
+│       │   ├── 2026-04-22-bot-queue-bulk-actions-plan.md
+│       │   ├── 2026-04-22-idempotency-split-lock-plan.md
+│       │   ├── 2026-04-22-contacts-supabase-migration-plan.md
+│       │   └── ... (30 more)
+│       └── followups/        # Post-merge retrospectives
+│           ├── 2026-04-22-observability-trace-id-apify-followups.md
+│           └── 2026-04-21-observability-phase{1..4}-followups.md
 │
-├── docs/                     # Documentation
-│   ├── superpowers/          # Feature documentation
-│   └── ...
+├── tests/                    # pytest suite (74 test files)
+│   └── (see Tests enumeration below)
 │
-├── .planning/codebase/       # GSD codebase analysis (this directory)
-│   ├── ARCHITECTURE.md       # Architecture & data flow
-│   ├── STRUCTURE.md          # This file
-│   ├── CONVENTIONS.md        # Coding style & patterns
-│   ├── TESTING.md            # Testing approach
-│   ├── STACK.md              # Technology stack
-│   ├── INTEGRATIONS.md       # External services
-│   └── CONCERNS.md           # Technical debt & issues
+├── .planning/
+│   └── codebase/             # THIS DIRECTORY — codebase maps
 │
-├── .github/                  # GitHub Actions workflows
-│   └── workflows/            # CI/CD pipelines
-│
-├── .env                      # Environment variables (secrets)
-├── .env.example              # Example env vars (safe template)
-├── .gitignore
-├── requirements.txt          # Python dependencies
-├── package.json              # JavaScript dependencies
-├── package-lock.json         # JavaScript lockfile
-├── pytest.ini                # Pytest configuration
-├── Dockerfile                # Container image definition
-├── railway.json              # Railway.app deployment config
-├── AGENT.md                  # Agent/workflow documentation
-└── README.md
+├── .state/                   # Persistent state between runs (gitignored)
+├── .tmp/                     # Ephemeral intermediates + .tmp/logs/
+│   └── logs/                 # .tmp/logs/<workflow>/<run_id>.json
+├── .claude/                  # Claude Code settings + slash commands
+├── .superpowers/             # Local brainstorm / agent state (gitignored)
+└── scripts/
+    └── archive/              # Archived one-off scripts
 ```
 
 ## Directory Purposes
 
-**`webhook/`:**
-- Purpose: HTTP entry point for Telegram webhook + supplementary HTTP API
-- Contains: Aiogram bot routers, dispatcher setup, aiohttp route handlers
-- Key files: `bot/main.py` (entry point), `dispatch.py` (broadcast), `contact_admin.py` (parsing)
+### Core Python Layer (`execution/`)
 
-**`webhook/bot/`:**
-- Purpose: Telegram bot application (Aiogram framework)
-- Contains: Message handlers, callback handlers, FSM state definitions, keyboard builders
-- Key files: `config.py` (singletons), `routers/commands.py` (command dispatch), `routers/messages.py` (FSM inputs), `routers/callbacks_contacts.py` (contact operations)
+- **`execution/core/`** — Pure primitives with no subsystem-specific knowledge. `event_bus.py`, `state_store.py`, `delivery_reporter.py`, `progress_reporter.py`, `logger.py`, `cron_parser.py`, `retry.py`, `sentry_init.py` are the shared backbone imported by every script and by the webhook.
+- **`execution/curation/`** (new layer) — Platts item classification and Redis curation keyspace. `redis_client.py` owns the `platts:*` namespace; `router.py` classifies items; `id_gen.py` produces stable hashes; `rationale_dispatcher.py` + `telegram_poster.py` push items into downstream pipelines.
+- **`execution/integrations/`** — Thin adapters to every external API. One module per provider; `contacts_repo.py` is the single read-path for WhatsApp contacts.
+- **`execution/scripts/`** — Cron entry points. Each is `@with_event_bus`-wrapped and exits success on "no data yet" so GH doesn't mark the run failed.
+- **`execution/agents/`** — Claude-backed content runners (rationale drafting).
+- **`execution/core/prompts/`** — Prompt templates for the draft pipeline (writer → critique → adjuster → curator).
 
-**`webhook/routes/`:**
-- Purpose: HTTP API endpoints (non-Telegram)
-- Contains: Report downloads, workflow status, mini-app authentication
-- Key files: `api.py` (main routes), `mini_api.py` (embedded app)
+### Bot Layer (`webhook/`)
 
-**`execution/`:**
-- Purpose: Core business logic, external service integration, CLI scripts
-- Contains: Workflow orchestration, contact repository, service clients
-- Key files: `integrations/contacts_repo.py` (Supabase abstraction), `core/delivery_reporter.py` (error handling), `scripts/` (cron jobs)
+- **`webhook/bot/`** — aiogram v3 package. `main.py` is the aiohttp entry point; `config.py` owns singletons; `callback_data.py` has typed factories; routers are feature-scoped.
+- **`webhook/bot/routers/`** — One router per feature domain. `callbacks_queue.py` (new) owns all `/queue` navigation + bulk-action callbacks. All queue routes gated by `RoleMiddleware(allowed_roles={"admin"})`.
+- **`webhook/bot/middlewares/`** — `auth.py:RoleMiddleware` reads `users.py` and short-circuits unauthorized callers.
+- **`webhook/routes/`** — Plain aiohttp routes unrelated to Telegram: GH Actions callbacks (`api.py`), draft preview HTML (`preview.py`), Mini-App API + static (`mini_api.py`, `mini_static.py`, `mini_auth.py`).
+- **`webhook/*.py` (top-level)** — Transport-agnostic helpers consumed by routers: `query_handlers.py` (formatters), `queue_selection.py` (select-mode Redis state, new), `redis_queries.py` (read-side queries), `dispatch.py` (approval pipeline), `status_builder.py` (/status), `reports_nav.py` (/reports), `workflow_trigger.py` (GH dispatch), `contact_admin.py`, `digest.py`, `pipeline.py`, `metrics.py`.
+- **`webhook/mini-app/`** — Vite + React 19 + Tailwind v4 Mini-App. Built by stage 1 of the Dockerfile; served by `routes/mini_static.py`.
 
-**`execution/integrations/`:**
-- Purpose: Wrap external API clients with domain logic
-- Contains: ContactsRepo, Telegram, Uazapi, Claude, Supabase clients
-- Note: Each client is independently testable; repos accept optional `client=` for dependency injection
+### Scraper Layer (`actors/`)
 
-**`execution/core/`:**
-- Purpose: Reusable utilities for workflow execution
-- Contains: State management, logging, retry logic, LLM prompts, event emission
-- Key files: `delivery_reporter.py` (WhatsApp error categorization), `progress_reporter.py` (event logging), `state_store.py` (persistent state)
+Four independent Apify Node packages. Each has its own `package.json`, `Dockerfile`, and `.actor/` manifest. `src/lib/eventBus.js` is duplicated between `platts-scrap-reports` and `platts-scrap-full-news`; the duplicates must stay in sync (header comment enforces).
 
-**`execution/scripts/`:**
-- Purpose: Standalone CLI/cron-invoked executables
-- Contains: Data ingestion (Baltic, Platts), report generation, health checks
-- Invoked by: GitHub Actions scheduled jobs
-- Entry pattern: `if __name__ == "__main__": main()`
+### Dashboard Layer (`dashboard/`)
 
-**`supabase/migrations/`:**
-- Purpose: Database schema definitions (SQL)
-- Contains: Version-stamped migration files
-- Naming: `YYYYMMDD_description.sql`
-- Key file: `20260422_contacts.sql` (active contact list, replacing Google Sheets)
+Standard Next.js 16 App Router. One file per route under `app/*/page.tsx`. Components split into feature folders (`delivery/`, `layout/`) + `ui/` for shadcn primitives. API routes live under `app/api/*` (inferred from `page.tsx` calls to `/api/workflows`, `/api/contacts`).
 
-**`dashboard/`:**
-- Purpose: Admin UI (Next.js, TypeScript, React)
-- Contains: Web interface for contact management, report viewing, workflow triggers
-- Key file: `app/api/contacts/route.ts` (parallel TypeScript implementation of Python ContactsRepo)
-- Note: Mirrors Python contact operations; decoupled but synchronized
+### Database Layer (`supabase/`)
 
-**`tests/`:**
-- Purpose: Automated test suite (Pytest)
-- Contains: Unit tests, integration tests, mock clients
-- Naming: `test_*.py` (Pytest discovery pattern)
-- Key file: `test_contacts_repo.py` (FakeQuery mock for Supabase client testing)
-- Key file: `test_callbacks_contacts.py` (handler mocking + dispatcher testing)
+Migrations only. No schema introspection or generated types. Applied manually per `supabase/migrations/README.md`. Three migrations currently: `event_log`, `event_log_rls`, `contacts`.
+
+### Docs Layer (`docs/superpowers/`)
+
+Three doc categories:
+- `specs/` — design docs, one per feature, dated.
+- `plans/` — implementation plans (phase breakdowns), dated.
+- `followups/` — post-merge retrospectives.
 
 ## Key File Locations
 
-**Entry Points:**
+### Entry Points
 
-| File | Triggers | Purpose |
-|------|----------|---------|
-| `webhook/bot/main.py` | HTTP POST to `/webhook` | Aiogram webhook + aiohttp app bootstrap |
-| `execution/scripts/send_daily_report.py` | GitHub Actions cron | Daily report broadcast |
-| `execution/scripts/send_news.py` | GitHub Actions cron | News article broadcast |
-| `webhook/routes/api.py` | HTTP requests to `/api/...` | Admin API (reports, webhooks) |
+- `webhook/bot/main.py` — aiohttp + Aiogram webhook (Railway startCommand).
+- `execution/scripts/*.py` — GH Actions cron entry points (one script per workflow YAML).
+- `actors/*/src/main.js` — Apify actor entry points.
+- `dashboard/app/page.tsx` — Next.js root page.
+- `dashboard/app/layout.tsx` — App Router layout.
 
-**Configuration:**
+### Configuration
 
-| File | Purpose |
-|------|---------|
-| `webhook/bot/config.py` | Bot/Dispatcher/Storage singletons, env var resolution |
-| `supabase/config.json` | Supabase project settings |
-| `.env` | Environment variables (secrets, auth tokens) |
-| `pytest.ini` | Test runner configuration |
-| `railway.json` | Railway.app deployment manifest |
+- `.env` (gitignored) — local env vars.
+- `Dockerfile` — webhook image (Railway).
+- `railway.json` — Railway config.
+- `requirements.txt` — root Python deps (GH Actions).
+- `webhook/requirements.txt` — bot-only Python deps (Railway).
+- `dashboard/package.json` — Node deps for Vercel.
+- `.github/workflows/*.yml` — cron schedules + secrets.
+- `supabase/migrations/*.sql` — schema.
+- `pytest.ini` — test discovery.
+- `dashboard/tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `eslint.config.mjs`.
 
-**Core Logic:**
+### Core Logic
 
-| File | Purpose |
-|------|---------|
-| `execution/integrations/contacts_repo.py` | Contact CRUD, phone normalization, business rules |
-| `webhook/dispatch.py` | WhatsApp message sending, idempotency, error handling |
-| `execution/core/delivery_reporter.py` | Delivery result aggregation, error categorization |
-| `webhook/contact_admin.py` | Input parsing, state management, UI rendering |
-| `webhook/bot/routers/commands.py` | `/add`, `/list`, `/status`, `/tail` command handlers |
-| `webhook/bot/routers/messages.py` | FSM text input handlers (contact add, adjust, reject) |
-| `webhook/bot/routers/callbacks_contacts.py` | Toggle, bulk, pagination button handlers |
+- `execution/core/event_bus.py` — observability fan-out.
+- `execution/core/state_store.py` — workflow-outcome + idempotency Redis store.
+- `execution/core/delivery_reporter.py` — WhatsApp send tracking + circuit breaker.
+- `execution/curation/redis_client.py` — curation staging/archive keyspace.
+- `webhook/queue_selection.py` — select-mode Redis state.
+- `webhook/bot/routers/callbacks_queue.py` — bulk-action handlers.
+- `webhook/query_handlers.py` — `/queue` rendering.
 
-**Testing:**
+### Testing
 
-| File | Purpose |
-|------|---------|
-| `tests/test_contacts_repo.py` | ContactsRepo with FakeQuery mock |
-| `tests/test_callbacks_contacts.py` | Handler + callback dispatcher testing |
-| `tests/test_contact_admin.py` | Input parsing + keyboard building |
-| `tests/test_dispatch_idempotency.py` | Redis idempotency key logic |
-| `tests/test_contacts_bulk_ops.py` | Bulk status changes |
-
-**Database:**
-
-| File | Purpose |
-|------|---------|
-| `supabase/migrations/20260422_contacts.sql` | Contacts table schema (replaces Google Sheets) |
-| `supabase/migrations/20260419_event_log_rls.sql` | Event log RLS policies |
-| `supabase/migrations/20260418_event_log.sql` | Event log schema |
+- `tests/conftest.py` — fixtures (fakeredis, supabase mocks).
+- `tests/*.py` — pytest files co-named with the module under test.
+- `actors/*/tests/*.test.js` — actor unit tests (Node).
 
 ## Naming Conventions
 
-**Files:**
+**Python files:** `snake_case.py` (e.g., `event_bus.py`, `state_store.py`, `callbacks_queue.py`).
 
-- **Python modules**: `snake_case.py` (e.g., `contact_admin.py`, `contacts_repo.py`)
-- **Test files**: `test_<module_name>.py` (e.g., `test_contacts_repo.py`)
-- **Routers**: `<feature>_<handler_type>.py` (e.g., `callbacks_contacts.py`, `routers/commands.py`)
-- **Migration files**: `YYYYMMDD_<description>.sql` (e.g., `20260422_contacts.sql`)
-- **TypeScript**: `kebab-case.ts` for routes, `PascalCase.tsx` for React components
+**Python modules:** snake_case, organized by feature (`curation/`, `integrations/`) not by type.
 
-**Directories:**
+**Test files:** `test_<module>.py` mirroring the source module (`test_state_store.py`, `test_callbacks_queue.py`, `test_queue_selection.py`).
 
-- **Feature grouping**: By functional domain (e.g., `routers/`, `integrations/`, `scripts/`)
-- **Layer separation**: `core/` (utilities), `integrations/` (API clients), `scripts/` (CLI)
-- **Tests colocated**: `tests/` directory (NOT scattered in source)
+**JS files (actors):** `camelCase.js` (e.g., `eventBus.js`, `capturePdf.js`, `applyFilters.js`).
 
-**Classes/Exports:**
+**TypeScript files (dashboard):** `PascalCase.tsx` for components, `camelCase.ts` for utilities, `kebab-case.tsx` for shadcn primitives (`dropdown-menu.tsx`).
 
-- **Data classes**: `PascalCase` (e.g., `Contact`, `DeliveryResult`, `ContactsRepo`)
-- **Functions**: `snake_case` (e.g., `normalize_phone()`, `build_list_keyboard()`)
-- **Constants**: `UPPER_SNAKE_CASE` (e.g., `WEBHOOK_PATH`, `WELCOME_MESSAGE`)
-- **Exceptions**: `PascalCase` ending in `Error` (e.g., `InvalidPhoneError`, `ContactNotFoundError`)
+**SQL migrations:** `YYYYMMDD_<short_name>.sql` — ISO date prefix for natural ordering.
 
-**CallbackData Classes:**
+**Design docs:** `YYYY-MM-DD-<kebab-name>-design.md` in `docs/superpowers/specs/`.
 
-- **Pattern**: `PascalCase` with domain prefix (e.g., `ContactToggle`, `ContactBulk`, `ContactBulkConfirm`)
-- **Prefix**: `CallbackData(prefix="...")` (e.g., `prefix="tgl"`, `prefix="bulk"`)
-- **Filter method**: Automatically generated by Aiogram (e.g., `ContactToggle.filter()`)
+**Plans:** `YYYY-MM-DD-<kebab-name>-plan.md` in `docs/superpowers/plans/`.
+
+**Directives:** descriptive kebab-case (e.g., `scrape_website.md`) in `directives/`.
 
 ## Where to Add New Code
 
-**New Feature (Contact-like entity):**
+### New Cron Workflow
+- Python script: `execution/scripts/<name>.py` wrapped with `@with_event_bus("<name>")`.
+- GH Actions YAML: `.github/workflows/<name>.yml` with `REDIS_URL`, `SUPABASE_*`, `TELEGRAM_*`, `SENTRY_DSN` envs.
+- Add `<name>` to `ALL_WORKFLOWS` in `webhook/status_builder.py` and to `_TAIL_KNOWN_WORKFLOWS` in `webhook/bot/routers/commands.py` for `/tail` support.
 
-1. **Data layer**: Add migration in `supabase/migrations/YYYYMMDD_<table>.sql`
-2. **Repository**: Create `execution/integrations/<entity>_repo.py` (extends ContactsRepo pattern)
-3. **Handler**: Create `webhook/bot/routers/<entity>_admin.py` or extend existing router
-4. **CallbackData**: Add to `webhook/bot/callback_data.py` (factories for button types)
-5. **Tests**: Create `tests/test_<entity>_repo.py` + `tests/test_<entity>_admin.py`
-6. **Scripts**: Add endpoints to `execution/scripts/` if needed
+### New Bot Command
+- Handler: add `@admin_router.message(Command("<name>"))` in `webhook/bot/routers/commands.py` (or create a feature-scoped router in `webhook/bot/routers/` and register it in `webhook/bot/main.py`).
+- Formatter: pure function in `webhook/query_handlers.py` returning `(text, reply_markup)`.
 
-**New Command:**
+### New Bot Callback Button
+- Typed CallbackData: add class to `webhook/bot/callback_data.py` with a short `prefix` (≤8 chars, Telegram 64-byte budget).
+- Handler: router in `webhook/bot/routers/callbacks_<domain>.py` using `@router.callback_query(<Class>.filter())`.
 
-1. **Handler**: Add to `webhook/bot/routers/commands.py` (admin_router or public_router)
-2. **Tests**: Add to `tests/test_bot_callback_data.py` or create `tests/test_<command>.py`
-3. **State (if multi-step)**: Add to `webhook/bot/states.py`
-4. **Callback handling (if buttons)**: Add to `webhook/bot/routers/callbacks_*.py`
+### New Redis Keyspace
+- For workflow state: add helpers to `execution/core/state_store.py` (non-raising contract).
+- For curation state: add helpers to `execution/curation/redis_client.py` (raising contract, use pipeline transactions for multi-key ops).
+- For bot runtime state: new module under `webhook/` that imports `execution.curation.redis_client._get_client`.
 
-**New Service Integration (API client):**
+### New Apify Actor
+- New directory `actors/<name>/` with its own `package.json` + `Dockerfile` + `.actor/` manifest.
+- Copy `src/lib/eventBus.js` from an existing actor (keep in sync).
+- Entry point at `actors/<name>/src/main.js`, accept `trace_id` + `parent_run_id` from `Actor.getInput()`.
+- Invoke from `execution/integrations/apify_client.py`.
 
-1. **Client**: Create `execution/integrations/<service>_client.py`
-2. **Interface**: Define domain-specific methods (not raw API calls)
-3. **Tests**: Create `tests/test_<service>_client.py` with mock HTTP
-4. **Usage**: Import in scripts or routers; pass as dependency
+### New Dashboard Page
+- Next.js route: `dashboard/app/<name>/page.tsx` with `"use client"` + `useSWR`.
+- API route (if needed): `dashboard/app/api/<name>/route.ts`.
+- Shared UI: reuse `dashboard/components/ui/*`; feature components under `dashboard/components/<domain>/`.
 
-**New Script (cron job):**
+### New Supabase Migration
+- `supabase/migrations/YYYYMMDD_<name>.sql` using `create … if not exists`.
+- Apply via Supabase SQL editor or CLI; log in `supabase/migrations/README.md` applied-migrations table.
 
-1. **File**: Create in `execution/scripts/<workflow_name>.py`
-2. **Entry point**: Implement `main()` function
-3. **State**: Use `execution.core.state_store` for persistence
-4. **Logging**: Use `execution.core.logger` for Sentry integration
-5. **Invocation**: Add GitHub Actions job in `.github/workflows/`
-
-**Utilities/Helpers:**
-
-- **Shared parsing/validation**: `webhook/contact_admin.py` (for contact-specific) or new utility module
-- **Shared business logic**: `execution/core/` (for workflow-agnostic logic)
-- **Shared UI builders**: `webhook/bot/keyboards.py` (inline/reply keyboards)
+### New Test
+- Python: `tests/test_<module>.py` matching the source module. Use `fakeredis` + `pytest-asyncio` fixtures from `conftest.py`.
+- Actor: `actors/<name>/tests/<feature>.test.js` using whatever test runner the actor's `package.json` declares.
 
 ## Special Directories
 
-**`.state/`:**
-- Purpose: Persistent JSON state for long-running workflows (GitHub Actions between jobs)
-- Generated: Yes (auto-created by `state_store.py`)
-- Committed: No (git-ignored, rebuild on each run)
-- Pattern: `<workflow_name>.json` (e.g., `send_daily_report.json`)
+- **`.state/`** — Persistent state between cron runs (gitignored, not in Redis).
+- **`.tmp/logs/`** — Structured JSON logs per `.tmp/logs/<workflow>/<run_id>.json`. 7-day retention (per AGENT.md).
+- **`.tmp/`** — All intermediates (regenerable). Never commit.
+- **`.worktrees/`** — Git worktree directories for parallel branches (gitignored).
+- **`.planning/codebase/`** — THIS directory. Codebase maps consumed by other Claude agents.
+- **`.superpowers/brainstorm/`** — Transient brainstorm HTML outputs from Claude agent runs (gitignored).
+- **`.claude/`** — Claude Code workspace settings + slash-command definitions.
 
-**`.tmp/logs/`:**
-- Purpose: Local development log archives
-- Generated: Yes
-- Committed: No (git-ignored)
+## Tests Enumeration
 
-**`supabase/.temp/`:**
-- Purpose: Supabase CLI temporary files
-- Generated: Yes
-- Committed: No (git-ignored)
+### Observability + state
+- `test_event_bus.py` — Sink fan-out, claim-ordering guarantees.
+- `test_state_store.py` — `check_sent_flag`, `set_sent_flag`, `release_inflight`, streaks, crash dedup.
+- `test_watchdog.py` — Missing-cron detection.
+- `test_progress_reporter.py`, `test_progress_reporter_sinks.py`.
+- `test_agents_progress.py`.
+- `test_cron_parser.py`.
 
-**`dashboard/.next/`:**
-- Purpose: Next.js build output (client + server bundles)
-- Generated: Yes (on `npm run build`)
-- Committed: No (git-ignored)
+### Idempotency (new)
+- `test_morning_check_idempotency.py` — Phase 0–5 split-lock scenarios.
+- `test_baltic_ingestion_idempotency.py` — Phase 0–5 split-lock scenarios.
+- `test_dispatch_idempotency.py`.
 
-**`__pycache__/`, `.pytest_cache/`:**
-- Purpose: Python bytecode cache, Pytest caches
-- Generated: Yes
-- Committed: No (git-ignored)
+### Curation Redis (new)
+- `test_curation_redis_client.py` — staging/archive/bulk ops.
+- `test_curation_router.py` — classify/route.
+- `test_curation_id_gen.py`.
+- `test_curation_telegram_poster.py`.
+- `test_rebuild_dedup.py`.
 
-## Public vs Internal Boundaries
+### Bot callbacks + FSM
+- `test_callbacks_queue.py` — Bulk actions + pagination + mode toggle (new).
+- `test_callbacks_curation.py` — Draft/curate/broadcast.
+- `test_callbacks_contacts.py` — Contact admin.
+- `test_callbacks_menu.py`, `test_callbacks_reports.py`, `test_callbacks_workflows.py`.
+- `test_bot_callback_data.py` — Typed CallbackData (de)serialization.
+- `test_bot_middlewares.py` — RoleMiddleware.
+- `test_bot_delivery.py`, `test_bot_states.py`, `test_bot_users.py`.
+- `test_messages_fsm_isolation.py`.
+- `test_reject_reason_flow.py`.
 
-**Public/Exported APIs:**
+### Queue + query handlers
+- `test_queue_selection.py` — Select-mode Redis state (new).
+- `test_query_handlers.py` — `/queue` normal + select rendering, `/history`, `/stats`, `/rejections`.
+- `test_redis_queries.py` — Feedback + pipeline keyspace.
 
-- `execution.integrations.contacts_repo.ContactsRepo` — Service boundary (all scripts/handlers depend on it)
-- `execution.integrations.contacts_repo.Contact` — Data model (serializable, hashable)
-- `webhook.dispatch.send_whatsapp()` — Broadcast sending (handlers, scripts use it)
-- `execution.core.delivery_reporter.DeliveryReporter` — Error handling abstraction
-- `webhook.bot.routers.*` — Handler routers (included by dispatcher)
+### Contacts
+- `test_contacts_repo.py`, `test_contacts_repo_normalize.py`, `test_contacts_bulk_ops.py`.
+- `test_contact_admin.py`.
+- `archive/test_migrate_contacts_from_sheets.py` (archived).
 
-**Internal/Private APIs:**
+### Mini-App
+- `test_mini_auth.py`, `test_mini_contacts.py`, `test_mini_news.py`, `test_mini_reports.py`, `test_mini_stats.py`, `test_mini_workflows.py`.
 
-- `webhook.contact_admin._parse_ts()` — Helper (underscore prefix signals internal)
-- `execution.integrations.contacts_repo._row_to_contact()` — Conversion helper
-- `webhook.dispatch._redis_sync_client`, `_redis_async_client` — Module singletons (not exported)
-- `webhook.bot.config._bot`, `_dp`, `_storage` — Lazy singletons (accessed via get_*() functions)
+### Traces (Phase 4)
+- `test_platts_ingestion_trace.py`, `test_platts_reports_trace.py`.
+
+### Misc
+- `test_tail_command.py`, `test_webhook_status.py`, `test_workflow_trigger.py`.
+- `test_delivery_reporter.py`.
+- `test_digest.py`.
+- `test_metrics_endpoint.py`.
+- `test_prompts.py`.
+
+### Actor JS tests (run in each actor package)
+- `actors/platts-scrap-full-news/tests/eventBus.test.js`.
+- `actors/platts-scrap-reports/tests/{dates,eventBus,filters,slug}.test.js`.
 
 ---
 

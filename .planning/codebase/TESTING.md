@@ -2,453 +2,269 @@
 
 **Analysis Date:** 2026-04-22
 
+Three test surfaces:
+
+1. **Python / pytest** — for `execution/` and `webhook/` (53 test files, `tests/*.py`)
+2. **JavaScript / vitest** — for two Apify actors (`platts-scrap-reports`, `platts-scrap-full-news`)
+3. **None** — `dashboard/` (Next.js) and `webhook/mini-app/` have no test harness at all
+
+This repo practices TDD discipline: every recent feature landed with a paired test module (queue bulk ops, split-lock idempotency, CallbackData factories, trace propagation). See `git log --oneline | grep '^test('` and the `docs/superpowers/plans/` structure.
+
 ## Test Framework
 
-**Runner:**
-- pytest 7.0.0+
-- Config: `pytest.ini` at project root
-- Python version: 3.9+
+**Python:**
+- Runner: `pytest` >= 7.0 (`requirements.txt`)
+- Config: `/Users/bigode/Dev/agentics_workflows/pytest.ini`
+  ```ini
+  [pytest]
+  testpaths = tests
+  python_files = test_*.py
+  python_classes = Test*
+  python_functions = test_*
+  addopts = -v --tb=short --ignore=tests/archive
+  norecursedirs = .venv __pycache__ .git node_modules tests/archive
+  ```
+- Assertions: stdlib `assert`
+- Plugins: `pytest-mock` >= 3.10 (the `mocker` fixture), `pytest-asyncio` >= 0.21, `fakeredis` >= 2.20
 
-**Test discovery:**
-```ini
-[pytest]
-testpaths = tests
-python_files = test_*.py
-python_classes = Test*
-python_functions = test_*
-addopts = -v --tb=short
-```
+**JavaScript actors:**
+- Runner: `vitest` ^2.1 (actor-local — `actors/platts-scrap-reports/package.json`, `actors/platts-scrap-full-news/package.json`)
+- Assertions: `expect` from vitest
+- Mocks: `vi.fn()`, `vi.spyOn(console, 'log')`, env manipulation via `process.env` snapshot/restore in `beforeEach`/`afterEach`
+- Other two actors (`platts-news-only`, `platts-scrap-price`) have no tests — `"test"` script exits 1 with a TODO string
 
-**Run Commands:**
+**Dashboard / mini-app:**
+- No Jest / vitest / Playwright configured. `dashboard/package.json` only exposes `dev`, `build`, `start`, `lint`.
+
+## Run Commands
+
 ```bash
-pytest tests/                          # Run all tests
-pytest tests/test_contacts_repo.py     # Run single module
-pytest -k test_contact_toggle          # Run by name pattern
-pytest --tb=short                      # Shorter traceback format
-pytest -v                              # Verbose output
-```
+# Python — full suite
+pytest
 
-**Additional libraries:**
-- `pytest-mock>=3.10.0` — for monkeypatching and fixtures
-- `pytest-asyncio>=0.21,<1.0` — for `@pytest.mark.asyncio` async test support
-- `fakeredis>=2.20,<3.0` — in-memory Redis for testing without Docker
+# Python — single file, verbose
+pytest tests/test_callbacks_queue.py -v
+
+# Python — single test
+pytest tests/test_state_store.py::test_record_success_writes_last_run_json
+
+# Python — skip slow/archive (already excluded)
+pytest --ignore=tests/archive
+
+# Actor tests (per-actor)
+cd actors/platts-scrap-reports && npm test          # vitest run
+cd actors/platts-scrap-reports && npm run test:watch
+```
 
 ## Test File Organization
 
-**Location:** Co-located in `tests/` directory parallel to source
+**Location:**
+- Python: all in repo-root `tests/` (flat — no subdirectories except `tests/archive/` which is git-kept but pytest-ignored)
+- Actors: co-located under `actors/<actor>/tests/` alongside `actors/<actor>/src/`
+- Dashboard / mini-app: none
 
-**Naming:** `test_*.py` files correspond to modules:
-- `webhook/bot/users.py` → `tests/test_bot_users.py`
-- `execution/integrations/contacts_repo.py` → `tests/test_contacts_repo.py`
-- `execution/core/delivery_reporter.py` → `tests/test_delivery_reporter.py`
+**Naming:**
+- Python: `test_<module-under-test>.py`. Test functions `test_<scenario>` with outcome phrase (`test_on_queue_page_happy_path_edits_message`, `test_on_queue_sel_toggle_preserves_current_page`)
+- Actors: `<subject>.test.js`
 
-**File structure (55 test files total, 8870 lines):**
-```
-tests/
-├── conftest.py                      # Shared fixtures (81 lines)
-├── _manual_format_check.py          # Legacy format checker
-├── test_bot_*.py                    # Bot handler & component tests
-├── test_callbacks_*.py              # Router callback tests
-├── test_contacts_*.py               # ContactsRepo and bulk ops
-├── test_delivery_reporter.py        # Delivery tracking (936 lines)
-├── test_event_bus.py                # Event system (625 lines)
-├── test_state_store.py              # Workflow state persistence
-├── test_progress_reporter.py        # Progress tracking (764 lines)
-└── test_*.py                        # Unit/integration tests
-```
+**Archive:** `tests/archive/` holds retired tests kept for git history (e.g. `test_migrate_contacts_from_sheets.py` — post-Sheets migration). Excluded from every run via `pytest.ini` `--ignore` + `norecursedirs`.
 
-**Imports path setup in conftest:**
-```python
-"""Shared pytest fixtures."""
-from __future__ import annotations
+## Full Python Test Inventory (`tests/*.py`, 53 files)
 
-import sys
-from pathlib import Path
+**Bot / aiogram handlers (router safety net):**
+- `test_bot_callback_data.py` — pack/unpack roundtrip for every `CallbackData` factory (queue, curate, draft, report, contact, workflow, approval, subscription, onboarding, queue select-mode)
+- `test_bot_delivery.py` — delivery reporter bot wrapper
+- `test_bot_middlewares.py` — `RoleMiddleware` gating admin callbacks
+- `test_bot_states.py` — FSM state class shapes
+- `test_bot_users.py` — user registry / approval flow
+- `test_callbacks_contacts.py` — contact page + toggle handlers
+- `test_callbacks_curation.py` — `/queue` item curation (archive/reject/pipeline)
+- `test_callbacks_menu.py` — `/menu` target routing
+- `test_callbacks_queue.py` — queue navigation + select-mode + bulk prompt/confirm/cancel handlers (31 tests, most-recent)
+- `test_callbacks_reports.py` — `/reports` navigation (type/year/month/download/back)
+- `test_callbacks_workflows.py` — `/workflows` listing + run trigger
+- `test_query_handlers.py` — `format_queue_page` rendering in normal + select modes
+- `test_tail_command.py` — `/tail` command parsing + `parse_mode=None` rendering
+- `test_reject_reason_flow.py` — draft reject reason FSM flow
+- `test_messages_fsm_isolation.py` — per-user FSM state isolation
 
-_REPO_ROOT = Path(__file__).parent.parent
-# Add repo root to sys.path so tests can import execution.* modules
-sys.path.insert(0, str(_REPO_ROOT))
-# Add webhook/ so bare imports (`import redis_queries`) resolve the same way
-# they do in production (Dockerfile copies webhook/ contents to /app/).
-sys.path.insert(0, str(_REPO_ROOT / "webhook"))
-```
+**Queue / curation / selection:**
+- `test_queue_selection.py` — `webhook.queue_selection` set-mode state, atomic toggle, TTL, page persistence, per-chat isolation
+- `test_curation_redis_client.py` — `execution.curation.redis_client` staging/archive/discard/seen/bulk_archive/bulk_discard (uses `fakeredis`)
+- `test_curation_router.py` — curation routing logic
+- `test_curation_telegram_poster.py` — `post_for_curation` message + keyboard
+- `test_curation_id_gen.py` — stable id generation
+- `test_rebuild_dedup.py` — dedup rebuild script
+- `test_redis_queries.py` — `webhook.redis_queries.list_staging` paging
 
-## Test Structure
+**State store / idempotency / event bus:**
+- `test_state_store.py` — `record_success`, `record_failure` (streak increment), `record_empty`, `record_crash`, `_send_streak_alert` threshold
+- `test_event_bus.py` — `EventBus` run_id gen, trace_id inheritance, stdout sink JSON, level coercion, supabase/telegram sink never-raise
+- `test_morning_check_idempotency.py` — split-lock claim-ordering across every exit path
+- `test_baltic_ingestion_idempotency.py` — same for `baltic_ingestion` script
+- `test_dispatch_idempotency.py` — `webhook.dispatch` idempotent send
+- `test_platts_ingestion_trace.py` — `trace_id` + `parent_run_id` injection into Apify `run_input`
+- `test_platts_reports_trace.py` — same for reports actor
 
-**Fixture pattern (conftest.py):**
+**Progress / delivery / reporting:**
+- `test_agents_progress.py` — agents progress tracker
+- `test_progress_reporter.py` — `ProgressReporter` text/sink
+- `test_progress_reporter_sinks.py` — sink fan-out behaviour
+- `test_delivery_reporter.py` — delivery summary rendering
+- `test_digest.py` — `webhook.digest` compose logic
+- `test_metrics_endpoint.py` — Prometheus `/metrics` route
+
+**Integrations / repos:**
+- `test_contacts_repo.py` — `ContactsRepo` CRUD against Supabase
+- `test_contacts_repo_normalize.py` — phone / name normalization
+- `test_contacts_bulk_ops.py` — bulk activate/deactivate
+- `test_contact_admin.py` — admin contact management CLI
+- `test_prompts.py` — prompt rendering (`execution/core/prompts/`)
+
+**Cron / watchdog / workflow trigger:**
+- `test_cron_parser.py` — crontab expression parser (croniter wrapper)
+- `test_watchdog.py` — watchdog missed-cron detection
+- `test_workflow_trigger.py` — GitHub Actions dispatch via octokit
+- `test_webhook_status.py` — `/status` aggregation
+
+**Mini-app (aiohttp + Jinja):**
+- `test_mini_auth.py` — session / Telegram initData auth
+- `test_mini_contacts.py` — contacts page
+- `test_mini_news.py` — news page
+- `test_mini_reports.py` — reports page
+- `test_mini_stats.py` — stats page
+- `test_mini_workflows.py` — workflows page
+
+**Infrastructure:**
+- `conftest.py` — shared fixtures (see below)
+- `__init__.py` — package marker
+- `_manual_format_check.py` — ad-hoc manual script, not a real test module (leading underscore bypasses `test_*` discovery)
+
+## Shared Fixtures (`tests/conftest.py`)
+
+**`sys.path` shim:** Inserts repo root and `webhook/` so tests can `import execution.*` and bare-import webhook modules (`redis_queries`, `query_handlers`) the way the Railway Docker container does.
+
+**Bot fixtures** (used by every `test_callbacks_*.py`):
+- `mock_bot` — `AsyncMock(spec=Bot)` with `send_message`, `edit_message_text`, `answer_callback_query`
+- `mock_callback_query(user_id, chat_id, message_id, data)` — factory returning a `MagicMock(spec=CallbackQuery)` wired up with `from_user`, `message.chat`, `message.answer`, and an awaitable `answer()`
+- `mock_message(text, chat_id, user_id)` — factory for `MagicMock(spec=Message)`
+- `fsm_context_in_state(state, data)` — factory for `MagicMock(spec=FSMContext)` preloaded with `get_state` / `get_data` return values
+
+## Mocking Patterns
+
+**`fakeredis` for Redis-backed modules** — canonical pattern in `test_curation_redis_client.py`, `test_state_store.py`, `test_queue_selection.py`:
 ```python
 @pytest.fixture
-def mock_bot():
-    """AsyncMock of aiogram Bot with the methods callback/message handlers call."""
-    bot = AsyncMock(spec=Bot)
-    bot.send_message = AsyncMock()
-    bot.edit_message_text = AsyncMock()
-    bot.answer_callback_query = AsyncMock()
-    return bot
+def fake_redis(monkeypatch):
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    from execution.curation import redis_client
+    monkeypatch.setattr(redis_client, "_get_client", lambda: fake)
+    return fake
 
-
-@pytest.fixture
-def mock_callback_query():
-    """Factory: mock_callback_query(user_id=12345, chat_id=12345, message_id=1, data='...')."""
-    def _factory(user_id: int = 12345, chat_id: int = 12345,
-                 message_id: int = 1, data: str = ""):
-        cb = MagicMock(spec=CallbackQuery)
-        cb.id = "cb_test_id"
-        cb.data = data
-        cb.from_user = MagicMock(spec=User)
-        cb.from_user.id = user_id
-        cb.from_user.first_name = "Test"
-        cb.message = MagicMock(spec=Message)
-        cb.message.message_id = message_id
-        cb.message.chat = MagicMock(spec=Chat)
-        cb.message.chat.id = chat_id
-        cb.message.answer = AsyncMock()
-        cb.answer = AsyncMock()
-        return cb
-    return _factory
+@pytest.fixture(autouse=True)
+def _reset_client_cache(monkeypatch):
+    """Prevent cached client leaking between tests."""
+    from execution.curation import redis_client
+    monkeypatch.setattr(redis_client, "_client", None)
 ```
 
-**Fixture factories return callable:**
-- `mock_callback_query()` accepts parameters to customize mock per test
-- `mock_message()` returns fresh instance with customizable text, chat_id, user_id
-- `fsm_context_in_state()` configures FSM state and data dict
+**Safety stubs in `state_store` fixture** (`tests/test_state_store.py:20-25`): the fixture also stubs `_send_streak_alert` to a no-op so a full run never leaks a real Telegram alert to the operator chat — regression guard for the 2026-04-21 incident where tests fired "TEST falhou 3x seguidas" into the admin chat.
 
-## Mocking Strategy
-
-**Mocking framework:** `unittest.mock` (built-in)
-- `AsyncMock()` for async methods
-- `MagicMock()` for sync methods with specs
-- `patch()` for import-time injection
-
-**Fake client builders for repo tests:**
+**`mocker` (pytest-mock) for patching** — preferred over `monkeypatch` when patching module attributes in router tests:
 ```python
-class FakeQuery:
-    """Minimal chainable builder: mirrors supabase-py's PostgrestBuilder."""
-    def __init__(self, data, count=None):
-        self._data = data
-        self._count = count
-        self.calls = []
-
-    def select(self, *a, **kw): self.calls.append(("select", a, kw)); return self
-    def eq(self, *a, **kw):     self.calls.append(("eq", a, kw)); return self
-    def ilike(self, *a, **kw):  self.calls.append(("ilike", a, kw)); return self
-    def execute(self):
-        r = MagicMock()
-        r.data = self._data
-        r.count = self._count
-        return r
-
-
-@pytest.fixture
-def fake_client():
-    client = MagicMock()
-    client._queries = []
-    return client
-
-
-def _set_next_query(client, query: FakeQuery):
-    """Configure client.table(...) to return `query` on the next call."""
-    client.table.return_value = query
-    client._queries.append(query)
+mocker.patch("webhook.queue_selection.is_select_mode", return_value=False)
+mocker.patch("bot.routers.callbacks_queue.get_bot", return_value=bot)
+mocker.patch("bot.routers.callbacks_queue.query_handlers.format_queue_page",
+             return_value=("body", {"inline_keyboard": []}))
 ```
 
-**Repo usage in tests:**
+**`AsyncMock` for aiogram I/O** — `bot.edit_message_text`, `query.answer`, and `asyncio.to_thread` are always awaitable mocks:
 ```python
-def test_list_active_filters_by_status_and_orders(fake_client):
-    q = FakeQuery([_row(), _row(name="Bob")])
-    _set_next_query(fake_client, q)
-
-    repo = ContactsRepo(client=fake_client)
-    contacts = repo.list_active()
-
-    assert len(contacts) == 2
-    assert contacts[0].name == "Alice"
-    ops = [c[0] for c in q.calls]
-    assert ops == ["select", "eq", "order"]
+to_thread = mocker.patch("asyncio.to_thread", new=AsyncMock(return_value={"archived": ["a"], "failed": []}))
 ```
 
-**Async handler mocking with patch:**
-```python
-@pytest.mark.asyncio
-async def test_bulk_prompt_shows_confirmation(fake_query):
-    """First tap on [❌ Desativar todos] must show confirmation keyboard."""
-    fake_repo = MagicMock()
-    fake_repo.list_all.return_value = ([MagicMock() for _ in range(47)], 5)
+**Heavy-dep stubbing via `sys.modules`** (idempotency tests) — `pandas`/`spgci` aren't installed in CI, so `tests/test_morning_check_idempotency.py` injects `MagicMock` into `sys.modules` for those imports inside an autouse module-scope fixture, and removes them on teardown to avoid leaking stubs into other tests.
 
-    with patch("webhook.bot.routers.callbacks_contacts.ContactsRepo",
-               return_value=fake_repo):
-        await on_bulk_prompt(
-            fake_query,
-            ContactBulk(status="inativo", search=""),
-        )
+**Spy recorder pattern for call-ordering assertions** (`spy_state_store` fixture in `test_morning_check_idempotency.py:36-57`): build a dict of per-helper call-log lists, `monkeypatch.setattr` each helper to a closure that appends then returns a canned value. Tests then assert on the order of entries — the core idempotency invariant.
 
-    fake_query.message.edit_text.assert_called_once()
-    call = fake_query.message.edit_text.call_args
-    text = call.args[0] if call.args else call.kwargs.get("text")
-    assert "47" in str(text)
-```
+**Env isolation:** `monkeypatch.delenv(..., raising=False)` for `SUPABASE_URL`, `SUPABASE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TRACE_ID`, `PARENT_RUN_ID` at the top of every `test_event_bus` test so defaults are deterministic.
 
-**What to mock:**
-- External services: Supabase, Redis, Telegram API, UazAPI
-- Database calls (use fake client builders)
-- Network I/O
-- Long-running operations (asyncio.to_thread calls)
+**Actor tests (vitest):**
+- `process.env` snapshot + restore in `beforeEach`/`afterEach`
+- `vi.spyOn(console, 'log')` → parse `mock.calls[0][0]` as JSON to assert on emitted event fields
+- Manual mock for `supabase.from(...).insert(...)` returning `Promise.resolve({})` or rejecting with an Error
+- See `actors/platts-scrap-reports/tests/eventBus.test.js` for the canonical structure
 
-**What NOT to mock (test the real thing):**
-- CallbackData serialization/deserialization: `ContactToggle.pack()` / `.unpack()`
-- Business logic: phone normalization, status checks, filtering
-- Data validation: `InvalidPhoneError` on bad input
-- Dataclass behavior
+## Idempotency Test Pattern (`test_*_idempotency.py`)
 
-## Fixtures and Factories
+Every new cron with a 48h "already sent" guard ships with an idempotency test file that enforces the split-lock invariant. The pattern:
 
-**Test data builders (inline):**
-```python
-def _row(**overrides):
-    base = {
-        "id": "00000000-0000-0000-0000-000000000001",
-        "name": "Alice",
-        "phone_raw": "+5511987654321",
-        "phone_uazapi": "5511987654321",
-        "status": "ativo",
-        "created_at": "2026-04-22T10:00:00+00:00",
-        "updated_at": "2026-04-22T10:00:00+00:00",
-    }
-    base.update(overrides)
-    return base
+1. **Module-scope autouse fixture** stubs heavy deps (`pandas`, `spgci`) via `sys.modules`
+2. **Per-test `spy_state_store` fixture** records call order of `check_sent_flag`, `try_claim_alert_key`, `set_sent_flag`, `release_inflight`
+3. **`patched_integrations` fixture** replaces `PlattsClient`, `ContactsRepo`, `UazapiClient` with `MagicMock` instances configurable per scenario
+4. **One test per exit path** — happy path, empty data, claim-lost (concurrent run), send failure, post-send crash
+5. **Assert on `calls[...]` list ordering**, not just that helpers were called
 
+Reference spec: `docs/superpowers/specs/2026-04-22-idempotency-claim-ordering-fix-design.md`.
 
-def test_list_active_filters_by_status_and_orders(fake_client):
-    q = FakeQuery([_row(), _row(name="Bob")])
-    _set_next_query(fake_client, q)
-    ...
-```
+## Test Categories
 
-**Welcome callback recorders:**
-```python
-class FakeWelcomeRecorder:
-    def __init__(self, fail=False):
-        self.calls = []
-        self.fail = fail
-    def __call__(self, phone_uazapi: str):
-        self.calls.append(phone_uazapi)
-        if self.fail:
-            raise RuntimeError("uazapi send failed")
+**Unit:** ~85% of the suite. Redis-backed modules (`fakeredis`), pure functions, FSM states, CallbackData roundtrip.
 
+**Integration:** idempotency tests, trace-propagation tests, bot router tests with `asyncio.to_thread` + real format_queue_page patched at boundary. None hit live Redis / Supabase / Telegram; everything is stubbed.
 
-def test_add_happy_path_sends_welcome_then_inserts(fake_client):
-    dup_q = FakeQuery([])
-    insert_q = FakeQuery([_row(name="Carol", phone_uazapi="5511900000001")])
-    
-    fake_client.table.side_effect = [dup_q, insert_q]
-    
-    welcome = FakeWelcomeRecorder()
-    repo = ContactsRepo(client=fake_client)
-    
-    contact = repo.add("Carol", "+55 11 90000-0001", send_welcome=welcome)
-    
-    assert welcome.calls == ["5511900000001"]
-```
-
-## Test Types
-
-### Unit Tests
-
-**Scope:** Single function/method in isolation
-
-**Example - Phone normalization:**
-```python
-def test_get_by_phone_normalizes_input(fake_client):
-    q = FakeQuery([_row()])
-    _set_next_query(fake_client, q)
-
-    repo = ContactsRepo(client=fake_client)
-    c = repo.get_by_phone("+55 (11) 98765-4321")
-
-    assert c.phone_uazapi == "5511987654321"
-    assert ("eq", ("phone_uazapi", "5511987654321"), {}) in q.calls
-```
-
-**Example - CallbackData pack/unpack:**
-```python
-def test_contact_toggle_pack_unpack():
-    cb = ContactToggle(phone="5511999999999")
-    packed = cb.pack()
-    parsed = ContactToggle.unpack(packed)
-    assert parsed.phone == "5511999999999"
-```
-
-### Integration Tests
-
-**Scope:** Multiple layers (handler → repo → mock client)
-
-**Example - Async callback handler:**
-```python
-@pytest.mark.asyncio
-async def test_bulk_confirm_calls_bulk_set_status_and_reports(fake_query):
-    fake_repo = MagicMock()
-    fake_repo.bulk_set_status.return_value = 47
-
-    with patch("webhook.bot.routers.callbacks_contacts.ContactsRepo",
-               return_value=fake_repo), \
-         patch("bot.routers.commands._render_list_view", new=AsyncMock()):
-        await on_bulk_confirm(
-            fake_query,
-            ContactBulkConfirm(status="ativo", search=""),
-        )
-
-    fake_repo.bulk_set_status.assert_called_once()
-    fake_query.answer.assert_called()
-```
-
-**Example - Error handling flow:**
-```python
-def test_add_welcome_failure_rolls_back_insert(fake_client):
-    dup_q = FakeQuery([])
-    _set_next_query(fake_client, dup_q)
-
-    welcome = FakeWelcomeRecorder(fail=True)
-    repo = ContactsRepo(client=fake_client)
-
-    with pytest.raises(RuntimeError, match="welcome send failed"):
-        repo.add("Carol", "+5511900000002", send_welcome=welcome)
-    
-    # insert_q should never have been called
-    assert len(fake_client.table.call_args_list) == 1  # only dup check
-```
-
-## Async Testing
-
-**Pattern with pytest-asyncio:**
-```python
-@pytest.mark.asyncio
-async def test_contact_toggle_success(fake_query):
-    fake_repo = MagicMock()
-    fake_repo.toggle.return_value = Contact(...)
-    
-    with patch("webhook.bot.routers.callbacks_contacts.ContactsRepo",
-               return_value=fake_repo):
-        await on_contact_toggle(fake_query, ContactToggle(phone="5511999999999"))
-    
-    fake_query.answer.assert_called()
-```
-
-**Running sync methods in threads (mirror production):**
-```python
-@pytest.mark.asyncio
-async def test_toggle_runs_sync_in_thread(fake_query):
-    # Handler uses: contact = await asyncio.to_thread(repo.toggle, ...)
-    # Test mocks the repo call, not asyncio.to_thread
-    fake_repo = MagicMock()
-    fake_repo.toggle.return_value = Contact(...)  # sync return
-    
-    with patch("webhook.bot.routers.callbacks_contacts.ContactsRepo",
-               return_value=fake_repo):
-        await on_contact_toggle(fake_query, ContactToggle(...))
-```
-
-## Error/Exception Testing
-
-**Pattern - pytest.raises captures custom exceptions:**
-```python
-def test_get_by_phone_raises_when_missing(fake_client):
-    q = FakeQuery([])
-    _set_next_query(fake_client, q)
-
-    repo = ContactsRepo(client=fake_client)
-    with pytest.raises(ContactNotFoundError):
-        repo.get_by_phone("+5511900000001")
-
-
-def test_get_by_phone_invalid_input_raises_invalid_phone(fake_client):
-    repo = ContactsRepo(client=fake_client)
-    with pytest.raises(InvalidPhoneError):
-        repo.get_by_phone("abc")
-
-
-def test_add_duplicate_pre_check_raises_and_skips_send(fake_client):
-    dup_q = FakeQuery([_row(name="Alice Existing")])
-    _set_next_query(fake_client, dup_q)
-
-    welcome = FakeWelcomeRecorder()
-    repo = ContactsRepo(client=fake_client)
-
-    with pytest.raises(ContactAlreadyExistsError) as exc_info:
-        repo.add("Alice", "+5511987654321", send_welcome=welcome)
-
-    assert exc_info.value.existing.name == "Alice Existing"
-    assert welcome.calls == []  # Never called before exception
-```
+**E2E:** none. No Playwright / Cypress / manual scripts beyond `tests/_manual_format_check.py`. The dashboard and Telegram mini-app have zero automated E2E coverage.
 
 ## Coverage
 
-**Target:** No explicit enforcement in pytest.ini or pyproject.toml
+- No coverage tool (`coverage.py` / `pytest-cov`) currently configured — target is 80% per user global rules but not measured in CI
+- To measure ad-hoc: `pip install pytest-cov && pytest --cov=execution --cov=webhook --cov-report=term-missing`
+- Observed gaps: dashboard (0%), webhook mini-app HTML rendering (tested at handler level only), two actors without test files (`platts-news-only`, `platts-scrap-price`)
 
-**Observed coverage by category:**
-- `execution/core/`: well-tested (delivery_reporter 936 lines, event_bus 625 lines)
-- `execution/integrations/`: well-tested (contacts_repo 368 lines)
-- `webhook/bot/routers/`: callback handlers tested (callbacks_contacts, callbacks_curation, etc.)
-- Bot models (states, callback_data): 100% coverage via pack/unpack tests
+## CI Test Execution
 
-**Coverage gaps:**
-- No explicit coverage requirement → assume 60-70% baseline
-- Error paths and edge cases prioritized over happy paths
+**GitHub Actions workflows (`.github/workflows/`):**
+- `baltic_ingestion.yml`, `daily_report.yml`, `market_news.yml`, `morning_check.yml`, `platts_reports.yml`, `watchdog.yml`
 
-## Test Independence
+**None of these run `pytest`** — they invoke `execution/scripts/<workflow>.py` directly as production crons. There is currently **no CI job** that runs the test suite on push / PR. Tests run locally or via `pytest` manually.
 
-**FSM isolation:**
-```python
-@pytest.fixture
-def fsm_context_in_state():
-    """Factory: fsm_context_in_state(state=AdjustDraft.waiting_feedback, data={'draft_id': 'x'})."""
-    def _factory(state=None, data: dict | None = None):
-        ctx = MagicMock(spec=FSMContext)
-        ctx.get_state = AsyncMock(return_value=state)
-        ctx.get_data = AsyncMock(return_value=data or {})
-        ctx.set_state = AsyncMock()
-        ctx.update_data = AsyncMock()
-        ctx.clear = AsyncMock()
-        return ctx
-    return _factory
-```
+**Actor tests** also run only locally (`npm test` inside the actor directory) — no GitHub Actions job invokes vitest.
 
-**Message isolation:**
-```python
-@pytest.fixture
-def mock_message():
-    """Factory: mock_message(text='hi', chat_id=12345, user_id=12345)."""
-    def _factory(text: str = "", chat_id: int = 12345, user_id: int = 12345):
-        msg = MagicMock(spec=Message)
-        msg.text = text
-        msg.message_id = 1
-        msg.chat = MagicMock(spec=Chat)
-        msg.chat.id = chat_id
-        msg.from_user = MagicMock(spec=User)
-        msg.from_user.id = user_id
-        msg.answer = AsyncMock()
-        return msg
-    return _factory
-```
+## Actor Test Pattern
 
-Each test gets a fresh MagicMock instance (no state pollution).
+`actors/platts-scrap-reports/tests/` contains four vitest files:
+- `eventBus.test.js` — `EventBus` constructor validation, runId generation, traceId inheritance, stdout JSON shape, Supabase sink fan-out, never-raise guarantees, circular-ref detail handling
+- `filters.test.js` — report filter logic
+- `dates.test.js` — date parsing
+- `slug.test.js` — URL slug generation
 
-## CI Integration
+`actors/platts-scrap-full-news/tests/eventBus.test.js` mirrors the reports eventBus test (the two actors keep `EventBus` in sync).
 
-**No explicit GitHub Actions workflow found in repo**
+ESM, `import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'`, no global setup file — each spec isolates its own env and mocks.
 
-**Local testing:**
-```bash
-pytest tests/                          # All tests
-pytest tests/ -v                       # Verbose
-pytest tests/ --tb=short               # Shorter tracebacks
-```
+## TDD Evidence (2026-04-22 queue bulk ops)
 
-**Expected pytest output:**
-```
-tests/test_contacts_repo.py::test_contact_is_active_true_for_ativo PASSED
-tests/test_contacts_repo.py::test_list_active_filters_by_status_and_orders PASSED
-...
-```
+Recent commits show strict TDD cadence for the `/queue` select-mode + bulk ops feature:
+- `27c268f docs(spec): /queue bulk archive+discard design`
+- `5c2329b docs(plan): /queue bulk actions implementation — 7 tasks`
+- `e9901c3 feat(queue): add queue_selection state module for bulk actions` (shipped with `test_queue_selection.py`)
+- `3c3332c refactor(queue_selection): atomic toggle + transactional pipelines`
+- `183e476 feat(curation): add bulk_archive and bulk_discard helpers` (shipped with `test_curation_redis_client.py` coverage)
+- `d873fa9 feat(bot): add 7 CallbackData classes for /queue select mode` (shipped with `test_bot_callback_data.py` roundtrip)
+- `f2897d9 / fa4b042 / 7e8f29f feat(queue): handlers ...` (each with `test_callbacks_queue.py` cases)
+- `f940166 fix(queue): singular/plural in select-mode header, order-sensitive + factory-parity tests`
+- `7d5f337 refactor(queue): bulk-op error recovery + singular/plural polish`
+- `38f59f3 fix(queue): preserve current page when toggling selection` (regression test `test_on_queue_sel_toggle_preserves_current_page`)
+
+Split-lock idempotency (commits `d4f3592`, `a13f9b7`, `43aa332`, `35629d4`) shipped with `test_baltic_ingestion_idempotency.py` + `test_morning_check_idempotency.py` regression guards.
+
+## Known Gaps & Flaky-Test Handling
+
+- **Dashboard coverage: 0%.** No Jest config, no Playwright. High-priority gap since the dashboard renders production data.
+- **Mini-app HTML templates:** handler tests (`test_mini_*.py`) assert on route logic, not the Jinja output.
+- **Two actors have no tests:** `platts-news-only`, `platts-scrap-price` (`"test"` script exits 1 with a TODO string).
+- **No flake retry config.** Tests are expected deterministic; `fakeredis` + `monkeypatch.delenv` patterns isolate env/state. The `_send_streak_alert` stub in `test_state_store.py` was added after a real-world leak — treat every Telegram/Supabase/HTTP boundary as a must-stub surface.
+- **No CI enforcement** — contributors must run `pytest` locally before pushing.
 
 ---
 

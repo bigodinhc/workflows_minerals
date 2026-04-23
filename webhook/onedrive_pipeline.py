@@ -176,6 +176,25 @@ async def process_notification(payload: dict) -> None:
 
         bus.emit("delta_query_done", detail={"item_count": len(items)})
 
+        # Bootstrap guard: on the FIRST webhook for this folder, the Graph delta
+        # query returns the full folder snapshot (not just changes). Without this
+        # check we'd send an approval card for every historical PDF already in the
+        # folder. Instead, mark every existing PDF as "seen" silently, persist
+        # a bootstrap flag, and notify only on subsequent deltas.
+        bootstrap_done = await redis_client.get("onedrive:bootstrap_done")
+        if not bootstrap_done:
+            pdf_count = 0
+            for item in items:
+                if _is_pdf_file(item):
+                    await _mark_seen(redis_client, item["id"])
+                    pdf_count += 1
+            await redis_client.set("onedrive:bootstrap_done", "1")
+            bus.emit(
+                "bootstrap_complete",
+                detail={"baseline_pdfs": pdf_count, "total_items": len(items)},
+            )
+            return
+
         contacts_repo = ContactsRepo()
         bot = get_bot()
         admin_chat_id = int(os.environ["TELEGRAM_CHAT_ID"])

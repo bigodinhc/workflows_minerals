@@ -80,8 +80,9 @@ def test_creates_subscription_when_none_match_our_url():
     kwargs = graph.create_subscription.call_args.kwargs
     assert kwargs["notification_url"] == "https://example.com/onedrive/notify"
     assert kwargs["client_state"] == "cstate-xyz"
-    assert "drive-test" in kwargs["resource"]
-    assert "/SIGCM/test" in kwargs["resource"]
+    # Graph subscriptions only support drive-root as resource; folder
+    # scoping happens via delta query in the pipeline, not the subscription.
+    assert kwargs["resource"] == "/drives/drive-test/root"
 
 
 def test_creates_subscription_when_zero_subs_exist():

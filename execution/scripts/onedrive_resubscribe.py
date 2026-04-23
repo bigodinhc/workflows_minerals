@@ -44,7 +44,11 @@ def _run() -> None:
     logger.info(f"found {len(our_subs)} subs matching our URL ({len(subs)} total)")
 
     if not our_subs:
-        resource = f"/drives/{drive_id}/root:{folder_path}"
+        # Graph subscriptions only support drive-root as the resource path
+        # (folder-scoped subscriptions are not supported). The pipeline
+        # filters by folder_path via the delta query, so drive-wide
+        # notifications are fine — they just trigger a folder-scoped delta.
+        resource = f"/drives/{drive_id}/root"
         created = graph.create_subscription(
             resource=resource,
             notification_url=our_url,

@@ -1,0 +1,128 @@
+"""Document (PDF) fan-out dispatcher for the OneDrive approval flow.
+
+Loads the Redis approval state, refreshes the Graph downloadUrl if stale,
+fans out to the selected list (or all active contacts for ALL_CODE) with
+concurrency=5, and applies per-recipient idempotency keys.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import os
+from datetime import datetime, timezone
+from typing import Optional
+
+from execution.core.logger import WorkflowLogger
+from execution.integrations.contacts_repo import ContactsRepo
+from execution.integrations.graph_client import GraphClient
+from execution.integrations.uazapi_client import UazapiClient
+
+
+ALL_CODE = "__all__"
+CONCURRENCY = 5
+DOWNLOAD_URL_STALE_AFTER_SECONDS = 50 * 60     # 50 min safety margin on Graph's ~1h TTL
+IDEMPOTENCY_TTL_SECONDS = 24 * 3600
+
+
+class ApprovalExpiredError(Exception):
+    """approval:{uuid} key is missing in Redis (TTL expired or never existed)."""
+
+
+def _redis():
+    """Returns an async Redis client. Factored out for test patchability."""
+    from redis.asyncio import Redis
+    return Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+
+
+def _idempotency_key(phone: str, drive_item_id: str) -> str:
+    raw = f"{phone}|{drive_item_id}".encode()
+    return f"idempotency:{hashlib.sha1(raw).hexdigest()}"
+
+
+async def _claim_idempotency(redis_client, phone: str, drive_item_id: str) -> bool:
+    """True if this (phone, drive_item_id) hasn't been sent before (claim succeeds)."""
+    key = _idempotency_key(phone, drive_item_id)
+    return bool(await redis_client.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS))
+
+
+def _is_stale(iso_ts: str) -> bool:
+    try:
+        fetched = datetime.fromisoformat(iso_ts)
+        age = datetime.now(timezone.utc) - fetched
+        return age.total_seconds() > DOWNLOAD_URL_STALE_AFTER_SECONDS
+    except Exception:
+        return True
+
+
+async def _refresh_download_url(redis_client, approval_id: str, state: dict) -> dict:
+    """Fetch a fresh downloadUrl via Graph, update Redis state, return new state."""
+    graph = GraphClient()
+    item = graph.get_item(state["drive_id"], state["drive_item_id"])
+    new_state = {
+        **state,
+        "downloadUrl": item["@microsoft.graph.downloadUrl"],
+        "downloadUrl_fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await redis_client.set(
+        f"approval:{approval_id}",
+        json.dumps(new_state),
+        keepttl=True,
+    )
+    return new_state
+
+
+async def dispatch_document(
+    approval_id: str,
+    list_code: str,
+) -> dict:
+    """Fan-out PDF broadcast. Returns counter dict for caller to display."""
+    logger = WorkflowLogger("DispatchDocument")
+    redis_client = _redis()
+
+    raw = await redis_client.get(f"approval:{approval_id}")
+    if not raw:
+        raise ApprovalExpiredError(approval_id)
+    state = json.loads(raw)
+
+    if _is_stale(state.get("downloadUrl_fetched_at", "")):
+        state = await _refresh_download_url(redis_client, approval_id, state)
+
+    contacts_repo = ContactsRepo()
+    if list_code == ALL_CODE:
+        recipients = contacts_repo.list_active()
+    else:
+        recipients = contacts_repo.list_by_list_code(list_code)
+
+    uazapi = UazapiClient()
+    sem = asyncio.Semaphore(CONCURRENCY)
+    results: dict = {"sent": 0, "failed": 0, "skipped": 0, "errors": []}
+
+    async def _send_one(contact):
+        async with sem:
+            claimed = await _claim_idempotency(
+                redis_client, contact.phone_uazapi, state["drive_item_id"]
+            )
+            if not claimed:
+                results["skipped"] += 1
+                return
+            try:
+                await asyncio.to_thread(
+                    uazapi.send_document,
+                    number=contact.phone_uazapi,
+                    file_url=state["downloadUrl"],
+                    doc_name=state["filename"],
+                )
+                results["sent"] += 1
+            except Exception as exc:
+                logger.error(
+                    f"send_document to {contact.phone_uazapi} failed: {exc}"
+                )
+                results["failed"] += 1
+                results["errors"].append({
+                    "phone": contact.phone_uazapi,
+                    "error": str(exc)[:200],
+                })
+
+    await asyncio.gather(*[_send_one(c) for c in recipients])
+    return results

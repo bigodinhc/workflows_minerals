@@ -144,6 +144,15 @@ class Contact:
         return d
 
 
+@dataclass(frozen=True)
+class ContactList:
+    """A named broadcast group. Used by onedrive_pipeline approval cards."""
+    code: str
+    label: str
+    member_count: int
+    description: Optional[str] = None
+
+
 # ── Repository ──
 
 class ContactsRepo:
@@ -178,6 +187,68 @@ class ContactsRepo:
             .execute()
         )
         return [self._row_to_contact(r) for r in (resp.data or [])]
+
+    def list_lists(self) -> "list[ContactList]":
+        """Return every contact_list with its current active-member count."""
+        lists_resp = (
+            self.client.table("contact_lists")
+            .select("*")
+            .order("code")
+            .execute()
+        )
+        rows = lists_resp.data or []
+
+        members_resp = (
+            self.client.table("contact_list_members")
+            .select("list_code, contact_phone")
+            .execute()
+        )
+        members = members_resp.data or []
+
+        # Only count members whose status is 'ativo'.
+        active_resp = (
+            self.client.table("contacts")
+            .select("phone_uazapi")
+            .eq("status", "ativo")
+            .execute()
+        )
+        active_phones = {r["phone_uazapi"] for r in (active_resp.data or [])}
+
+        counts: dict[str, int] = {}
+        for m in members:
+            if m.get("contact_phone") in active_phones:
+                counts[m["list_code"]] = counts.get(m["list_code"], 0) + 1
+
+        return [
+            ContactList(
+                code=r["code"],
+                label=r["label"],
+                description=r.get("description"),
+                member_count=counts.get(r["code"], 0),
+            )
+            for r in rows
+        ]
+
+    def list_by_list_code(self, code: str) -> "list[Contact]":
+        """Return active `Contact` rows subscribed to the given list code."""
+        membership_resp = (
+            self.client.table("contact_list_members")
+            .select("contact_phone")
+            .eq("list_code", code)
+            .execute()
+        )
+        phones = [m["contact_phone"] for m in (membership_resp.data or [])]
+        if not phones:
+            return []
+
+        rows_resp = (
+            self.client.table("contacts")
+            .select("*")
+            .in_("phone_uazapi", phones)
+            .eq("status", "ativo")
+            .execute()
+        )
+        return [self._row_to_contact(r) for r in (rows_resp.data or [])]
 
     def list_all(
         self,

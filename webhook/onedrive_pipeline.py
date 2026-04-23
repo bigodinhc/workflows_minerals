@@ -207,17 +207,21 @@ async def process_notification(payload: dict) -> None:
                 continue
             await _mark_seen(redis_client, item["id"])
 
+            # Delta responses omit @microsoft.graph.downloadUrl — we must
+            # fetch the full driveItem to get a signed download URL.
+            full_item = graph.get_item(drive_id, item["id"])
+
             approval_id = await create_approval_state(
-                redis_client, item, drive_id=drive_id, trace_id=bus.trace_id
+                redis_client, full_item, drive_id=drive_id, trace_id=bus.trace_id
             )
             bus.emit("approval_created", detail={
                 "approval_id": approval_id,
-                "filename": item["name"],
+                "filename": full_item.get("name", item.get("name", "?")),
             })
 
             await bot.send_message(
                 chat_id=admin_chat_id,
-                text=build_approval_text(item),
+                text=build_approval_text(full_item),
                 reply_markup=build_approval_keyboard(approval_id, contacts_repo),
                 parse_mode="Markdown",
             )

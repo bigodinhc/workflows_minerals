@@ -90,7 +90,9 @@ async def dispatch_document(
         raise ApprovalExpiredError(approval_id)
     state = json.loads(raw)
 
-    if _is_stale(state.get("downloadUrl_fetched_at", "")):
+    # Refresh downloadUrl when stale OR missing. Older approvals created
+    # before the 'get_item in pipeline' fix may have an empty downloadUrl.
+    if not state.get("downloadUrl") or _is_stale(state.get("downloadUrl_fetched_at", "")):
         state = await _refresh_download_url(redis_client, approval_id, state)
 
     contacts_repo = ContactsRepo()

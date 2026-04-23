@@ -65,10 +65,13 @@ def _idempotency_key(phone: str, draft_id: str, message: str) -> str:
     return f"whatsapp:sent:{digest}"
 
 
+BROADCAST_LIST_CODE = "minerals_report"
+
+
 async def get_contacts():
-    """Fetch active WhatsApp contacts from Supabase (async wrapper)."""
+    """Fetch WhatsApp broadcast recipients (scoped to minerals_report list)."""
     def _read():
-        return ContactsRepo().list_active()
+        return ContactsRepo().list_by_list_code(BROADCAST_LIST_CODE)
     return await asyncio.to_thread(_read)
 
 

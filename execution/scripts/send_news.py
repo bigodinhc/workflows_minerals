@@ -57,7 +57,7 @@ def main():
         bus.emit("step", label="Buscando contatos")
         try:
             contacts_repo = ContactsRepo()
-            contacts = contacts_repo.list_active()
+            contacts = contacts_repo.list_by_list_code("minerals_report")
         except Exception as e:
             logger.critical(f"Failed to fetch contacts: {e}")
             progress.finish_empty("falha na ingestao")

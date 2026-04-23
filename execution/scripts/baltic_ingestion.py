@@ -362,7 +362,9 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
 
         bus.emit("step", label="Enviando WhatsApp")
         contacts_repo = ContactsRepo()
-        contacts = await asyncio.to_thread(contacts_repo.list_active)
+        contacts = await asyncio.to_thread(
+            contacts_repo.list_by_list_code, "minerals_report"
+        )
         uazapi = UazapiClient()
 
         delivery_contacts = [build_delivery_contact(c) for c in contacts]

@@ -138,7 +138,7 @@ def main():
         # 3. Fetch Contacts
         logger.info("Fetching contacts...")
         contacts_repo = ContactsRepo()
-        contacts = contacts_repo.list_active()
+        contacts = contacts_repo.list_by_list_code("minerals_report")
         
         if not contacts:
             logger.warning("No contacts found to send to.")

@@ -90,7 +90,7 @@ def patched_integrations(monkeypatch):
     claude_instance.extract_data_from_pdf.return_value = VALID_CLAUDE_DATA
 
     contacts_instance = MagicMock()
-    contacts_instance.list_active.return_value = [
+    contacts_instance.list_by_list_code.return_value = [
         MagicMock(name="Contact1", phone_uazapi="5511999999999"),
     ]
 

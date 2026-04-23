@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callback_data import OneDriveApprove, OneDriveConfirm, OneDriveDiscard
 from bot.middlewares.auth import RoleMiddleware
+from execution.core.event_bus import EventBus
 from execution.integrations.contacts_repo import ContactsRepo
 
 from dispatch_document import dispatch_document, ALL_CODE
@@ -60,6 +61,12 @@ async def on_approve(query: CallbackQuery, callback_data: OneDriveApprove):
         await query.answer(text="⚠️ Aprovação expirada", show_alert=True)
         return
 
+    bus = EventBus(workflow="onedrive_webhook", trace_id=state.get("trace_id"))
+    bus.emit("approval_clicked", detail={
+        "approval_id": callback_data.approval_id,
+        "list_code": callback_data.list_code,
+    })
+
     contacts_repo = ContactsRepo()
     label, count = _list_label(callback_data.list_code, contacts_repo)
 
@@ -106,6 +113,12 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
         await query.answer(text="Já em andamento…", show_alert=True)
         return
 
+    bus = EventBus(workflow="onedrive_webhook", trace_id=state.get("trace_id"))
+    bus.emit("approval_approved", detail={
+        "approval_id": callback_data.approval_id,
+        "list_code": callback_data.list_code,
+    })
+
     state = {**state, "status": "dispatching"}
     await _save_state(redis_client, callback_data.approval_id, state)
 
@@ -127,6 +140,10 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
         )
     except Exception as exc:
         logger.exception("dispatch_document failed")
+        bus.emit("dispatch_failed", level="error", detail={
+            "approval_id": callback_data.approval_id,
+            "error": str(exc)[:200],
+        })
         await query.bot.edit_message_text(
             text=f"❌ Falha no envio: {type(exc).__name__}: {str(exc)[:200]}",
             chat_id=query.message.chat.id,
@@ -134,6 +151,13 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
             parse_mode=None,
         )
         return
+
+    bus.emit("dispatch_completed", detail={
+        "approval_id": callback_data.approval_id,
+        "sent": result["sent"],
+        "failed": result["failed"],
+        "skipped": result["skipped"],
+    })
 
     total = result["sent"] + result["failed"] + result["skipped"]
     summary = (
@@ -160,6 +184,10 @@ async def on_discard(query: CallbackQuery, callback_data: OneDriveDiscard):
     redis_client = _redis()
     state = await _load_state(redis_client, callback_data.approval_id)
     filename = state.get("filename", "(expirado)") if state else "(expirado)"
+
+    if state:
+        bus = EventBus(workflow="onedrive_webhook", trace_id=state.get("trace_id"))
+        bus.emit("approval_discarded", detail={"approval_id": callback_data.approval_id})
 
     await redis_client.delete(f"approval:{callback_data.approval_id}")
 

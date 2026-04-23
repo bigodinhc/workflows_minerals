@@ -13,6 +13,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+from execution.core.event_bus import EventBus
 from execution.core.logger import WorkflowLogger
 from execution.integrations.contacts_repo import ContactsRepo
 from execution.integrations.graph_client import GraphClient
@@ -75,6 +76,7 @@ async def _refresh_download_url(redis_client, approval_id: str, state: dict) -> 
 async def dispatch_document(
     approval_id: str,
     list_code: str,
+    trace_id: str | None = None,
 ) -> dict:
     """Fan-out PDF broadcast. Returns counter dict for caller to display."""
     logger = WorkflowLogger("DispatchDocument")
@@ -93,6 +95,14 @@ async def dispatch_document(
         recipients = contacts_repo.list_active()
     else:
         recipients = contacts_repo.list_by_list_code(list_code)
+
+    bus_trace_id = trace_id or state.get("trace_id")
+    bus = EventBus(workflow="onedrive_webhook", trace_id=bus_trace_id)
+    bus.emit("dispatch_started", detail={
+        "approval_id": approval_id,
+        "list_code": list_code,
+        "recipients": len(recipients),
+    })
 
     uazapi = UazapiClient()
     sem = asyncio.Semaphore(CONCURRENCY)
@@ -125,4 +135,10 @@ async def dispatch_document(
                 })
 
     await asyncio.gather(*[_send_one(c) for c in recipients])
+    bus.emit("dispatch_completed", detail={
+        "approval_id": approval_id,
+        "sent": results["sent"],
+        "failed": results["failed"],
+        "skipped": results["skipped"],
+    })
     return results

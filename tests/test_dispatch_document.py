@@ -141,3 +141,21 @@ async def test_dispatch_missing_approval_raises():
     with patch("dispatch_document._redis", return_value=empty):
         with pytest.raises(ApprovalExpiredError):
             await dispatch_document("missing-id", "minerals_report")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_emits_started_and_completed_events(
+    redis_client, fresh_approval_state, mock_uazapi, mock_contacts_repo
+):
+    from dispatch_document import dispatch_document
+    await redis_client.set("approval:abc12", json.dumps(fresh_approval_state))
+    bus_instance = MagicMock()
+    bus_class = MagicMock(return_value=bus_instance)
+    with patch("dispatch_document.UazapiClient", return_value=mock_uazapi), \
+         patch("dispatch_document.ContactsRepo", return_value=mock_contacts_repo), \
+         patch("dispatch_document._redis", return_value=redis_client), \
+         patch("dispatch_document.EventBus", bus_class):
+        await dispatch_document("abc12", "minerals_report")
+    emitted_events = [call.args[0] for call in bus_instance.emit.call_args_list]
+    assert "dispatch_started" in emitted_events
+    assert "dispatch_completed" in emitted_events

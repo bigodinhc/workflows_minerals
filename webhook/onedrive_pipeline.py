@@ -12,6 +12,7 @@ Responsibilities:
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import uuid
@@ -64,7 +65,7 @@ def _now_iso() -> str:
 
 
 async def create_approval_state(
-    redis_client, item: dict, drive_id: str
+    redis_client, item: dict, drive_id: str, trace_id: str | None = None
 ) -> str:
     approval_id = uuid.uuid4().hex[:12]     # 12-char keeps CallbackData under 64 bytes
     state = {
@@ -76,6 +77,7 @@ async def create_approval_state(
         "downloadUrl_fetched_at": _now_iso(),
         "status": "pending",
         "created_at": _now_iso(),
+        "trace_id": trace_id,
     }
     await redis_client.set(
         f"approval:{approval_id}",
@@ -130,11 +132,15 @@ def build_approval_text(item: dict) -> str:
 # ── Notification validation ──
 
 def validate_notification(payload: dict, expected_client_state: str) -> bool:
-    """Every notification in payload['value'] must carry our clientState."""
+    """Every notification in payload['value'] must carry our clientState (constant-time compare)."""
     values = payload.get("value", [])
     if not values:
         return False
-    return all(v.get("clientState") == expected_client_state for v in values)
+    expected = expected_client_state or ""
+    return all(
+        hmac.compare_digest(v.get("clientState") or "", expected)
+        for v in values
+    )
 
 
 # ── Main entrypoint (called from routes/onedrive.py) ──
@@ -183,7 +189,7 @@ async def process_notification(payload: dict) -> None:
             await _mark_seen(redis_client, item["id"])
 
             approval_id = await create_approval_state(
-                redis_client, item, drive_id=drive_id
+                redis_client, item, drive_id=drive_id, trace_id=bus.trace_id
             )
             bus.emit("approval_created", detail={
                 "approval_id": approval_id,

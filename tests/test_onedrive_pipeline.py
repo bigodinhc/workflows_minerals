@@ -133,3 +133,13 @@ async def test_process_notification_accepts_correct_client_state():
     from onedrive_pipeline import validate_notification
     payload = {"value": [{"clientState": "GOOD"}, {"clientState": "GOOD"}]}
     assert validate_notification(payload, expected_client_state="GOOD") is True
+
+
+@pytest.mark.asyncio
+async def test_create_approval_persists_trace_id(redis_client, sample_pdf_item):
+    from onedrive_pipeline import create_approval_state
+    approval_id = await create_approval_state(
+        redis_client, sample_pdf_item, drive_id="drive-test", trace_id="trace-abc"
+    )
+    data = json.loads(await redis_client.get(f"approval:{approval_id}"))
+    assert data["trace_id"] == "trace-abc"

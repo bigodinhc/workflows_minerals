@@ -145,3 +145,20 @@ class QueueBulkConfirm(CallbackData, prefix="q_bulkok"):
 class QueueBulkCancel(CallbackData, prefix="q_bulkno"):
     """Cancel confirmation, return to select-mode view."""
     pass
+
+
+class OneDriveApprove(CallbackData, prefix="od_ap"):
+    """First click from approval card — admin picked a list (or '__all__')."""
+    approval_id: str       # UUID of Redis approval:{uuid} key
+    list_code: str         # contact_lists.code OR '__all__'
+
+
+class OneDriveConfirm(CallbackData, prefix="od_cf"):
+    """Second click — admin confirmed the envio on the confirmation screen."""
+    approval_id: str
+    list_code: str
+
+
+class OneDriveDiscard(CallbackData, prefix="od_dc"):
+    """Admin clicked Descartar on the approval card."""
+    approval_id: str

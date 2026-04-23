@@ -152,16 +152,20 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
         )
         return
 
-    bus.emit("dispatch_completed", detail={
-        "approval_id": callback_data.approval_id,
-        "sent": result["sent"],
-        "failed": result["failed"],
-        "skipped": result["skipped"],
-    })
+    # (dispatch_completed is emitted inside dispatch_document; no duplicate emit here)
 
     total = result["sent"] + result["failed"] + result["skipped"]
+    if result["failed"] and not result["sent"]:
+        icon = "❌"
+        header = "Falhou"
+    elif result["failed"]:
+        icon = "⚠️"
+        header = "Parcial"
+    else:
+        icon = "✅"
+        header = "Enviado"
     summary = (
-        f"✅ *Enviado* — {state['filename']}\n"
+        f"{icon} *{header}* — {state['filename']}\n"
         f"Lista: {label}\n"
         f"{result['sent']}/{total} sucesso"
     )
@@ -169,6 +173,11 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
         summary += f" · {result['failed']} falhas"
     if result["skipped"]:
         summary += f" · {result['skipped']} já enviados antes"
+
+    # Surface first error reason if everything failed
+    if result["failed"] and not result["sent"] and result.get("errors"):
+        first = result["errors"][0]
+        summary += f"\n\n⚠️ Erro: `{first.get('error','')[:200]}`"
 
     await query.bot.edit_message_text(
         text=summary,

@@ -129,10 +129,20 @@ async def dispatch_document(
                     f"send_document to {contact.phone_uazapi} failed: {exc}"
                 )
                 results["failed"] += 1
+                err_str = str(exc)[:300]
                 results["errors"].append({
                     "phone": contact.phone_uazapi,
-                    "error": str(exc)[:200],
+                    "error": err_str,
                 })
+                bus.emit(
+                    "send_failed",
+                    level="error",
+                    detail={
+                        "phone": contact.phone_uazapi,
+                        "error": err_str,
+                        "exc_type": type(exc).__name__,
+                    },
+                )
 
     await asyncio.gather(*[_send_one(c) for c in recipients])
     bus.emit("dispatch_completed", detail={

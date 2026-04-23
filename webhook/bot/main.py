@@ -35,11 +35,13 @@ from bot.routers.callbacks_queue import callbacks_queue_router
 from bot.routers.callbacks_menu import callbacks_menu_router
 from bot.routers.callbacks_contacts import callbacks_contacts_router
 from bot.routers.callbacks_workflows import callbacks_workflows_router
+from bot.routers.callbacks_onedrive import callbacks_onedrive_router
 from bot.routers.messages import message_router, reply_kb_router
 from routes.api import routes as api_routes
 from routes.preview import routes as preview_routes
 from routes.mini_api import routes as mini_api_routes
 from routes.mini_static import routes as mini_static_routes
+from routes.onedrive import setup_routes as setup_onedrive_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -88,6 +90,7 @@ def create_app() -> web.Application:
     dp.include_router(callbacks_menu_router)       # main menu switchboard
     dp.include_router(callbacks_contacts_router)   # contact admin callbacks
     dp.include_router(callbacks_workflows_router)  # workflow trigger + nop callbacks
+    dp.include_router(callbacks_onedrive_router)   # onedrive approve/confirm/discard callbacks
     dp.include_router(reply_kb_router)      # reply keyboard text (admin + subscriber)
     dp.include_router(message_router)       # FSM + catch-all text (admin)
 
@@ -105,6 +108,7 @@ def create_app() -> web.Application:
     app.router.add_routes(preview_routes)
     app.router.add_routes(mini_api_routes)
     app.router.add_routes(mini_static_routes)
+    setup_onedrive_routes(app)
 
     # Mount Aiogram webhook handler
     bot = get_bot()

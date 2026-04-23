@@ -45,6 +45,8 @@ _TAIL_KNOWN_WORKFLOWS = frozenset(
         "platts_scrap_reports",
         "rebuild_dedup",
         "watchdog",
+        "onedrive_resubscribe",
+        "onedrive_webhook",
     }
 )
 

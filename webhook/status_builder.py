@@ -18,6 +18,7 @@ ALL_WORKFLOWS = [
     "baltic_ingestion",
     "market_news",
     "rationale_news",
+    "onedrive_resubscribe",
 ]
 
 

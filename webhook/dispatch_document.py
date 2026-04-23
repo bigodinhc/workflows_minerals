@@ -7,11 +7,14 @@ concurrency=5, and applies per-recipient idempotency keys.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
 from datetime import datetime, timezone
 from typing import Optional
+
+import requests
 
 from execution.core.event_bus import EventBus
 from execution.core.logger import WorkflowLogger
@@ -104,6 +107,40 @@ async def dispatch_document(
         "recipients": len(recipients),
     })
 
+    # Download the PDF once on our side and send it as base64 to Uazapi.
+    # Passing the raw Graph downloadUrl to Uazapi triggers 500 errors
+    # (Uazapi's server can't reliably fetch SharePoint-signed URLs),
+    # so we proxy the bytes through ourselves.
+    def _download_pdf() -> str:
+        r = requests.get(state["downloadUrl"], timeout=60, stream=False)
+        r.raise_for_status()
+        return base64.b64encode(r.content).decode("ascii")
+
+    try:
+        pdf_b64 = await asyncio.to_thread(_download_pdf)
+        bus.emit("pdf_downloaded", detail={
+            "approval_id": approval_id,
+            "bytes_b64": len(pdf_b64),
+        })
+    except Exception as exc:
+        logger.error(f"PDF download failed: {exc}")
+        bus.emit("pdf_download_failed", level="error", detail={
+            "approval_id": approval_id,
+            "error": str(exc)[:300],
+        })
+        bus.emit("dispatch_completed", detail={
+            "approval_id": approval_id,
+            "sent": 0,
+            "failed": len(recipients),
+            "skipped": 0,
+        })
+        return {
+            "sent": 0,
+            "failed": len(recipients),
+            "skipped": 0,
+            "errors": [{"phone": "*", "error": f"download: {str(exc)[:250]}"}],
+        }
+
     uazapi = UazapiClient()
     sem = asyncio.Semaphore(CONCURRENCY)
     results: dict = {"sent": 0, "failed": 0, "skipped": 0, "errors": []}
@@ -120,7 +157,7 @@ async def dispatch_document(
                 await asyncio.to_thread(
                     uazapi.send_document,
                     number=contact.phone_uazapi,
-                    file_url=state["downloadUrl"],
+                    file_url=pdf_b64,
                     doc_name=state["filename"],
                 )
                 results["sent"] += 1

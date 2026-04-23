@@ -28,6 +28,16 @@ def fresh_approval_state():
     }
 
 
+@pytest.fixture(autouse=True)
+def mock_pdf_download():
+    """Stub requests.get so tests never actually hit the network."""
+    fake_resp = MagicMock()
+    fake_resp.content = b"%PDF-1.4 fake-pdf-bytes"
+    fake_resp.raise_for_status = MagicMock()
+    with patch("dispatch_document.requests.get", return_value=fake_resp) as p:
+        yield p
+
+
 @pytest.fixture
 def mock_uazapi():
     client = MagicMock()
@@ -129,9 +139,13 @@ async def test_dispatch_refetches_stale_download_url(
          patch("dispatch_document._redis", return_value=redis_client):
         await dispatch_document("stale", "minerals_report")
     mock_graph.get_item.assert_called_once_with("drive-test", "item-abc")
-    # first send should use the fresh URL
+    # After refresh, the PDF is downloaded and sent as base64 — verify
+    # the dispatch attempted the send (with b64-encoded fake bytes) rather
+    # than passing the raw URL through.
+    assert mock_uazapi.send_document.call_count >= 1
     call_kwargs = mock_uazapi.send_document.call_args_list[0].kwargs
-    assert call_kwargs["file_url"] == "https://cdn.example.com/FRESH"
+    assert call_kwargs["file_url"] != "https://cdn.example.com/FRESH"
+    assert call_kwargs["file_url"]  # non-empty base64 string
 
 
 @pytest.mark.asyncio

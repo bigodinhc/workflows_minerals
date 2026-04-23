@@ -13,9 +13,10 @@ from aiogram.fsm.context import FSMContext
 
 from bot.callback_data import MenuAction
 from bot.middlewares.auth import RoleMiddleware
-from bot.states import WriterInput, BroadcastMessage
+from bot.states import AddContact, BroadcastMessage, ReprocessItem, WriterInput
 from reports_nav import reports_show_types
 from status_builder import build_status_message
+import contact_admin
 import query_handlers
 
 logger = logging.getLogger(__name__)
@@ -60,11 +61,19 @@ async def on_menu_action(query: CallbackQuery, callback_data: MenuAction, state:
         except Exception:
             pass
     elif target == "reprocess":
-        await query.message.answer("Uso: `/reprocess <item\\_id>`\n\nDigite o comando com o ID do item.")
+        await state.set_state(ReprocessItem.waiting_id)
+        await query.message.answer(
+            "🔁 *Reprocessar item*\n\n"
+            "Envie o `item\\_id` (🆔 no rodapé dos cards de curadoria).\n"
+            "Busca em staging (48h) e depois em archive (7d).\n\n"
+            "Use `/cancel` para cancelar.",
+        )
     elif target == "list":
-        await query.message.answer("Uso: `/list [busca]`\n\nDigite o comando ou `/list` pra ver todos.")
+        from bot.routers.commands import _render_list_view
+        await _render_list_view(chat_id, page=1, search=None)
     elif target == "add":
-        await query.message.answer("Uso: `/add`\n\nDigite o comando pra iniciar.")
+        await state.set_state(AddContact.waiting_data)
+        await query.message.answer(contact_admin.render_add_prompt())
     elif target == "writer":
         await state.set_state(WriterInput.waiting_text)
         await query.message.answer(

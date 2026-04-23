@@ -35,3 +35,8 @@ class BroadcastMessage(StatesGroup):
 class WriterInput(StatesGroup):
     """Admin wants to process text through the 3-agent pipeline."""
     waiting_text = State()
+
+
+class ReprocessItem(StatesGroup):
+    """Admin tapped 🔁 Reprocessar — must send the curation item_id."""
+    waiting_id = State()

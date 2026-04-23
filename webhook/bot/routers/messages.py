@@ -14,7 +14,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from bot.config import ANTHROPIC_API_KEY
-from bot.states import AdjustDraft, RejectReason, AddContact, BroadcastMessage, WriterInput
+from bot.states import AdjustDraft, RejectReason, AddContact, BroadcastMessage, ReprocessItem, WriterInput
 from bot.middlewares.auth import RoleMiddleware
 from bot.routers._helpers import process_news, process_adjustment
 import contact_admin
@@ -249,6 +249,26 @@ async def on_add_contact_data(message: Message, state: FSMContext):
         f"Total ativos: {active}",
     )
     await state.clear()
+
+
+# ── Reprocess input (via "🔁 Reprocessar" button) ──
+
+@message_router.message(ReprocessItem.waiting_id, F.text)
+async def on_reprocess_id(message: Message, state: FSMContext):
+    """Consume the item_id sent after pressing 🔁 Reprocessar."""
+    text = (message.text or "").strip()
+
+    if text.startswith("/"):
+        await state.clear()
+        return
+
+    if not text:
+        await message.answer("❌ Envie o `item_id` ou /cancel.")
+        return
+
+    await state.clear()
+    from bot.routers.commands import _reprocess_item
+    await _reprocess_item(message.chat.id, text)
 
 
 # ── Writer input (via "🖋️ Writer" button) ──

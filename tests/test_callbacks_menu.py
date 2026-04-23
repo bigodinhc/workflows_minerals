@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 
 from bot.callback_data import MenuAction
 from bot.routers.callbacks_menu import on_menu_action
-from bot.states import WriterInput, BroadcastMessage
+from bot.states import AddContact, BroadcastMessage, ReprocessItem, WriterInput
 
 
 @pytest.mark.asyncio
@@ -79,7 +79,7 @@ async def test_menu_action_broadcast_sets_fsm_broadcast_state(
 
 
 @pytest.mark.asyncio
-async def test_menu_action_reprocess_shows_usage_hint(
+async def test_menu_action_reprocess_sets_fsm_reprocess_state(
     mock_callback_query, fsm_context_in_state,
 ):
     query = mock_callback_query(chat_id=100)
@@ -87,9 +87,41 @@ async def test_menu_action_reprocess_shows_usage_hint(
 
     await on_menu_action(query, MenuAction(target="reprocess"), state)
 
+    state.set_state.assert_awaited_once_with(ReprocessItem.waiting_id)
     query.message.answer.assert_awaited_once()
-    msg = query.message.answer.await_args.args[0]
-    assert "/reprocess" in msg
+    prompt = query.message.answer.await_args.args[0]
+    assert "item" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_menu_action_list_renders_contacts_directly(
+    mock_callback_query, fsm_context_in_state, mocker,
+):
+    query = mock_callback_query(chat_id=100)
+    state = fsm_context_in_state()
+    render = mocker.patch("bot.routers.commands._render_list_view", new=AsyncMock())
+
+    await on_menu_action(query, MenuAction(target="list"), state)
+
+    render.assert_awaited_once_with(100, page=1, search=None)
+    query.message.answer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_menu_action_add_sets_fsm_add_contact_state(
+    mock_callback_query, fsm_context_in_state, mocker,
+):
+    query = mock_callback_query(chat_id=100)
+    state = fsm_context_in_state()
+    mocker.patch(
+        "bot.routers.callbacks_menu.contact_admin.render_add_prompt",
+        return_value="add prompt",
+    )
+
+    await on_menu_action(query, MenuAction(target="add"), state)
+
+    state.set_state.assert_awaited_once_with(AddContact.waiting_data)
+    query.message.answer.assert_awaited_once_with("add prompt")
 
 
 @pytest.mark.asyncio

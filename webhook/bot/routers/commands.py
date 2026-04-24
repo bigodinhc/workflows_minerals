@@ -328,25 +328,35 @@ async def cmd_menu_reply(message: Message):
 
 # ── Helpers ──
 
-async def _render_list_view(chat_id, page, search, message_id=None):
+_FILTER_TO_REPO = {
+    "t":  {"status": None,      "list_code": None},
+    "a":  {"status": "ativo",   "list_code": None},
+    "i":  {"status": "inativo", "list_code": None},
+    "mr": {"status": None,      "list_code": "minerals_report"},
+    "sf": {"status": None,      "list_code": "solid_fuels"},
+}
+
+
+async def _render_list_view(chat_id, page, search, message_id=None, filter="t"):
     """Fetch contacts from Supabase and render the list message with keyboard."""
     bot = get_bot()
     try:
         repo = ContactsRepo()
         per_page = 10
+        repo_kwargs = _FILTER_TO_REPO.get(filter, _FILTER_TO_REPO["t"])
         contacts, total_pages = await asyncio.to_thread(
-            repo.list_all, search=search, page=page, per_page=per_page,
+            repo.list_all, search=search, page=page, per_page=per_page, **repo_kwargs,
         )
         all_contacts, _ = await asyncio.to_thread(
-            repo.list_all, search=search, page=1, per_page=10_000,
+            repo.list_all, search=search, page=1, per_page=10_000, **repo_kwargs,
         )
         total = len(all_contacts)
 
         msg = contact_admin.render_list_message(
-            contacts, total=total, page=page, per_page=per_page, search=search,
+            contacts, total=total, page=page, per_page=per_page, search=search, filter=filter,
         )
         kb = contact_admin.build_list_keyboard(
-            contacts, page=page, total_pages=total_pages, search=search,
+            contacts, page=page, total_pages=total_pages, search=search, filter=filter,
         )
 
         if message_id is None:

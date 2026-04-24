@@ -227,24 +227,24 @@ def test_build_list_keyboard_has_toggle_buttons():
     ]
     kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None)
     rows = kb["inline_keyboard"]
-    # First 2 rows = contact toggles
-    assert rows[0][0]["callback_data"] == "tgl:5511111"
-    assert "✅" in rows[0][0]["text"]  # ativo = active
-    assert "A" in rows[0][0]["text"]
-    assert rows[1][0]["callback_data"] == "tgl:5511222"
-    assert "❌" in rows[1][0]["text"]  # inativo
+    # rows[0] = filter chips. Contact toggles start at rows[1].
+    assert rows[1][0]["callback_data"] == "tgl:5511111:t"
+    assert "✅" in rows[1][0]["text"]  # ativo = active
+    assert "A" in rows[1][0]["text"]
+    assert rows[2][0]["callback_data"] == "tgl:5511222:t"
+    assert "❌" in rows[2][0]["text"]  # inativo
 
 
 def test_build_list_keyboard_includes_nav_when_multiple_pages():
     contacts = [_contact("a", "A", "111", status="ativo")]
     kb = build_list_keyboard(contacts, page=2, total_pages=5, search=None)
     rows = kb["inline_keyboard"]
-    # Row order: contact, nav, bulk. Nav is second-to-last.
+    # Row order: chips, contact, nav, bulk. Nav is second-to-last.
     nav = rows[-2]
     callbacks = [b["callback_data"] for b in nav]
-    # ContactPage.pack() emits trailing ':' for empty search field
-    assert "pg:1:" in callbacks  # prev
-    assert "pg:3:" in callbacks  # next
+    # ContactPage.pack() emits trailing fields — search empty, filter "t"
+    assert "pg:1::t" in callbacks  # prev
+    assert "pg:3::t" in callbacks  # next
     assert "nop" in callbacks  # center indicator
 
 
@@ -254,20 +254,59 @@ def test_build_list_keyboard_nav_with_search():
     # nav is second-to-last; last is bulk row
     nav = kb["inline_keyboard"][-2]
     callbacks = [b["callback_data"] for b in nav]
-    assert "pg:1:joao" in callbacks
-    assert "pg:3:joao" in callbacks
+    assert "pg:1:joao:t" in callbacks
+    assert "pg:3:joao:t" in callbacks
 
 
 def test_build_list_keyboard_no_nav_when_single_page():
     contacts = [_contact("a", "A", "111", status="ativo")]
     kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None)
     # No nav row when total_pages == 1.
-    # Rows: 1 contact toggle + 1 bulk-action row = 2 total; no pg: callback.
+    # Rows: chips + 1 contact toggle + bulk-action row = 3 total; no pg: callback.
     callbacks = [btn["callback_data"] for row in kb["inline_keyboard"] for btn in row]
     assert not any(c.startswith("pg:") for c in callbacks), "nav row should be absent"
 
 
-def test_build_list_keyboard_empty_contacts():
+def test_build_list_keyboard_empty_contacts_still_shows_filter_chips():
     kb = build_list_keyboard([], page=1, total_pages=0, search=None)
-    # Empty keyboard is OK (caller uses render message instead)
-    assert kb["inline_keyboard"] == []
+    rows = kb["inline_keyboard"]
+    # Filter chip row always present so the user can change filter.
+    assert len(rows) == 1
+    codes = [b["callback_data"] for b in rows[0]]
+    assert codes == ["cf:t", "cf:a", "cf:i", "cf:mr", "cf:sf"]
+
+
+def test_build_list_keyboard_chip_row_highlights_active_filter():
+    contacts = [_contact("a", "A", "111", status="ativo")]
+    kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None, filter="a")
+    chips = kb["inline_keyboard"][0]
+    texts = {b["callback_data"]: b["text"] for b in chips}
+    assert texts["cf:a"].startswith("•") and texts["cf:a"].endswith("•")
+    # Inactive chips don't have bullet decorations.
+    assert not texts["cf:t"].startswith("•")
+    assert not texts["cf:mr"].startswith("•")
+
+
+def test_build_list_keyboard_propagates_filter_to_pagination_and_bulk():
+    contacts = [_contact("a", "A", "111", status="ativo")]
+    kb = build_list_keyboard(contacts, page=2, total_pages=3, search=None, filter="mr")
+    callbacks = [btn["callback_data"] for row in kb["inline_keyboard"] for btn in row]
+    # pg:<n>:<search>:<filter>
+    assert "pg:1::mr" in callbacks
+    assert "pg:3::mr" in callbacks
+    # bulk:<status>:<search>:<filter>
+    assert "bulk:ativo::mr" in callbacks
+    assert "bulk:inativo::mr" in callbacks
+    # Toggle buttons carry the filter too.
+    assert "tgl:111:mr" in callbacks
+
+
+def test_render_list_message_with_filter_adds_suffix():
+    contacts = [_contact("a", "A", "111")]
+    msg = render_list_message(contacts, total=1, page=1, per_page=10, search=None, filter="mr")
+    assert "Minerals" in msg
+
+
+def test_render_list_message_empty_with_filter_explains_scope():
+    msg = render_list_message([], total=0, page=1, per_page=10, search=None, filter="i")
+    assert "Inativos" in msg

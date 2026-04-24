@@ -151,6 +151,85 @@ def test_list_all_empty(fake_client):
     assert total_pages == 0
 
 
+def test_list_all_with_status_ativo_filters(fake_client):
+    q = FakeQuery([_row()], count=1)
+    _set_next_query(fake_client, q)
+
+    repo = ContactsRepo(client=fake_client)
+    repo.list_all(status="ativo", page=1, per_page=10)
+
+    assert ("eq", ("status", "ativo"), {}) in q.calls
+
+
+def test_list_all_with_status_inativo_filters(fake_client):
+    q = FakeQuery([_row(status="inativo")], count=1)
+    _set_next_query(fake_client, q)
+
+    repo = ContactsRepo(client=fake_client)
+    repo.list_all(status="inativo", page=1, per_page=10)
+
+    assert ("eq", ("status", "inativo"), {}) in q.calls
+
+
+def test_list_all_without_status_does_not_filter_by_status(fake_client):
+    q = FakeQuery([_row()], count=1)
+    _set_next_query(fake_client, q)
+
+    repo = ContactsRepo(client=fake_client)
+    repo.list_all(page=1, per_page=10)
+
+    eq_status_calls = [
+        c for c in q.calls
+        if c[0] == "eq" and c[1] and c[1][0] == "status"
+    ]
+    assert eq_status_calls == []
+
+
+def test_list_all_with_list_code_fetches_members_then_filters_contacts(fake_client):
+    members_q = FakeQuery([
+        {"contact_phone": "5511111111111"},
+        {"contact_phone": "5511222222222"},
+    ])
+    contacts_q = FakeQuery(
+        [_row(phone_uazapi="5511111111111"),
+         _row(phone_uazapi="5511222222222", name="Bob")],
+        count=2,
+    )
+    fake_client.table.side_effect = [members_q, contacts_q]
+
+    repo = ContactsRepo(client=fake_client)
+    contacts, total_pages = repo.list_all(list_code="minerals_report", page=1, per_page=10)
+
+    # Table calls: first contact_list_members, then contacts.
+    assert [c.args[0] for c in fake_client.table.call_args_list] == [
+        "contact_list_members", "contacts",
+    ]
+    # Members query filters by list_code.
+    assert ("eq", ("list_code", "minerals_report"), {}) in members_q.calls
+    # Contacts query restricts to active members of that list.
+    in_calls = [c for c in contacts_q.calls if c[0] == "in_"]
+    assert len(in_calls) == 1
+    assert in_calls[0][1][0] == "phone_uazapi"
+    assert set(in_calls[0][1][1]) == {"5511111111111", "5511222222222"}
+    assert ("eq", ("status", "ativo"), {}) in contacts_q.calls
+
+    assert len(contacts) == 2
+    assert total_pages == 1
+
+
+def test_list_all_with_list_code_empty_membership_returns_nothing(fake_client):
+    members_q = FakeQuery([])
+    fake_client.table.side_effect = [members_q]
+
+    repo = ContactsRepo(client=fake_client)
+    contacts, total_pages = repo.list_all(list_code="minerals_report", page=1, per_page=10)
+
+    assert contacts == []
+    assert total_pages == 0
+    # Must short-circuit — don't even query contacts.
+    assert fake_client.table.call_count == 1
+
+
 def test_get_by_phone_normalizes_input(fake_client):
     q = FakeQuery([_row()])
     _set_next_query(fake_client, q)

@@ -119,30 +119,57 @@ def render_add_prompt() -> str:
     )
 
 
+FILTER_LABELS = {
+    "t":  "Todos",
+    "a":  "✅ Ativos",
+    "i":  "❌ Inativos",
+    "mr": "📊 Minerals",
+    "sf": "🛢️ Fuels",
+}
+
+
 def render_list_message(contacts: list, total: int, page: int, per_page: int,
-                        search: Optional[str]) -> str:
+                        search: Optional[str], filter: str = "t") -> str:
     """Message text for /list. Renders the header — contacts go in keyboard buttons."""
+    filter_label = FILTER_LABELS.get(filter, FILTER_LABELS["t"])
+    filter_suffix = "" if filter == "t" else f" • {filter_label}"
+
     if not contacts:
         if search:
-            return f"📋 Nenhum contato encontrado pra \"{search}\""
+            return f"📋 Nenhum contato encontrado pra \"{search}\"{filter_suffix}"
+        if filter != "t":
+            return f"📋 Nenhum contato em {filter_label}"
         return "📋 Nenhum contato cadastrado. Use /add"
 
     import math
     total_pages = math.ceil(total / per_page) if per_page else 1
 
     if search:
-        header = f"📋 *RESULTADO BUSCA* \"{search}\" ({total})"
+        header = f"📋 *RESULTADO BUSCA* \"{search}\" ({total}){filter_suffix}"
     else:
-        header = f"📋 *CONTATOS* ({total}) — Página {page}/{total_pages}"
+        header = f"📋 *CONTATOS* ({total}){filter_suffix} — Página {page}/{total_pages}"
 
     return header + "\n\nToque pra ativar/desativar."
 
 
+def _build_filter_chip_row(current_filter: str) -> list:
+    """Row of 5 filter chips. Active chip wrapped in brackets."""
+    from bot.callback_data import ContactFilter
+    row = []
+    for code, label in FILTER_LABELS.items():
+        text = f"• {label} •" if code == current_filter else label
+        row.append({
+            "text": text,
+            "callback_data": ContactFilter(value=code).pack(),
+        })
+    return row
+
+
 def build_list_keyboard(contacts: list, page: int, total_pages: int,
-                        search: Optional[str]) -> dict:
+                        search: Optional[str], filter: str = "t") -> dict:
     """
-    Build inline_keyboard dict with one toggle button per contact,
-    plus bulk-action and nav rows.
+    Build inline_keyboard dict with a filter chip row, one toggle button
+    per contact, plus pagination + bulk-action rows.
 
     `contacts` is a list of execution.integrations.contacts_repo.Contact
     instances (dataclass with .name, .phone_uazapi, .status, etc.).
@@ -153,7 +180,7 @@ def build_list_keyboard(contacts: list, page: int, total_pages: int,
     # Local imports to avoid cycles when this module is imported at bot start.
     from bot.callback_data import ContactToggle, ContactPage, ContactBulk
 
-    rows = []
+    rows = [_build_filter_chip_row(filter)]
     search_for_pack = search or ""
 
     for c in contacts:
@@ -164,7 +191,7 @@ def build_list_keyboard(contacts: list, page: int, total_pages: int,
             label = label[:57] + "..."
         rows.append([{
             "text": label,
-            "callback_data": ContactToggle(phone=c.phone_uazapi).pack(),
+            "callback_data": ContactToggle(phone=c.phone_uazapi, flt=filter).pack(),
         }])
 
     # Pagination row (only when >1 page)
@@ -172,16 +199,16 @@ def build_list_keyboard(contacts: list, page: int, total_pages: int,
         prev_page = max(1, page - 1)
         next_page = min(total_pages, page + 1)
         rows.append([
-            {"text": "◀", "callback_data": ContactPage(page=prev_page, search=search_for_pack).pack()},
+            {"text": "◀", "callback_data": ContactPage(page=prev_page, search=search_for_pack, flt=filter).pack()},
             {"text": f"{page}/{total_pages}", "callback_data": "nop"},
-            {"text": "▶", "callback_data": ContactPage(page=next_page, search=search_for_pack).pack()},
+            {"text": "▶", "callback_data": ContactPage(page=next_page, search=search_for_pack, flt=filter).pack()},
         ])
 
     # Bulk-action row (always shown when there's at least one contact).
     if contacts:
         rows.append([
-            {"text": "✅ Ativar todos", "callback_data": ContactBulk(status="ativo", search=search_for_pack).pack()},
-            {"text": "❌ Desativar todos", "callback_data": ContactBulk(status="inativo", search=search_for_pack).pack()},
+            {"text": "✅ Ativar todos", "callback_data": ContactBulk(status="ativo", search=search_for_pack, flt=filter).pack()},
+            {"text": "❌ Desativar todos", "callback_data": ContactBulk(status="inativo", search=search_for_pack, flt=filter).pack()},
         ])
 
     return {"inline_keyboard": rows}

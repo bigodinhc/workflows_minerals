@@ -85,4 +85,46 @@ async def test_contact_page_renders_with_search_param(mock_callback_query, mocke
     await on_contact_page(query, ContactPage(page=2, search="joão"))
 
     query.answer.assert_awaited_with("")
-    render.assert_awaited_once_with(100, page=2, search="joão", message_id=200)
+    render.assert_awaited_once_with(100, page=2, search="joão", message_id=200, filter="t")
+
+
+@pytest.mark.asyncio
+async def test_contact_page_preserves_filter_when_paginating(mock_callback_query, mocker):
+    query = mock_callback_query(chat_id=100, message_id=200)
+    render = mocker.patch("bot.routers.commands._render_list_view", new=AsyncMock())
+
+    await on_contact_page(query, ContactPage(page=3, search="", flt="mr"))
+
+    render.assert_awaited_once_with(100, page=3, search=None, message_id=200, filter="mr")
+
+
+@pytest.mark.asyncio
+async def test_contact_filter_chip_re_renders_with_chosen_filter(mock_callback_query, mocker):
+    from bot.callback_data import ContactFilter
+    from bot.routers.callbacks_contacts import on_contact_filter
+
+    query = mock_callback_query(chat_id=100, message_id=200)
+    render = mocker.patch("bot.routers.commands._render_list_view", new=AsyncMock())
+
+    await on_contact_filter(query, ContactFilter(value="a"))
+
+    query.answer.assert_awaited_with("")
+    render.assert_awaited_once_with(100, page=1, search=None, message_id=200, filter="a")
+
+
+@pytest.mark.asyncio
+async def test_contact_toggle_preserves_filter_on_re_render(mock_callback_query, mocker):
+    query = mock_callback_query(chat_id=100, message_id=200)
+    returned_contact = _contact("João", "ativo")
+    mocker.patch(
+        "bot.routers.callbacks_contacts.ContactsRepo",
+        return_value=MagicMock(),
+    )
+    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=returned_contact))
+    render = mocker.patch("bot.routers.commands._render_list_view", new=AsyncMock())
+
+    await on_contact_toggle(query, ContactToggle(phone="+5511999", flt="i"))
+
+    render.assert_awaited_once_with(
+        100, page=1, search=None, message_id=200, filter="i",
+    )

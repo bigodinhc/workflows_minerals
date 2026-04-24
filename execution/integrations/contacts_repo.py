@@ -256,11 +256,34 @@ class ContactsRepo:
         search: Optional[str] = None,
         page: int = 1,
         per_page: int = 10,
+        status: Optional[str] = None,
+        list_code: Optional[str] = None,
     ) -> tuple:
-        """Paginated admin list, optional name search (ILIKE).
+        """Paginated admin list with optional filters.
+
+        `status`: restrict to rows with `status=status` ('ativo' | 'inativo').
+        `list_code`: restrict to active members of contact_list `<list_code>`.
+            Forces status='ativo' to match list_by_list_code semantics.
+
         Returns (rows_on_page, total_pages)."""
         import math
+
+        if list_code:
+            members_resp = (
+                self.client.table("contact_list_members")
+                .select("contact_phone")
+                .eq("list_code", list_code)
+                .execute()
+            )
+            phones = [m["contact_phone"] for m in (members_resp.data or [])]
+            if not phones:
+                return [], 0
+
         q = self.client.table("contacts").select("*", count="exact")
+        if list_code:
+            q = q.in_("phone_uazapi", phones).eq("status", "ativo")
+        elif status:
+            q = q.eq("status", status)
         if search:
             q = q.ilike("name", f"%{search}%")
         start = (page - 1) * per_page

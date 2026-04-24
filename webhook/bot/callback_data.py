@@ -58,11 +58,18 @@ class QueueOpen(CallbackData, prefix="queue_open"):
 
 class ContactToggle(CallbackData, prefix="tgl"):
     phone: str
+    flt: str = "t"  # "t" (todos) | "a" | "i" | "mr" | "sf"
 
 
 class ContactPage(CallbackData, prefix="pg"):
     page: int
     search: str = ""
+    flt: str = "t"
+
+
+class ContactFilter(CallbackData, prefix="cf"):
+    """Tap on a filter chip above the contact list."""
+    value: str  # "t" | "a" | "i" | "mr" | "sf"
 
 
 class WorkflowRun(CallbackData, prefix="wf_run"):
@@ -99,12 +106,14 @@ class ContactBulk(CallbackData, prefix="bulk"):
     """First tap on bulk activate/deactivate. Shows confirmation prompt."""
     status: str       # 'ativo' | 'inativo'
     search: str = ""
+    flt: str = "t"
 
 
 class ContactBulkConfirm(CallbackData, prefix="bulkok"):
     """Second tap — user confirmed the bulk action."""
     status: str       # 'ativo' | 'inativo'
     search: str = ""
+    flt: str = "t"
 
 
 class ContactBulkCancel(CallbackData, prefix="bulkno"):

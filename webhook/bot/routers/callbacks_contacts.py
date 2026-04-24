@@ -8,7 +8,7 @@ from aiogram import Router
 from aiogram.types import CallbackQuery
 
 from bot.callback_data import (
-    ContactToggle, ContactPage,
+    ContactToggle, ContactPage, ContactFilter,
     ContactBulk, ContactBulkConfirm, ContactBulkCancel,
 )
 from bot.middlewares.auth import RoleMiddleware
@@ -48,7 +48,7 @@ async def on_contact_toggle(query: CallbackQuery, callback_data: ContactToggle):
     await query.answer(toast)
     await _render_list_view(
         query.message.chat.id, page=1, search=None,
-        message_id=query.message.message_id,
+        message_id=query.message.message_id, filter=callback_data.flt,
     )
 
 
@@ -62,6 +62,19 @@ async def on_contact_page(query: CallbackQuery, callback_data: ContactPage):
     await _render_list_view(
         query.message.chat.id, page=callback_data.page,
         search=search, message_id=query.message.message_id,
+        filter=callback_data.flt,
+    )
+
+
+# ── Filter chip tap ──
+
+@callbacks_contacts_router.callback_query(ContactFilter.filter())
+async def on_contact_filter(query: CallbackQuery, callback_data: ContactFilter):
+    from bot.routers.commands import _render_list_view
+    await query.answer("")
+    await _render_list_view(
+        query.message.chat.id, page=1, search=None,
+        message_id=query.message.message_id, filter=callback_data.value,
     )
 
 
@@ -71,10 +84,12 @@ async def on_contact_page(query: CallbackQuery, callback_data: ContactPage):
 async def on_bulk_prompt(query: CallbackQuery, callback_data: ContactBulk):
     """First tap — count how many contacts match and show confirmation."""
     search = callback_data.search if callback_data.search else None
+    flt = callback_data.flt
+    repo_kwargs = _flt_to_repo_kwargs(flt)
     try:
         repo = ContactsRepo()
         all_rows, _ = await asyncio.to_thread(
-            repo.list_all, search=search, page=1, per_page=10_000,
+            repo.list_all, search=search, page=1, per_page=10_000, **repo_kwargs,
         )
     except Exception as e:
         logger.error(f"bulk count failed: {e}")
@@ -83,7 +98,13 @@ async def on_bulk_prompt(query: CallbackQuery, callback_data: ContactBulk):
 
     count = len(all_rows)
     verb = "ativar" if callback_data.status == "ativo" else "desativar"
-    scope = f' (filtro: "{search}")' if search else ""
+    scope_parts = []
+    if search:
+        scope_parts.append(f'busca: "{search}"')
+    if flt and flt != "t":
+        from contact_admin import FILTER_LABELS
+        scope_parts.append(f"filtro: {FILTER_LABELS.get(flt, flt)}")
+    scope = f" ({', '.join(scope_parts)})" if scope_parts else ""
     prompt = f"Confirma {verb} {count} contatos{scope}?"
 
     confirm_kb = {
@@ -93,6 +114,7 @@ async def on_bulk_prompt(query: CallbackQuery, callback_data: ContactBulk):
                 "callback_data": ContactBulkConfirm(
                     status=callback_data.status,
                     search=callback_data.search,
+                    flt=flt,
                 ).pack(),
             },
             {
@@ -126,7 +148,7 @@ async def on_bulk_confirm(query: CallbackQuery, callback_data: ContactBulkConfir
     await query.answer(f"✅ {count} contatos {verb}")
     await _render_list_view(
         query.message.chat.id, page=1, search=search,
-        message_id=query.message.message_id,
+        message_id=query.message.message_id, filter=callback_data.flt,
     )
 
 
@@ -140,3 +162,9 @@ async def on_bulk_cancel(query: CallbackQuery, callback_data: ContactBulkCancel)
         query.message.chat.id, page=1, search=None,
         message_id=query.message.message_id,
     )
+
+
+def _flt_to_repo_kwargs(flt: str) -> dict:
+    """Translate short filter code → ContactsRepo.list_all kwargs."""
+    from bot.routers.commands import _FILTER_TO_REPO
+    return _FILTER_TO_REPO.get(flt, _FILTER_TO_REPO["t"])

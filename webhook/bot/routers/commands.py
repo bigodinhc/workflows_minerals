@@ -340,6 +340,7 @@ _FILTER_TO_REPO = {
 async def _render_list_view(chat_id, page, search, message_id=None, filter="t"):
     """Fetch contacts from Supabase and render the list message with keyboard."""
     bot = get_bot()
+    logger.info(f"_render_list_view chat={chat_id} page={page} search={search!r} filter={filter!r}")
     try:
         repo = ContactsRepo()
         per_page = 10
@@ -351,6 +352,7 @@ async def _render_list_view(chat_id, page, search, message_id=None, filter="t"):
             repo.list_all, search=search, page=1, per_page=10_000, **repo_kwargs,
         )
         total = len(all_contacts)
+        logger.info(f"_render_list_view filter={filter!r} → total={total}, page_rows={len(contacts)}")
 
         msg = contact_admin.render_list_message(
             contacts, total=total, page=page, per_page=per_page, search=search, filter=filter,
@@ -362,7 +364,15 @@ async def _render_list_view(chat_id, page, search, message_id=None, filter="t"):
         if message_id is None:
             await bot.send_message(chat_id, msg, reply_markup=kb)
         else:
-            await bot.edit_message_text(msg, chat_id=chat_id, message_id=message_id, reply_markup=kb)
+            try:
+                await bot.edit_message_text(msg, chat_id=chat_id, message_id=message_id, reply_markup=kb)
+            except Exception as edit_err:
+                # "message is not modified" fires when user taps the currently-
+                # active chip. Nothing to do — the view already matches.
+                if "not modified" in str(edit_err).lower():
+                    logger.info(f"_render_list_view: edit skipped (not modified)")
+                    return
+                raise
     except Exception as e:
         logger.error(f"_render_list_view failed: {e}")
         err_msg = "❌ Erro ao acessar base de contatos. Tente novamente."

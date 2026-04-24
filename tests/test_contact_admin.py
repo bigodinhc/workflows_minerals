@@ -227,19 +227,19 @@ def test_build_list_keyboard_has_toggle_buttons():
     ]
     kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None)
     rows = kb["inline_keyboard"]
-    # rows[0] = filter chips. Contact toggles start at rows[1].
-    assert rows[1][0]["callback_data"] == "tgl:5511111:t"
-    assert "✅" in rows[1][0]["text"]  # ativo = active
-    assert "A" in rows[1][0]["text"]
-    assert rows[2][0]["callback_data"] == "tgl:5511222:t"
-    assert "❌" in rows[2][0]["text"]  # inativo
+    # rows[0..1] = 2 filter chip rows. Contact toggles start at rows[2].
+    assert rows[2][0]["callback_data"] == "tgl:5511111:t"
+    assert "✅" in rows[2][0]["text"]  # ativo = active
+    assert "A" in rows[2][0]["text"]
+    assert rows[3][0]["callback_data"] == "tgl:5511222:t"
+    assert "❌" in rows[3][0]["text"]  # inativo
 
 
 def test_build_list_keyboard_includes_nav_when_multiple_pages():
     contacts = [_contact("a", "A", "111", status="ativo")]
     kb = build_list_keyboard(contacts, page=2, total_pages=5, search=None)
     rows = kb["inline_keyboard"]
-    # Row order: chips, contact, nav, bulk. Nav is second-to-last.
+    # Row order: 2 chip rows, contact, nav, bulk. Nav is second-to-last.
     nav = rows[-2]
     callbacks = [b["callback_data"] for b in nav]
     # ContactPage.pack() emits trailing fields — search empty, filter "t"
@@ -270,16 +270,19 @@ def test_build_list_keyboard_no_nav_when_single_page():
 def test_build_list_keyboard_empty_contacts_still_shows_filter_chips():
     kb = build_list_keyboard([], page=1, total_pages=0, search=None)
     rows = kb["inline_keyboard"]
-    # Filter chip row always present so the user can change filter.
-    assert len(rows) == 1
-    codes = [b["callback_data"] for b in rows[0]]
-    assert codes == ["cf:t", "cf:a", "cf:i", "cf:mr", "cf:sf"]
+    # Two filter chip rows always present (3+2 layout) so user can change filter.
+    assert len(rows) == 2
+    row1_codes = [b["callback_data"] for b in rows[0]]
+    row2_codes = [b["callback_data"] for b in rows[1]]
+    assert row1_codes == ["cf:t", "cf:a", "cf:i"]
+    assert row2_codes == ["cf:mr", "cf:sf"]
 
 
 def test_build_list_keyboard_chip_row_highlights_active_filter():
     contacts = [_contact("a", "A", "111", status="ativo")]
     kb = build_list_keyboard(contacts, page=1, total_pages=1, search=None, filter="a")
-    chips = kb["inline_keyboard"][0]
+    # Flatten both chip rows for lookup.
+    chips = kb["inline_keyboard"][0] + kb["inline_keyboard"][1]
     texts = {b["callback_data"]: b["text"] for b in chips}
     assert texts["cf:a"].startswith("•") and texts["cf:a"].endswith("•")
     # Inactive chips don't have bullet decorations.

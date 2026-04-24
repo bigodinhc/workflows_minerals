@@ -127,6 +127,13 @@ FILTER_LABELS = {
     "sf": "🛢️ Fuels",
 }
 
+# Chips are split into 2 rows so labels don't truncate on mobile:
+# row 1 = status scope, row 2 = list membership.
+_FILTER_CHIP_ROWS = [
+    ["t", "a", "i"],
+    ["mr", "sf"],
+]
+
 
 def render_list_message(contacts: list, total: int, page: int, per_page: int,
                         search: Optional[str], filter: str = "t") -> str:
@@ -152,17 +159,21 @@ def render_list_message(contacts: list, total: int, page: int, per_page: int,
     return header + "\n\nToque pra ativar/desativar."
 
 
-def _build_filter_chip_row(current_filter: str) -> list:
-    """Row of 5 filter chips. Active chip wrapped in brackets."""
+def _build_filter_chip_rows(current_filter: str) -> list:
+    """Two rows of filter chips (3 + 2) — keeps labels legible on mobile."""
     from bot.callback_data import ContactFilter
-    row = []
-    for code, label in FILTER_LABELS.items():
-        text = f"• {label} •" if code == current_filter else label
-        row.append({
-            "text": text,
-            "callback_data": ContactFilter(value=code).pack(),
-        })
-    return row
+    rows = []
+    for codes in _FILTER_CHIP_ROWS:
+        row = []
+        for code in codes:
+            label = FILTER_LABELS[code]
+            text = f"• {label} •" if code == current_filter else label
+            row.append({
+                "text": text,
+                "callback_data": ContactFilter(value=code).pack(),
+            })
+        rows.append(row)
+    return rows
 
 
 def build_list_keyboard(contacts: list, page: int, total_pages: int,
@@ -180,7 +191,7 @@ def build_list_keyboard(contacts: list, page: int, total_pages: int,
     # Local imports to avoid cycles when this module is imported at bot start.
     from bot.callback_data import ContactToggle, ContactPage, ContactBulk
 
-    rows = [_build_filter_chip_row(filter)]
+    rows = list(_build_filter_chip_rows(filter))
     search_for_pack = search or ""
 
     for c in contacts:

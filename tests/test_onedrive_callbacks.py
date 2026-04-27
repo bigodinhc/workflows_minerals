@@ -15,7 +15,7 @@ def redis_client():
 @pytest.fixture
 def seeded_pending_factory(redis_client):
     """Returns an async setup func: await it inside each async test."""
-    async def _setup():
+    async def _setup(extra: dict | None = None):
         state = {
             "drive_id": "drive-test",
             "drive_item_id": "item-1",
@@ -25,8 +25,12 @@ def seeded_pending_factory(redis_client):
             "downloadUrl_fetched_at": "2026-04-22T00:00:00+00:00",
             "status": "pending",
             "created_at": "2026-04-22T00:00:00+00:00",
+            # Default: only the clicker is a recipient → cascade is a no-op
+            "recipients": [{"chat_id": 12345, "message_id": 1}],
         }
-        await redis_client.set("approval:abc12", json.dumps(state))
+        if extra:
+            state.update(extra)
+        await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
         return "abc12"
     return _setup
 
@@ -361,3 +365,97 @@ async def test_edit_others_emits_failed_for_unknown_exception(redis_client):
         if c.args and c.args[0] == "cascade_edit_failed"
     ]
     assert len(failed_calls) == 1
+
+
+# ── Task 6: on_approve race + cascade tests ──
+
+
+@pytest.mark.asyncio
+async def test_on_approve_winner_cascades_lock_message(
+    mock_bot, mock_callback_query, redis_client
+):
+    """Winner clicks Lista X → other recipients get '🔒 Sendo decidido por @X'."""
+    from bot.routers.callbacks_onedrive import on_approve
+    from bot.callback_data import OneDriveApprove
+
+    state = {
+        "drive_item_id": "item1",
+        "filename": "Test.pdf",
+        "size": 1024,
+        "downloadUrl": "https://x",
+        "downloadUrl_fetched_at": "2026-04-22T00:00:00+00:00",
+        "status": "pending",
+        "created_at": "2026-04-22T00:00:00+00:00",
+        "recipients": [
+            {"chat_id": 100, "message_id": 1001},
+            {"chat_id": 200, "message_id": 2002},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+
+    cb_data = OneDriveApprove(approval_id="abc12", list_code="minerals_report")
+    cb = mock_callback_query(user_id=100, chat_id=100, message_id=1001, data=cb_data.pack())
+    cb.from_user.username = "admin"
+    cb.from_user.first_name = "Admin"
+    cb.bot = mock_bot
+
+    mock_repo = MagicMock()
+    mock_list = MagicMock(code="minerals_report", label="Minerals", member_count=3)
+    mock_repo.list_lists.return_value = [mock_list]
+
+    with patch("bot.routers.callbacks_onedrive._redis", return_value=redis_client), \
+         patch("bot.routers.callbacks_onedrive.ContactsRepo", return_value=mock_repo):
+        await on_approve(cb, cb_data)
+
+    # Two edits: clicker's confirm screen + cascade lock to chat_id=200
+    edited = mock_bot.edit_message_text.await_args_list
+    edited_chats = sorted(c.kwargs["chat_id"] for c in edited)
+    assert edited_chats == [100, 200]
+
+    cascade_call = next(c for c in edited if c.kwargs["chat_id"] == 200)
+    assert "Sendo decidido" in cascade_call.kwargs["text"]
+    assert "@admin" in cascade_call.kwargs["text"]
+    assert cascade_call.kwargs.get("parse_mode") is None
+
+
+@pytest.mark.asyncio
+async def test_on_approve_loser_only_toasts(
+    mock_bot, mock_callback_query, redis_client
+):
+    """Loser (claim already held) → toast only, no edits."""
+    from bot.routers.callbacks_onedrive import on_approve
+    from bot.callback_data import OneDriveApprove
+
+    state = {
+        "drive_item_id": "item1", "filename": "Test.pdf", "size": 1,
+        "downloadUrl": "x", "downloadUrl_fetched_at": "2026-04-22T00:00:00+00:00",
+        "status": "pending", "created_at": "2026-04-22T00:00:00+00:00",
+        "recipients": [
+            {"chat_id": 100, "message_id": 1001},
+            {"chat_id": 200, "message_id": 2002},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    # Pre-existing claim by user 100 (admin)
+    await redis_client.set(
+        "approval:abc12:claimed_by",
+        json.dumps({"chat_id": 100, "label": "@admin", "claimed_at": "x"}),
+        ex=48 * 3600,
+    )
+
+    cb_data = OneDriveApprove(approval_id="abc12", list_code="minerals_report")
+    cb = mock_callback_query(user_id=200, chat_id=200, message_id=2002, data=cb_data.pack())
+    cb.from_user.username = "colega"
+    cb.from_user.first_name = "Colega"
+    cb.bot = mock_bot
+
+    with patch("bot.routers.callbacks_onedrive._redis", return_value=redis_client):
+        await on_approve(cb, cb_data)
+
+    # No edit — just answer with toast
+    mock_bot.edit_message_text.assert_not_called()
+    cb.answer.assert_called()
+    toast = cb.answer.call_args.kwargs.get("text") or (
+        cb.answer.call_args.args[0] if cb.answer.call_args.args else ""
+    )
+    assert "@admin" in toast

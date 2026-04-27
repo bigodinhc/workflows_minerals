@@ -152,6 +152,29 @@ async def on_approve(query: CallbackQuery, callback_data: OneDriveApprove):
         return
 
     bus = EventBus(workflow="onedrive_webhook", trace_id=state.get("trace_id"))
+
+    # Atomic first-click claim
+    claim_status, claimer = await _claim(redis_client, callback_data.approval_id, query.from_user)
+
+    if claim_status == "lost":
+        bus.emit("approval_clashed", detail={
+            "loser_chat_id": query.from_user.id,
+            "winner_label": claimer.get("label"),
+        })
+        await query.answer(
+            text=f"Já em decisão por {claimer.get('label', 'outro aprovador')}",
+            show_alert=False,
+        )
+        return
+
+    if claim_status == "won":
+        bus.emit("approval_claimed", detail={
+            "approval_id": callback_data.approval_id,
+            "chat_id": claimer["chat_id"],
+            "label": claimer["label"],
+        })
+
+    # Existing emission preserved
     bus.emit("approval_clicked", detail={
         "approval_id": callback_data.approval_id,
         "list_code": callback_data.list_code,
@@ -189,6 +212,21 @@ async def on_approve(query: CallbackQuery, callback_data: OneDriveApprove):
         reply_markup=kb.as_markup(),
         parse_mode="Markdown",
     )
+
+    # Cascade lock to other recipients (only if this was a fresh claim;
+    # reentrant means cards are already locked from a prior click).
+    if claim_status == "won":
+        hhmm = datetime.now(timezone.utc).strftime("%H:%M")
+        cascade_text = f"🔒 Sendo decidido por {claimer['label']} às {hhmm}"
+        await _edit_others(
+            bot=query.bot,
+            redis_client=redis_client,
+            approval_id=callback_data.approval_id,
+            new_text=cascade_text,
+            exclude_chat_id=query.from_user.id,
+            bus=bus,
+        )
+
     await query.answer()
 
 

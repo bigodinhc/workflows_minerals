@@ -251,3 +251,113 @@ async def test_claim_inherits_approval_ttl(redis_client):
     claim_ttl = await redis_client.ttl("approval:abc12:claimed_by")
 
     assert abs(approval_ttl - claim_ttl) <= 5
+
+
+# ── Task 5: _edit_others cascade helper tests ──
+
+
+@pytest.mark.asyncio
+async def test_edit_others_skips_clicker(redis_client):
+    from bot.routers.callbacks_onedrive import _edit_others
+    state = {
+        "filename": "x.pdf",
+        "recipients": [
+            {"chat_id": 100, "message_id": 1001},
+            {"chat_id": 200, "message_id": 2002},
+            {"chat_id": 300, "message_id": 3003},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    bot = AsyncMock()
+    bus = MagicMock()
+
+    await _edit_others(
+        bot=bot,
+        redis_client=redis_client,
+        approval_id="abc12",
+        new_text="hello",
+        exclude_chat_id=200,
+        bus=bus,
+    )
+
+    # Should edit chat_ids 100 and 300, skipping 200
+    edited_chat_ids = sorted(
+        c.kwargs["chat_id"] for c in bot.edit_message_text.await_args_list
+    )
+    assert edited_chat_ids == [100, 300]
+
+
+@pytest.mark.asyncio
+async def test_edit_others_no_recipients_is_noop(redis_client):
+    from bot.routers.callbacks_onedrive import _edit_others
+    state = {"filename": "x.pdf"}  # no recipients key
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    bot = AsyncMock()
+    bus = MagicMock()
+
+    await _edit_others(
+        bot=bot, redis_client=redis_client, approval_id="abc12",
+        new_text="hello", exclude_chat_id=999, bus=bus,
+    )
+
+    bot.edit_message_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_edit_others_swallows_telegram_bad_request(redis_client):
+    from bot.routers.callbacks_onedrive import _edit_others
+    from aiogram.exceptions import TelegramBadRequest
+
+    state = {
+        "recipients": [
+            {"chat_id": 200, "message_id": 2002},
+            {"chat_id": 300, "message_id": 3003},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    bot = AsyncMock()
+    bot.edit_message_text = AsyncMock(side_effect=[
+        TelegramBadRequest(method=MagicMock(), message="message to edit not found"),
+        None,
+    ])
+    bus = MagicMock()
+
+    # Must not raise
+    await _edit_others(
+        bot=bot, redis_client=redis_client, approval_id="abc12",
+        new_text="hello", exclude_chat_id=100, bus=bus,
+    )
+
+    # Bus emitted cascade_edit_skipped for the failed one
+    skipped_calls = [
+        c for c in bus.emit.call_args_list
+        if c.args and c.args[0] == "cascade_edit_skipped"
+    ]
+    assert len(skipped_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_edit_others_emits_failed_for_unknown_exception(redis_client):
+    from bot.routers.callbacks_onedrive import _edit_others
+
+    state = {
+        "recipients": [
+            {"chat_id": 200, "message_id": 2002},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    bot = AsyncMock()
+    bot.edit_message_text = AsyncMock(side_effect=RuntimeError("network"))
+    bus = MagicMock()
+
+    # Must not raise
+    await _edit_others(
+        bot=bot, redis_client=redis_client, approval_id="abc12",
+        new_text="hello", exclude_chat_id=100, bus=bus,
+    )
+
+    failed_calls = [
+        c for c in bus.emit.call_args_list
+        if c.args and c.args[0] == "cascade_edit_failed"
+    ]
+    assert len(failed_calls) == 1

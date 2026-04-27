@@ -1,12 +1,14 @@
 """Callback handlers for the OneDrive PDF approval flow."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from datetime import datetime, timezone
 
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -79,6 +81,57 @@ async def _claim(redis_client, approval_id: str, from_user) -> tuple[str, dict]:
     if existing.get("chat_id") == from_user.id:
         return ("reentrant", existing)
     return ("lost", existing)
+
+
+async def _edit_others(
+    bot,
+    redis_client,
+    approval_id: str,
+    new_text: str,
+    exclude_chat_id: int,
+    bus,
+) -> None:
+    """Cascade-edit every recipient card EXCEPT the clicker's.
+
+    Reads recipients from approval:{uuid}.recipients. Edits in parallel
+    via asyncio.gather. Swallows TelegramBadRequest (message gone, bot
+    blocked, message not modified) and emits cascade_edit_skipped.
+    Logs and emits cascade_edit_failed for unexpected errors. Never raises.
+
+    Uses parse_mode=None deliberately — see spec, Markdown safety section.
+    """
+    state = await _load_state(redis_client, approval_id)
+    if not state:
+        return
+    recipients = state.get("recipients", []) or []
+    targets = [r for r in recipients if r.get("chat_id") != exclude_chat_id]
+    if not targets:
+        return
+
+    coros = [
+        bot.edit_message_text(
+            chat_id=r["chat_id"],
+            message_id=r["message_id"],
+            text=new_text,
+            parse_mode=None,
+            reply_markup=None,
+        )
+        for r in targets
+    ]
+    results = await asyncio.gather(*coros, return_exceptions=True)
+
+    for r, exc in zip(targets, results):
+        if isinstance(exc, TelegramBadRequest):
+            bus.emit("cascade_edit_skipped", level="info", detail={
+                "target_chat_id": r["chat_id"],
+                "reason": str(exc)[:120],
+            })
+        elif isinstance(exc, Exception):
+            bus.emit("cascade_edit_failed", level="warn", detail={
+                "target_chat_id": r["chat_id"],
+                "error": str(exc)[:200],
+                "exc_type": type(exc).__name__,
+            })
 
 
 def _list_label(list_code: str, contacts_repo: ContactsRepo):

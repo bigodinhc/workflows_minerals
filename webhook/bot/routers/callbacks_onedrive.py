@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callback_data import OneDriveApprove, OneDriveConfirm, OneDriveDiscard
 from bot.middlewares.auth import RoleMiddleware
+from bot.users import format_user_label
 from execution.core.event_bus import EventBus
 from execution.integrations.contacts_repo import ContactsRepo
 
@@ -42,6 +43,42 @@ async def _save_state(redis_client, approval_id: str, state: dict) -> None:
         json.dumps(state),
         keepttl=True,
     )
+
+
+async def _claim(redis_client, approval_id: str, from_user) -> tuple[str, dict]:
+    """Atomic first-click lock.
+
+    Returns one of:
+      ("won", claimer_dict)        — this caller now owns the approval
+      ("reentrant", claimer_dict)  — same user clicked again, still owns it
+      ("lost", existing_claimer)   — another user already owns the approval
+
+    The lock key is `approval:{uuid}:claimed_by`. TTL inherits the
+    remaining TTL of `approval:{uuid}` so they expire together.
+    """
+    approval_ttl = await redis_client.ttl(f"approval:{approval_id}")
+    if approval_ttl <= 0:
+        approval_ttl = 48 * 3600  # safety fallback if TTL info is missing
+
+    payload = {
+        "chat_id": from_user.id,
+        "label": format_user_label(from_user),
+        "claimed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ok = await redis_client.set(
+        f"approval:{approval_id}:claimed_by",
+        json.dumps(payload),
+        nx=True,
+        ex=approval_ttl,
+    )
+    if ok:
+        return ("won", payload)
+
+    raw = await redis_client.get(f"approval:{approval_id}:claimed_by")
+    existing = json.loads(raw) if raw else {}
+    if existing.get("chat_id") == from_user.id:
+        return ("reentrant", existing)
+    return ("lost", existing)
 
 
 def _list_label(list_code: str, contacts_repo: ContactsRepo):

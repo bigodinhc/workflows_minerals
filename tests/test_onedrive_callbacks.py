@@ -151,3 +151,103 @@ async def test_expired_approval_shows_warning(
     args_list = cb.answer.call_args
     text = args_list.kwargs.get("text") or (args_list.args[0] if args_list.args else "")
     assert "expirada" in str(text).lower() or "expired" in str(text).lower()
+
+
+# ── Task 4: _claim helper tests ──
+
+
+@pytest.mark.asyncio
+async def test_claim_winner_path(redis_client):
+    """First click on a fresh approval → returns ('won', claimer_dict)."""
+    from bot.routers.callbacks_onedrive import _claim
+    await redis_client.set(
+        "approval:abc12",
+        json.dumps({"status": "pending"}),
+        ex=48 * 3600,
+    )
+    user = MagicMock()
+    user.id = 100
+    user.username = "joao"
+    user.first_name = "João"
+
+    status, claimer = await _claim(redis_client, "abc12", user)
+
+    assert status == "won"
+    assert claimer["chat_id"] == 100
+    assert claimer["label"] == "@joao"
+    # Persisted in Redis
+    raw = await redis_client.get("approval:abc12:claimed_by")
+    assert raw is not None
+    persisted = json.loads(raw)
+    assert persisted["chat_id"] == 100
+
+
+@pytest.mark.asyncio
+async def test_claim_loser_path(redis_client):
+    """Second click by a different user → returns ('lost', original_claimer)."""
+    from bot.routers.callbacks_onedrive import _claim
+    await redis_client.set(
+        "approval:abc12",
+        json.dumps({"status": "pending"}),
+        ex=48 * 3600,
+    )
+    # Pre-existing claim by user A
+    await redis_client.set(
+        "approval:abc12:claimed_by",
+        json.dumps({"chat_id": 100, "label": "@joao", "claimed_at": "x"}),
+        ex=48 * 3600,
+    )
+
+    user_b = MagicMock()
+    user_b.id = 200
+    user_b.username = "maria"
+    user_b.first_name = "Maria"
+
+    status, claimer = await _claim(redis_client, "abc12", user_b)
+
+    assert status == "lost"
+    assert claimer["chat_id"] == 100  # original claimer
+    assert claimer["label"] == "@joao"
+
+
+@pytest.mark.asyncio
+async def test_claim_reentrant_path(redis_client):
+    """Same user clicks twice → second call returns ('reentrant', self_claimer)."""
+    from bot.routers.callbacks_onedrive import _claim
+    await redis_client.set(
+        "approval:abc12",
+        json.dumps({"status": "pending"}),
+        ex=48 * 3600,
+    )
+    user = MagicMock()
+    user.id = 100
+    user.username = "joao"
+    user.first_name = "João"
+
+    status1, _ = await _claim(redis_client, "abc12", user)
+    status2, claimer2 = await _claim(redis_client, "abc12", user)
+
+    assert status1 == "won"
+    assert status2 == "reentrant"
+    assert claimer2["chat_id"] == 100
+
+
+@pytest.mark.asyncio
+async def test_claim_inherits_approval_ttl(redis_client):
+    """claimed_by key TTL ≈ approval key remaining TTL (within 5 s)."""
+    from bot.routers.callbacks_onedrive import _claim
+    await redis_client.set(
+        "approval:abc12",
+        json.dumps({"status": "pending"}),
+        ex=48 * 3600,
+    )
+    user = MagicMock()
+    user.id = 100
+    user.username = "j"
+    user.first_name = "J"
+
+    await _claim(redis_client, "abc12", user)
+    approval_ttl = await redis_client.ttl("approval:abc12")
+    claim_ttl = await redis_client.ttl("approval:abc12:claimed_by")
+
+    assert abs(approval_ttl - claim_ttl) <= 5

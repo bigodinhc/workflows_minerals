@@ -241,7 +241,22 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
         await query.answer(text="Já em andamento…", show_alert=True)
         return
 
+    # Reentrant claim — same user already owns this approval from on_approve.
+    # If a different user somehow reaches on_confirm (shouldn't happen via UI
+    # because cascade locked their card), reject defensively.
     bus = EventBus(workflow="onedrive_webhook", trace_id=state.get("trace_id"))
+    claim_status, claimer = await _claim(redis_client, callback_data.approval_id, query.from_user)
+    if claim_status == "lost":
+        bus.emit("approval_clashed", detail={
+            "loser_chat_id": query.from_user.id,
+            "winner_label": claimer.get("label"),
+        })
+        await query.answer(
+            text=f"Já em decisão por {claimer.get('label', 'outro aprovador')}",
+            show_alert=False,
+        )
+        return
+
     bus.emit("approval_approved", detail={
         "approval_id": callback_data.approval_id,
         "list_code": callback_data.list_code,
@@ -278,9 +293,19 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
             message_id=query.message.message_id,
             parse_mode=None,
         )
+        # Cascade failure to other recipients
+        cascade_text = (
+            f"❌ Decidido por {claimer.get('label', '?')} → {label}\n"
+            f"Falha no envio"
+        )
+        await _edit_others(
+            bot=query.bot, redis_client=redis_client,
+            approval_id=callback_data.approval_id, new_text=cascade_text,
+            exclude_chat_id=query.from_user.id, bus=bus,
+        )
+        await redis_client.delete(f"approval:{callback_data.approval_id}")
+        await redis_client.delete(f"approval:{callback_data.approval_id}:claimed_by")
         return
-
-    # (dispatch_completed is emitted inside dispatch_document; no duplicate emit here)
 
     total = result["sent"] + result["failed"] + result["skipped"]
     if result["failed"] and not result["sent"]:
@@ -302,7 +327,6 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
     if result["skipped"]:
         summary += f" · {result['skipped']} já enviados antes"
 
-    # Surface first error reason if everything failed
     if result["failed"] and not result["sent"] and result.get("errors"):
         first = result["errors"][0]
         summary += f"\n\n⚠️ Erro: `{first.get('error','')[:200]}`"
@@ -313,7 +337,22 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
         message_id=query.message.message_id,
         parse_mode="Markdown",
     )
+
+    # Cascade final result to other recipients (parse_mode=None — no Markdown)
+    cascade_text = (
+        f"✏️ Decidido por {claimer.get('label', '?')} → {label}\n"
+        f"{icon} {result['sent']}/{total}"
+    )
+    if result["failed"]:
+        cascade_text += f" · {result['failed']} falhas"
+    await _edit_others(
+        bot=query.bot, redis_client=redis_client,
+        approval_id=callback_data.approval_id, new_text=cascade_text,
+        exclude_chat_id=query.from_user.id, bus=bus,
+    )
+
     await redis_client.delete(f"approval:{callback_data.approval_id}")
+    await redis_client.delete(f"approval:{callback_data.approval_id}:claimed_by")
 
 
 @callbacks_onedrive_router.callback_query(OneDriveDiscard.filter())

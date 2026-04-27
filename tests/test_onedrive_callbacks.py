@@ -459,3 +459,150 @@ async def test_on_approve_loser_only_toasts(
         cb.answer.call_args.args[0] if cb.answer.call_args.args else ""
     )
     assert "@admin" in toast
+
+
+# ── Task 7: on_confirm cascade tests ──
+
+
+@pytest.mark.asyncio
+async def test_on_confirm_cascades_final_result_to_others(
+    mock_bot, mock_callback_query, redis_client
+):
+    """After successful dispatch, non-clicker recipients see '✏️ Decidido por … ✅ N/M'."""
+    from bot.routers.callbacks_onedrive import on_confirm
+    from bot.callback_data import OneDriveConfirm
+
+    state = {
+        "drive_item_id": "item1", "filename": "Test.pdf", "size": 1,
+        "downloadUrl": "x", "downloadUrl_fetched_at": "2026-04-22T00:00:00+00:00",
+        "status": "awaiting_confirm", "created_at": "2026-04-22T00:00:00+00:00",
+        "recipients": [
+            {"chat_id": 100, "message_id": 1001},
+            {"chat_id": 200, "message_id": 2002},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    # Pre-claimed by clicker 100
+    await redis_client.set(
+        "approval:abc12:claimed_by",
+        json.dumps({"chat_id": 100, "label": "@admin", "claimed_at": "x"}),
+        ex=48 * 3600,
+    )
+
+    cb_data = OneDriveConfirm(approval_id="abc12", list_code="minerals_report")
+    cb = mock_callback_query(user_id=100, chat_id=100, message_id=1001, data=cb_data.pack())
+    cb.from_user.username = "admin"
+    cb.from_user.first_name = "Admin"
+    cb.bot = mock_bot
+
+    mock_dispatch = AsyncMock(return_value={"sent": 3, "failed": 0, "skipped": 0})
+    mock_repo = MagicMock()
+    mock_list = MagicMock(code="minerals_report", label="Minerals", member_count=3)
+    mock_repo.list_lists.return_value = [mock_list]
+
+    with patch("bot.routers.callbacks_onedrive._redis", return_value=redis_client), \
+         patch("bot.routers.callbacks_onedrive.ContactsRepo", return_value=mock_repo), \
+         patch("bot.routers.callbacks_onedrive.dispatch_document", mock_dispatch):
+        await on_confirm(cb, cb_data)
+
+    edits = mock_bot.edit_message_text.await_args_list
+    edited_chats = sorted(c.kwargs["chat_id"] for c in edits)
+    # Clicker (100) gets at least one edit ("Enviando..." then "Enviado")
+    # Other recipient (200) gets exactly one cascade edit at the end
+    assert 100 in edited_chats
+    assert 200 in edited_chats
+
+    cascade = next(c for c in edits if c.kwargs["chat_id"] == 200)
+    assert "Decidido por" in cascade.kwargs["text"]
+    assert "@admin" in cascade.kwargs["text"]
+    assert "3/3" in cascade.kwargs["text"] or "3 / 3" in cascade.kwargs["text"]
+    assert cascade.kwargs.get("parse_mode") is None
+
+
+@pytest.mark.asyncio
+async def test_on_confirm_cascades_failure_to_others(
+    mock_bot, mock_callback_query, redis_client
+):
+    """When dispatch fails entirely, non-clickers see failure cascade."""
+    from bot.routers.callbacks_onedrive import on_confirm
+    from bot.callback_data import OneDriveConfirm
+
+    state = {
+        "drive_item_id": "item1", "filename": "Test.pdf", "size": 1,
+        "downloadUrl": "x", "downloadUrl_fetched_at": "2026-04-22T00:00:00+00:00",
+        "status": "awaiting_confirm", "created_at": "2026-04-22T00:00:00+00:00",
+        "recipients": [
+            {"chat_id": 100, "message_id": 1001},
+            {"chat_id": 200, "message_id": 2002},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    await redis_client.set(
+        "approval:abc12:claimed_by",
+        json.dumps({"chat_id": 100, "label": "@admin", "claimed_at": "x"}),
+        ex=48 * 3600,
+    )
+
+    cb_data = OneDriveConfirm(approval_id="abc12", list_code="minerals_report")
+    cb = mock_callback_query(user_id=100, chat_id=100, message_id=1001, data=cb_data.pack())
+    cb.from_user.username = "admin"
+    cb.from_user.first_name = "Admin"
+    cb.bot = mock_bot
+
+    # Dispatch raises → handler catches and renders failure card
+    mock_dispatch = AsyncMock(side_effect=RuntimeError("PDF download failed"))
+    mock_repo = MagicMock()
+    mock_repo.list_lists.return_value = [
+        MagicMock(code="minerals_report", label="Minerals", member_count=3)
+    ]
+
+    with patch("bot.routers.callbacks_onedrive._redis", return_value=redis_client), \
+         patch("bot.routers.callbacks_onedrive.ContactsRepo", return_value=mock_repo), \
+         patch("bot.routers.callbacks_onedrive.dispatch_document", mock_dispatch):
+        await on_confirm(cb, cb_data)
+
+    edits = mock_bot.edit_message_text.await_args_list
+    cascade = next((c for c in edits if c.kwargs["chat_id"] == 200), None)
+    assert cascade is not None
+    assert "Falha" in cascade.kwargs["text"] or "❌" in cascade.kwargs["text"]
+    assert "@admin" in cascade.kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_on_confirm_deletes_both_redis_keys_after_success(
+    mock_bot, mock_callback_query, redis_client
+):
+    from bot.routers.callbacks_onedrive import on_confirm
+    from bot.callback_data import OneDriveConfirm
+
+    state = {
+        "drive_item_id": "item1", "filename": "Test.pdf", "size": 1,
+        "downloadUrl": "x", "downloadUrl_fetched_at": "2026-04-22T00:00:00+00:00",
+        "status": "awaiting_confirm", "created_at": "2026-04-22T00:00:00+00:00",
+        "recipients": [{"chat_id": 100, "message_id": 1001}],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    await redis_client.set(
+        "approval:abc12:claimed_by",
+        json.dumps({"chat_id": 100, "label": "@admin", "claimed_at": "x"}),
+        ex=48 * 3600,
+    )
+
+    cb_data = OneDriveConfirm(approval_id="abc12", list_code="minerals_report")
+    cb = mock_callback_query(user_id=100, chat_id=100, message_id=1001, data=cb_data.pack())
+    cb.from_user.username = "admin"
+    cb.bot = mock_bot
+
+    mock_dispatch = AsyncMock(return_value={"sent": 1, "failed": 0, "skipped": 0})
+    mock_repo = MagicMock()
+    mock_repo.list_lists.return_value = [
+        MagicMock(code="minerals_report", label="Minerals", member_count=1)
+    ]
+
+    with patch("bot.routers.callbacks_onedrive._redis", return_value=redis_client), \
+         patch("bot.routers.callbacks_onedrive.ContactsRepo", return_value=mock_repo), \
+         patch("bot.routers.callbacks_onedrive.dispatch_document", mock_dispatch):
+        await on_confirm(cb, cb_data)
+
+    assert (await redis_client.get("approval:abc12")) is None
+    assert (await redis_client.get("approval:abc12:claimed_by")) is None

@@ -12,8 +12,10 @@ Responsibilities:
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -28,6 +30,10 @@ from execution.integrations.contacts_repo import ContactsRepo
 
 from bot.callback_data import OneDriveApprove, OneDriveDiscard
 from bot.config import get_bot
+from bot.users import get_onedrive_approver_ids
+
+
+logger = logging.getLogger(__name__)
 
 
 ALL_CODE = "__all__"                        # Special list_code for Todos
@@ -143,6 +149,78 @@ def validate_notification(payload: dict, expected_client_state: str) -> bool:
     )
 
 
+async def _send_approval_cards(
+    bot,
+    admin_chat_id: int,
+    text: str,
+    keyboard,
+) -> dict:
+    """Fan-out the approval card to admin + every approver in ONEDRIVE_APPROVER_IDS.
+
+    Returns a dict:
+      {
+        "recipients": [{"chat_id": int, "message_id": int}, ...],  # successful sends
+        "errors": [{"chat_id": int, "error": str}, ...],            # failed sends
+        "attempted": int,                                            # deduplicated target count
+      }
+    Failures are logged but never raise — partial fan-out is acceptable
+    (other approvers + admin still receive the card).
+    """
+    # Dedupe: admin always implicit, may also appear in the env list
+    targets: list[int] = [admin_chat_id]
+    for cid in get_onedrive_approver_ids():
+        if cid not in targets:
+            targets.append(cid)
+
+    coros = [
+        bot.send_message(
+            chat_id=cid,
+            text=text,
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+        for cid in targets
+    ]
+    results = await asyncio.gather(*coros, return_exceptions=True)
+
+    recipients: list[dict] = []
+    errors: list[dict] = []
+    for cid, res in zip(targets, results):
+        if isinstance(res, Exception):
+            logger.warning(
+                "OneDrive approval card send to %s failed: %s", cid, res
+            )
+            errors.append({"chat_id": cid, "error": str(res)[:200]})
+            continue
+        # res is the Message object returned by aiogram
+        message_id = getattr(res, "message_id", None)
+        if message_id is None:
+            errors.append({"chat_id": cid, "error": "no message_id"})
+            continue
+        recipients.append({"chat_id": cid, "message_id": message_id})
+    return {
+        "recipients": recipients,
+        "errors": errors,
+        "attempted": len(targets),
+    }
+
+
+async def _persist_recipients(
+    redis_client, approval_id: str, recipients: list[dict]
+) -> None:
+    """Update approval:{uuid} JSON in place with recipients[]. Preserves TTL."""
+    raw = await redis_client.get(f"approval:{approval_id}")
+    if not raw:
+        return
+    state = json.loads(raw)
+    state = {**state, "recipients": recipients}
+    await redis_client.set(
+        f"approval:{approval_id}",
+        json.dumps(state),
+        keepttl=True,
+    )
+
+
 # ── Main entrypoint (called from routes/onedrive.py) ──
 
 async def process_notification(payload: dict) -> None:
@@ -219,12 +297,35 @@ async def process_notification(payload: dict) -> None:
                 "filename": full_item.get("name", item.get("name", "?")),
             })
 
-            await bot.send_message(
-                chat_id=admin_chat_id,
+            fanout = await _send_approval_cards(
+                bot=bot,
+                admin_chat_id=admin_chat_id,
                 text=build_approval_text(full_item),
-                reply_markup=build_approval_keyboard(approval_id, contacts_repo),
-                parse_mode="Markdown",
+                keyboard=build_approval_keyboard(approval_id, contacts_repo),
             )
+            recipients = fanout["recipients"]
+
+            await _persist_recipients(redis_client, approval_id, recipients)
+
+            if not recipients:
+                bus.emit("approval_fanout_failed", level="error", detail={
+                    "approval_id": approval_id,
+                    "errors": fanout["errors"],
+                })
+            elif len(recipients) < fanout["attempted"]:
+                # Fewer recipients than expected (admin + approvers, deduplicated)
+                bus.emit("approval_fanout_partial", level="warn", detail={
+                    "approval_id": approval_id,
+                    "succeeded": len(recipients),
+                    "failed": fanout["attempted"] - len(recipients),
+                    "errors": fanout["errors"],
+                })
+            else:
+                bus.emit("approval_fanout", detail={
+                    "approval_id": approval_id,
+                    "recipient_count": len(recipients),
+                    "recipient_chat_ids": [r["chat_id"] for r in recipients],
+                })
 
         bus.emit("webhook_processed")
     except Exception as exc:

@@ -719,3 +719,18 @@ async def test_on_discard_loser_path(
     assert "@admin" in toast
     # Approval state must NOT be deleted by a losing click
     assert (await redis_client.get("approval:abc12")) is not None
+
+
+# ── Task 9: capability filter integration test ──
+
+
+def test_router_uses_capability_filter_not_role_middleware():
+    """Sanity check: router has no admin-only middleware; gating is per-handler."""
+    from bot.routers import callbacks_onedrive
+
+    middlewares = list(callbacks_onedrive.callbacks_onedrive_router.callback_query.middleware._middlewares)
+    role_mws = [m for m in middlewares if type(m).__name__ == "RoleMiddleware"]
+    assert role_mws == [], (
+        "callbacks_onedrive_router must not gate by RoleMiddleware "
+        "— gating is per-handler via is_onedrive_approver capability filter"
+    )

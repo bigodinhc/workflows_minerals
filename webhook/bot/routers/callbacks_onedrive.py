@@ -7,14 +7,13 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callback_data import OneDriveApprove, OneDriveConfirm, OneDriveDiscard
-from bot.middlewares.auth import RoleMiddleware
-from bot.users import format_user_label
+from bot.users import format_user_label, is_onedrive_approver
 from execution.core.event_bus import EventBus
 from execution.integrations.contacts_repo import ContactsRepo
 
@@ -24,9 +23,9 @@ from dispatch_document import dispatch_document, ALL_CODE
 logger = logging.getLogger(__name__)
 
 callbacks_onedrive_router = Router(name="callbacks_onedrive")
-callbacks_onedrive_router.callback_query.middleware(
-    RoleMiddleware(allowed_roles={"admin"})
-)
+# Authorization is per-handler via is_onedrive_approver capability filter
+# (added to each callback_query decorator below). RoleMiddleware is intentionally
+# NOT attached here — the capability is orthogonal to the existing role enum.
 
 
 def _redis():
@@ -143,7 +142,10 @@ def _list_label(list_code: str, contacts_repo: ContactsRepo):
     return list_code, 0
 
 
-@callbacks_onedrive_router.callback_query(OneDriveApprove.filter())
+@callbacks_onedrive_router.callback_query(
+    OneDriveApprove.filter(),
+    F.func(lambda q: is_onedrive_approver(q.from_user.id)),
+)
 async def on_approve(query: CallbackQuery, callback_data: OneDriveApprove):
     redis_client = _redis()
     state = await _load_state(redis_client, callback_data.approval_id)
@@ -230,7 +232,10 @@ async def on_approve(query: CallbackQuery, callback_data: OneDriveApprove):
     await query.answer()
 
 
-@callbacks_onedrive_router.callback_query(OneDriveConfirm.filter())
+@callbacks_onedrive_router.callback_query(
+    OneDriveConfirm.filter(),
+    F.func(lambda q: is_onedrive_approver(q.from_user.id)),
+)
 async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
     redis_client = _redis()
     state = await _load_state(redis_client, callback_data.approval_id)
@@ -355,7 +360,10 @@ async def on_confirm(query: CallbackQuery, callback_data: OneDriveConfirm):
     await redis_client.delete(f"approval:{callback_data.approval_id}:claimed_by")
 
 
-@callbacks_onedrive_router.callback_query(OneDriveDiscard.filter())
+@callbacks_onedrive_router.callback_query(
+    OneDriveDiscard.filter(),
+    F.func(lambda q: is_onedrive_approver(q.from_user.id)),
+)
 async def on_discard(query: CallbackQuery, callback_data: OneDriveDiscard):
     redis_client = _redis()
     state = await _load_state(redis_client, callback_data.approval_id)

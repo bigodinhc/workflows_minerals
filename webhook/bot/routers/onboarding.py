@@ -19,7 +19,7 @@ from bot.keyboards import (
 )
 from bot.users import (
     get_user, create_pending_user, approve_user, reject_user,
-    get_user_role, is_admin, toggle_subscription,
+    get_user_role, is_admin, is_onedrive_approver, toggle_subscription,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,18 @@ async def cmd_start(message: Message):
         )
         return
 
-    # Unknown user — create pending + notify admin
+    # OneDrive approver who isn't admin/subscriber/pending — fixed welcome,
+    # no pending record created. They interact only via approval card buttons.
+    if is_onedrive_approver(chat_id) and not is_admin(chat_id) and get_user(chat_id) is None:
+        await message.answer(
+            "👋 Olá! Você está cadastrado como aprovador de relatórios "
+            "OneDrive.\n\nEu vou te enviar os PDFs novos da pasta SharePoint "
+            "assim que chegarem. Use os botões de cada card pra aprovar ou "
+            "descartar.",
+        )
+        return
+
+    # Unknown user — create pending + notify admin (existing behavior)
     user = message.from_user
     name = user.full_name or "Desconhecido"
     username = user.username or ""
@@ -67,7 +78,6 @@ async def cmd_start(message: Message):
         "Voce recebera uma notificacao quando aprovado.",
     )
 
-    # Notify admin
     bot = get_bot()
     admin_id = int(TELEGRAM_CHAT_ID) if TELEGRAM_CHAT_ID.isdigit() else 0
     if admin_id:

@@ -361,11 +361,35 @@ async def on_discard(query: CallbackQuery, callback_data: OneDriveDiscard):
     state = await _load_state(redis_client, callback_data.approval_id)
     filename = state.get("filename", "(expirado)") if state else "(expirado)"
 
+    bus = EventBus(workflow="onedrive_webhook", trace_id=(state or {}).get("trace_id"))
+
     if state:
-        bus = EventBus(workflow="onedrive_webhook", trace_id=state.get("trace_id"))
+        # Race-safe claim — discard is also a "decision" that locks the approval
+        claim_status, claimer = await _claim(redis_client, callback_data.approval_id, query.from_user)
+        if claim_status == "lost":
+            bus.emit("approval_clashed", detail={
+                "loser_chat_id": query.from_user.id,
+                "winner_label": claimer.get("label"),
+            })
+            await query.answer(
+                text=f"Já em decisão por {claimer.get('label', 'outro aprovador')}",
+                show_alert=False,
+            )
+            return
+
         bus.emit("approval_discarded", detail={"approval_id": callback_data.approval_id})
 
+        # Cascade discard message to other recipients (skip 🔒 — terminal in one step)
+        hhmm = datetime.now(timezone.utc).strftime("%H:%M")
+        cascade_text = f"❌ Descartado por {claimer['label']} às {hhmm}\n{filename}"
+        await _edit_others(
+            bot=query.bot, redis_client=redis_client,
+            approval_id=callback_data.approval_id, new_text=cascade_text,
+            exclude_chat_id=query.from_user.id, bus=bus,
+        )
+
     await redis_client.delete(f"approval:{callback_data.approval_id}")
+    await redis_client.delete(f"approval:{callback_data.approval_id}:claimed_by")
 
     await query.bot.edit_message_text(
         text=f"❌ Descartado às {datetime.now().strftime('%H:%M')}\n`{filename}`",

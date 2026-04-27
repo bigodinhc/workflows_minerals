@@ -606,3 +606,116 @@ async def test_on_confirm_deletes_both_redis_keys_after_success(
 
     assert (await redis_client.get("approval:abc12")) is None
     assert (await redis_client.get("approval:abc12:claimed_by")) is None
+
+
+# ── Task 8: on_discard cascade tests ──
+
+
+@pytest.mark.asyncio
+async def test_on_discard_cascades_to_others_skipping_lock_state(
+    mock_bot, mock_callback_query, redis_client
+):
+    """Discard goes directly to '❌ Descartado por @X' on others (no intermediate 🔒)."""
+    from bot.routers.callbacks_onedrive import on_discard
+    from bot.callback_data import OneDriveDiscard
+
+    state = {
+        "drive_item_id": "item1", "filename": "Test.pdf", "size": 1,
+        "downloadUrl": "x", "downloadUrl_fetched_at": "2026-04-22T00:00:00+00:00",
+        "status": "pending", "created_at": "2026-04-22T00:00:00+00:00",
+        "recipients": [
+            {"chat_id": 100, "message_id": 1001},
+            {"chat_id": 200, "message_id": 2002},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+
+    cb_data = OneDriveDiscard(approval_id="abc12")
+    cb = mock_callback_query(user_id=100, chat_id=100, message_id=1001, data=cb_data.pack())
+    cb.from_user.username = "admin"
+    cb.from_user.first_name = "Admin"
+    cb.bot = mock_bot
+
+    with patch("bot.routers.callbacks_onedrive._redis", return_value=redis_client):
+        await on_discard(cb, cb_data)
+
+    edits = mock_bot.edit_message_text.await_args_list
+    cascade = next((c for c in edits if c.kwargs["chat_id"] == 200), None)
+    assert cascade is not None
+    assert "Descartado por" in cascade.kwargs["text"]
+    assert "@admin" in cascade.kwargs["text"]
+    assert "Test.pdf" in cascade.kwargs["text"]
+    assert cascade.kwargs.get("parse_mode") is None
+
+
+@pytest.mark.asyncio
+async def test_on_discard_deletes_both_keys(
+    mock_bot, mock_callback_query, redis_client
+):
+    from bot.routers.callbacks_onedrive import on_discard
+    from bot.callback_data import OneDriveDiscard
+
+    state = {
+        "drive_item_id": "item1", "filename": "Test.pdf", "size": 1,
+        "downloadUrl": "x", "downloadUrl_fetched_at": "2026-04-22T00:00:00+00:00",
+        "status": "pending", "created_at": "2026-04-22T00:00:00+00:00",
+        "recipients": [{"chat_id": 100, "message_id": 1001}],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    await redis_client.set(
+        "approval:abc12:claimed_by",
+        json.dumps({"chat_id": 100, "label": "@admin", "claimed_at": "x"}),
+        ex=48 * 3600,
+    )
+
+    cb_data = OneDriveDiscard(approval_id="abc12")
+    cb = mock_callback_query(user_id=100, data=cb_data.pack())
+    cb.from_user.username = "admin"
+    cb.bot = mock_bot
+
+    with patch("bot.routers.callbacks_onedrive._redis", return_value=redis_client):
+        await on_discard(cb, cb_data)
+
+    assert (await redis_client.get("approval:abc12")) is None
+    assert (await redis_client.get("approval:abc12:claimed_by")) is None
+
+
+@pytest.mark.asyncio
+async def test_on_discard_loser_path(
+    mock_bot, mock_callback_query, redis_client
+):
+    """Discard click when claim already held by someone else → toast only."""
+    from bot.routers.callbacks_onedrive import on_discard
+    from bot.callback_data import OneDriveDiscard
+
+    state = {
+        "filename": "Test.pdf",
+        "recipients": [
+            {"chat_id": 100, "message_id": 1001},
+            {"chat_id": 200, "message_id": 2002},
+        ],
+    }
+    await redis_client.set("approval:abc12", json.dumps(state), ex=48 * 3600)
+    await redis_client.set(
+        "approval:abc12:claimed_by",
+        json.dumps({"chat_id": 100, "label": "@admin", "claimed_at": "x"}),
+        ex=48 * 3600,
+    )
+
+    cb_data = OneDriveDiscard(approval_id="abc12")
+    cb = mock_callback_query(user_id=200, data=cb_data.pack())
+    cb.from_user.username = "colega"
+    cb.from_user.first_name = "Colega"
+    cb.bot = mock_bot
+
+    with patch("bot.routers.callbacks_onedrive._redis", return_value=redis_client):
+        await on_discard(cb, cb_data)
+
+    mock_bot.edit_message_text.assert_not_called()
+    cb.answer.assert_called()
+    toast = cb.answer.call_args.kwargs.get("text") or (
+        cb.answer.call_args.args[0] if cb.answer.call_args.args else ""
+    )
+    assert "@admin" in toast
+    # Approval state must NOT be deleted by a losing click
+    assert (await redis_client.get("approval:abc12")) is not None

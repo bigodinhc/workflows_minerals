@@ -9,8 +9,10 @@ Status: pending, approved, rejected
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -182,3 +184,60 @@ def get_user_role(chat_id: int) -> str:
     if status == "pending":
         return "pending"
     return "unknown"
+
+
+# ── OneDrive approver capability (orthogonal to role enum) ──
+
+
+@functools.lru_cache(maxsize=1)
+def get_onedrive_approver_ids() -> list[int]:
+    """Parse ONEDRIVE_APPROVER_IDS env var → list of int chat_ids.
+
+    - Empty / unset → [].
+    - Whitespace tolerated.
+    - Malformed items skipped with a single warning log.
+    - Cached for process lifetime (env changes require redeploy).
+    """
+    raw = os.environ.get("ONEDRIVE_APPROVER_IDS", "").strip()
+    if not raw:
+        return []
+    out: list[int] = []
+    skipped: list[str] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            out.append(int(token))
+        except ValueError:
+            skipped.append(token)
+    if skipped:
+        logger.warning(
+            "Skipped malformed ONEDRIVE_APPROVER_IDS entries: %s",
+            ", ".join(skipped),
+        )
+    return out
+
+
+def is_onedrive_approver(chat_id: int) -> bool:
+    """True if chat_id is admin OR appears in ONEDRIVE_APPROVER_IDS env."""
+    if is_admin(chat_id):
+        return True
+    return chat_id in get_onedrive_approver_ids()
+
+
+def format_user_label(from_user) -> str:
+    """Render a user's display label.
+
+    Priority: @username → first_name → 'Usuário XXXX' (last 4 digits).
+    Used in cascade card text — caller stores the result so it stays
+    consistent across all edits even if the user later changes username.
+    """
+    username = getattr(from_user, "username", None) or ""
+    first_name = getattr(from_user, "first_name", None) or ""
+    if username:
+        return f"@{username}"
+    if first_name:
+        return first_name
+    chat_id = getattr(from_user, "id", 0) or 0
+    return f"Usuário {str(chat_id)[-4:]}"

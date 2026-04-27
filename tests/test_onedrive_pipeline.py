@@ -143,3 +143,185 @@ async def test_create_approval_persists_trace_id(redis_client, sample_pdf_item):
     )
     data = json.loads(await redis_client.get(f"approval:{approval_id}"))
     assert data["trace_id"] == "trace-abc"
+
+
+# ── Multi-recipient fan-out tests (Task 3 of multi-approver plan) ──
+
+
+@pytest.fixture
+def fake_full_item():
+    """Item shape after graph.get_item — has a downloadUrl."""
+    return {
+        "id": "item-multi-1",
+        "name": "Multi_Test.pdf",
+        "size": 9999,
+        "file": {"mimeType": "application/pdf"},
+        "@microsoft.graph.downloadUrl": "https://cdn.example.com/x?sig=multi",
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_approval_cards_admin_only_when_env_empty(
+    monkeypatch, redis_client, fake_full_item, fake_contacts_repo
+):
+    """Empty ONEDRIVE_APPROVER_IDS → 1 send to admin, recipients=[admin]."""
+    from onedrive_pipeline import _send_approval_cards
+    monkeypatch.delenv("ONEDRIVE_APPROVER_IDS", raising=False)
+    from bot.users import get_onedrive_approver_ids
+    get_onedrive_approver_ids.cache_clear()
+
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(side_effect=[
+        MagicMock(message_id=1001),
+    ])
+
+    fanout = await _send_approval_cards(
+        bot=bot,
+        admin_chat_id=100,
+        text="hello",
+        keyboard=MagicMock(),
+    )
+    recipients = fanout["recipients"]
+
+    assert recipients == [{"chat_id": 100, "message_id": 1001}]
+    assert bot.send_message.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_send_approval_cards_admin_plus_approvers(
+    monkeypatch, fake_full_item
+):
+    monkeypatch.setenv("ONEDRIVE_APPROVER_IDS", "200,300")
+    from onedrive_pipeline import _send_approval_cards
+    from bot.users import get_onedrive_approver_ids
+    get_onedrive_approver_ids.cache_clear()
+
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(side_effect=[
+        MagicMock(message_id=1001),
+        MagicMock(message_id=2002),
+        MagicMock(message_id=3003),
+    ])
+
+    fanout = await _send_approval_cards(
+        bot=bot,
+        admin_chat_id=100,
+        text="hello",
+        keyboard=MagicMock(),
+    )
+    recipients = fanout["recipients"]
+
+    chat_ids = sorted(r["chat_id"] for r in recipients)
+    assert chat_ids == [100, 200, 300]
+    assert bot.send_message.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_send_approval_cards_dedup_admin_in_env(monkeypatch):
+    """Admin chat_id listed in env → still only one send to admin."""
+    monkeypatch.setenv("ONEDRIVE_APPROVER_IDS", "100,200")
+    from onedrive_pipeline import _send_approval_cards
+    from bot.users import get_onedrive_approver_ids
+    get_onedrive_approver_ids.cache_clear()
+
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(side_effect=[
+        MagicMock(message_id=1001),
+        MagicMock(message_id=2002),
+    ])
+
+    fanout = await _send_approval_cards(
+        bot=bot,
+        admin_chat_id=100,
+        text="hello",
+        keyboard=MagicMock(),
+    )
+    recipients = fanout["recipients"]
+
+    chat_ids = sorted(r["chat_id"] for r in recipients)
+    assert chat_ids == [100, 200]
+    assert bot.send_message.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_send_approval_cards_partial_failure_continues(monkeypatch):
+    """One approver send fails → others still proceed; recipients excludes the failure."""
+    monkeypatch.setenv("ONEDRIVE_APPROVER_IDS", "200,300")
+    from onedrive_pipeline import _send_approval_cards
+    from bot.users import get_onedrive_approver_ids
+    get_onedrive_approver_ids.cache_clear()
+
+    class _Forbidden(Exception):
+        pass
+
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(side_effect=[
+        MagicMock(message_id=1001),
+        _Forbidden("blocked"),
+        MagicMock(message_id=3003),
+    ])
+
+    fanout = await _send_approval_cards(
+        bot=bot,
+        admin_chat_id=100,
+        text="hello",
+        keyboard=MagicMock(),
+    )
+    recipients = fanout["recipients"]
+
+    chat_ids = sorted(r["chat_id"] for r in recipients)
+    assert chat_ids == [100, 300]
+    assert bot.send_message.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_send_approval_cards_admin_failure_returns_empty(monkeypatch):
+    """If admin send fails too — return empty list, caller decides what to do."""
+    monkeypatch.delenv("ONEDRIVE_APPROVER_IDS", raising=False)
+    from onedrive_pipeline import _send_approval_cards
+    from bot.users import get_onedrive_approver_ids
+    get_onedrive_approver_ids.cache_clear()
+
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(side_effect=Exception("network down"))
+
+    fanout = await _send_approval_cards(
+        bot=bot,
+        admin_chat_id=100,
+        text="hello",
+        keyboard=MagicMock(),
+    )
+
+    assert fanout["recipients"] == []
+    assert bot.send_message.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_persist_recipients_updates_approval_state(redis_client):
+    """After _persist_recipients, approval state JSON has recipients array."""
+    from onedrive_pipeline import _persist_recipients
+
+    await redis_client.set(
+        "approval:abc12",
+        json.dumps({"status": "pending", "filename": "x.pdf"}),
+        ex=48 * 3600,
+    )
+
+    await _persist_recipients(
+        redis_client,
+        approval_id="abc12",
+        recipients=[
+            {"chat_id": 100, "message_id": 1001},
+            {"chat_id": 200, "message_id": 2002},
+        ],
+    )
+
+    raw = await redis_client.get("approval:abc12")
+    state = json.loads(raw)
+    assert state["recipients"] == [
+        {"chat_id": 100, "message_id": 1001},
+        {"chat_id": 200, "message_id": 2002},
+    ]
+    assert state["filename"] == "x.pdf"  # other fields preserved
+    ttl = await redis_client.ttl("approval:abc12")
+    assert ttl > 0  # KEEPTTL preserved

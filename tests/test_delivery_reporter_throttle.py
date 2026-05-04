@@ -157,3 +157,41 @@ def test_broadcast_delay_range_clamps_huge_max(monkeypatch):
     monkeypatch.setenv("BROADCAST_DELAY_MAX", "9999.0")
     lo, hi = _broadcast_delay_range()
     assert lo == 15.0 and hi == 300.0  # clamped to 300s ceiling
+
+
+def test_dispatch_extra_sleep_on_rate_limit(monkeypatch):
+    monkeypatch.setenv("BROADCAST_RATE_LIMIT_SLEEP", "60.0")
+    monkeypatch.setenv("BROADCAST_DELAY_MIN", "15.0")
+    monkeypatch.setenv("BROADCAST_DELAY_MAX", "30.0")
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "execution.core.delivery_reporter.time.sleep",
+        lambda s: sleeps.append(s),
+    )
+    monkeypatch.setattr(
+        "execution.core.delivery_reporter.random.uniform",
+        lambda lo, hi: 20.0,
+    )
+
+    import requests
+    call = {"n": 0}
+    def send_fn(phone, text):
+        call["n"] += 1
+        if call["n"] == 1:
+            resp = MagicMock()
+            resp.status_code = 429
+            resp.text = '{"message": "rate limit exceeded"}'
+            raise requests.HTTPError(response=resp)
+        # subsequent calls succeed
+
+    reporter = DeliveryReporter(
+        workflow="t", send_fn=send_fn, notify_telegram=False
+    )
+    contacts = [Contact(name=f"U{i}", phone=f"55{i:03}") for i in range(3)]
+    reporter.dispatch(contacts, message="hi")
+
+    # Expected sleeps: 60 (rate-limit backoff after attempt 1)
+    #                + 20 (regular jitter after attempt 1)
+    #                + 20 (regular jitter after attempt 2)
+    # No sleep after attempt 3 (last).
+    assert sleeps == [60.0, 20.0, 20.0]

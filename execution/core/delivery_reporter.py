@@ -45,6 +45,18 @@ def _broadcast_delay_range() -> tuple[float, float]:
     return lo, hi
 
 
+def _rate_limit_sleep() -> float:
+    """Returns extra seconds to sleep after a 429 / rate-limit response.
+    Validates non-numeric / NaN / inf to defaults; clamps to [0, 600s]."""
+    try:
+        value = float(os.environ.get("BROADCAST_RATE_LIMIT_SLEEP", "60.0"))
+    except (TypeError, ValueError):
+        return 60.0
+    if not math.isfinite(value):
+        return 60.0
+    return max(0.0, min(value, 600.0))  # 10-minute hard ceiling
+
+
 class SendErrorCategory(Enum):
     """Categories of send failures. Used for alert grouping, action hints,
     circuit breaker decisions, and Sentry tagging."""
@@ -480,6 +492,8 @@ class DeliveryReporter:
                 circuit_tripped and result.category == SendErrorCategory.SKIPPED_CIRCUIT_BREAK
             )
             if not is_last and was_attempted:
+                if (not success) and category == SendErrorCategory.RATE_LIMIT:
+                    time.sleep(_rate_limit_sleep())
                 time.sleep(random.uniform(delay_lo, delay_hi))
 
         finished_at = datetime.now().astimezone()

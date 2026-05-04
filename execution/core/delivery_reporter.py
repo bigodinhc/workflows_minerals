@@ -5,6 +5,7 @@ across GH Actions scripts and webhook flows.
 Emits structured JSON to stdout (for dashboard parsing) and sends
 Telegram summary notification at end of dispatch.
 """
+import math
 import os
 import random
 import secrets
@@ -26,11 +27,21 @@ def _ref_token_enabled() -> bool:
 
 
 def _broadcast_delay_range() -> tuple[float, float]:
-    """Returns (min, max) seconds between sends. Clamps to safe values."""
-    lo = float(os.environ.get("BROADCAST_DELAY_MIN", "15.0"))
-    hi = float(os.environ.get("BROADCAST_DELAY_MAX", "30.0"))
+    """Returns (min, max) seconds between sends. Clamps to safe values.
+
+    Rejects NaN/inf and caps at 300s to prevent operator typos from
+    silently freezing broadcasts.
+    """
+    try:
+        lo = float(os.environ.get("BROADCAST_DELAY_MIN", "15.0"))
+        hi = float(os.environ.get("BROADCAST_DELAY_MAX", "30.0"))
+    except (TypeError, ValueError):
+        # Issue I-2: non-numeric env values should not crash mid-broadcast.
+        lo, hi = 15.0, 30.0
+    if not math.isfinite(lo) or not math.isfinite(hi):
+        lo, hi = 15.0, 30.0
     lo = max(0.0, lo)
-    hi = max(lo, hi)
+    hi = max(lo, min(hi, 300.0))  # 5-minute hard ceiling
     return lo, hi
 
 
@@ -393,6 +404,10 @@ class DeliveryReporter:
         streak_count = 0
         circuit_tripped = False
 
+        # Cache throttle config once per dispatch — env vars don't change mid-run,
+        # and this avoids re-parsing on every iteration.
+        delay_lo, delay_hi = _broadcast_delay_range()
+
         for i, contact in enumerate(contacts_list):
             if circuit_tripped:
                 result = DeliveryResult(
@@ -461,12 +476,11 @@ class DeliveryReporter:
             # Skip after the last contact, and skip when the contact was
             # circuit-broken (no API call was made).
             is_last = (i == total - 1)
-            was_real_send = not (
+            was_attempted = not (
                 circuit_tripped and result.category == SendErrorCategory.SKIPPED_CIRCUIT_BREAK
             )
-            if not is_last and was_real_send:
-                lo, hi = _broadcast_delay_range()
-                time.sleep(random.uniform(lo, hi))
+            if not is_last and was_attempted:
+                time.sleep(random.uniform(delay_lo, delay_hi))
 
         finished_at = datetime.now().astimezone()
         report = DeliveryReport(

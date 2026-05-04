@@ -86,36 +86,74 @@ def test_dispatch_no_sleep_after_last_contact(monkeypatch):
 
 
 def test_dispatch_no_sleep_for_circuit_broken_skipped(monkeypatch):
-    """Circuit-broken contacts don't actually call uazapi → no throttle delay."""
+    """Circuit-broken contacts don't actually call uazapi → no throttle delay.
+
+    Stronger than just count-based: also verifies which iterations slept,
+    so a regression that fires the throttle inside the early-continue path
+    would still fail this test.
+    """
     sleeps: list[float] = []
+    sleep_at_call: list[int] = []
+    call_count = {"n": 0}
+
+    def fake_send(phone, text):
+        call_count["n"] += 1
+        import requests
+        resp = MagicMock()
+        resp.status_code = 401
+        resp.text = '{"message": "auth failed"}'
+        raise requests.HTTPError(response=resp)
+
+    def fake_sleep(s):
+        sleep_at_call.append(call_count["n"])
+        sleeps.append(s)
+
     monkeypatch.setattr(
-        "execution.core.delivery_reporter.time.sleep",
-        lambda s: sleeps.append(s),
+        "execution.core.delivery_reporter.time.sleep", fake_sleep
     )
     monkeypatch.setattr(
         "execution.core.delivery_reporter.random.uniform", lambda lo, hi: 5.0
     )
-    # send_fn that raises a fatal-category error on every call → circuit trips
-    import requests
-    def send_fn(phone, text):
-        resp = MagicMock()
-        resp.status_code = 401
-        resp.text = '{"message": "auth failed"}'
-        err = requests.HTTPError(response=resp)
-        raise err
 
     reporter = DeliveryReporter(
         workflow="t",
-        send_fn=send_fn,
+        send_fn=fake_send,
         notify_telegram=False,
         circuit_breaker_threshold=2,
     )
     contacts = [Contact(name=f"U{i}", phone=f"55{i:03}") for i in range(5)]
     reporter.dispatch(contacts, message="hi")
 
-    # Failures 1+2 each followed by a sleep (between iterations).
-    # Failure 3+ trip the circuit → skipped → no sleep.
-    # Expected: 2 sleeps between attempts 1→2 and 2→3, then circuit trips,
-    # remaining iterations are circuit-broken (no API call, no sleep).
-    assert len(sleeps) == 2
-    assert all(s == 5.0 for s in sleeps)
+    # Sleeps fire AFTER attempts 1 and 2, before circuit trips on iteration 3.
+    # If the throttle ever fires on a circuit-broken iteration, sleep_at_call
+    # would include 2 (the call count never advances on skipped iterations).
+    assert sleeps == [5.0, 5.0]
+    assert sleep_at_call == [1, 2]
+
+
+def test_broadcast_delay_range_rejects_inf_and_nan(monkeypatch):
+    from execution.core.delivery_reporter import _broadcast_delay_range
+    monkeypatch.setenv("BROADCAST_DELAY_MIN", "15.0")
+    monkeypatch.setenv("BROADCAST_DELAY_MAX", "inf")
+    lo, hi = _broadcast_delay_range()
+    assert lo == 15.0 and hi == 30.0  # falls back to defaults
+
+    monkeypatch.setenv("BROADCAST_DELAY_MAX", "nan")
+    lo, hi = _broadcast_delay_range()
+    assert lo == 15.0 and hi == 30.0
+
+
+def test_broadcast_delay_range_rejects_non_numeric(monkeypatch):
+    from execution.core.delivery_reporter import _broadcast_delay_range
+    monkeypatch.setenv("BROADCAST_DELAY_MIN", "abc")
+    monkeypatch.setenv("BROADCAST_DELAY_MAX", "30.0")
+    lo, hi = _broadcast_delay_range()
+    assert lo == 15.0 and hi == 30.0  # defaults on parse failure
+
+
+def test_broadcast_delay_range_clamps_huge_max(monkeypatch):
+    from execution.core.delivery_reporter import _broadcast_delay_range
+    monkeypatch.setenv("BROADCAST_DELAY_MIN", "15.0")
+    monkeypatch.setenv("BROADCAST_DELAY_MAX", "9999.0")
+    lo, hi = _broadcast_delay_range()
+    assert lo == 15.0 and hi == 300.0  # clamped to 300s ceiling

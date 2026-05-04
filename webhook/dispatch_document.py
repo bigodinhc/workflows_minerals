@@ -14,6 +14,8 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+import random
+
 import requests
 
 from execution.core.event_bus import EventBus
@@ -24,9 +26,26 @@ from execution.integrations.uazapi_client import UazapiClient
 
 
 ALL_CODE = "__all__"
-CONCURRENCY = 5
+CONCURRENCY = 1
 DOWNLOAD_URL_STALE_AFTER_SECONDS = 50 * 60     # 50 min safety margin on Graph's ~1h TTL
 IDEMPOTENCY_TTL_SECONDS = 24 * 3600
+
+
+def _broadcast_delay_range() -> tuple[float, float]:
+    """Mirror of execution.core.delivery_reporter._broadcast_delay_range.
+    Duplicated here to avoid pulling delivery_reporter into the async PDF path.
+    Reads the same env vars."""
+    import math
+    try:
+        lo = float(os.environ.get("BROADCAST_DELAY_MIN", "15.0"))
+        hi = float(os.environ.get("BROADCAST_DELAY_MAX", "30.0"))
+    except (TypeError, ValueError):
+        lo, hi = 15.0, 30.0
+    if not math.isfinite(lo) or not math.isfinite(hi):
+        lo, hi = 15.0, 30.0
+    lo = max(0.0, lo)
+    hi = max(lo, min(hi, 300.0))
+    return lo, hi
 
 
 class ApprovalExpiredError(Exception):
@@ -113,16 +132,16 @@ async def dispatch_document(
     # Passing the raw Graph downloadUrl to Uazapi triggers 500 errors
     # (Uazapi's server can't reliably fetch SharePoint-signed URLs),
     # so we proxy the bytes through ourselves.
-    def _download_pdf() -> str:
+    def _download_pdf() -> bytes:
         r = requests.get(state["downloadUrl"], timeout=60, stream=False)
         r.raise_for_status()
-        return base64.b64encode(r.content).decode("ascii")
+        return r.content
 
     try:
-        pdf_b64 = await asyncio.to_thread(_download_pdf)
+        pdf_bytes = await asyncio.to_thread(_download_pdf)
         bus.emit("pdf_downloaded", detail={
             "approval_id": approval_id,
-            "bytes_b64": len(pdf_b64),
+            "bytes": len(pdf_bytes),
         })
     except Exception as exc:
         logger.error(f"PDF download failed: {exc}")
@@ -147,7 +166,7 @@ async def dispatch_document(
     sem = asyncio.Semaphore(CONCURRENCY)
     results: dict = {"sent": 0, "failed": 0, "skipped": 0, "errors": []}
 
-    async def _send_one(contact):
+    async def _send_one(contact, idx, total):
         async with sem:
             claimed = await _claim_idempotency(
                 redis_client, contact.phone_uazapi, state["drive_item_id"]
@@ -156,10 +175,12 @@ async def dispatch_document(
                 results["skipped"] += 1
                 return
             try:
+                # attachment mode (current default behavior)
+                pdf_b64_payload = base64.b64encode(pdf_bytes).decode("ascii")
                 await asyncio.to_thread(
                     uazapi.send_document,
                     number=contact.phone_uazapi,
-                    file_url=pdf_b64,
+                    file_url=pdf_b64_payload,
                     doc_name=state["filename"],
                 )
                 results["sent"] += 1
@@ -182,8 +203,13 @@ async def dispatch_document(
                         "exc_type": type(exc).__name__,
                     },
                 )
+            # Throttle: sleep between sends, skip after last contact.
+            if idx < total - 1:
+                lo, hi = _broadcast_delay_range()
+                await asyncio.sleep(random.uniform(lo, hi))
 
-    await asyncio.gather(*[_send_one(c) for c in recipients])
+    total = len(recipients)
+    await asyncio.gather(*[_send_one(c, i, total) for i, c in enumerate(recipients)])
     bus.emit("dispatch_completed", detail={
         "approval_id": approval_id,
         "sent": results["sent"],

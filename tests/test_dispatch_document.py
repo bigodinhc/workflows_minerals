@@ -38,6 +38,13 @@ def mock_pdf_download():
         yield p
 
 
+@pytest.fixture(autouse=True)
+def mock_asyncio_sleep():
+    """Stub asyncio.sleep so per-iteration jitter doesn't slow tests."""
+    with patch("dispatch_document.asyncio.sleep", new=AsyncMock(return_value=None)):
+        yield
+
+
 @pytest.fixture
 def mock_uazapi():
     client = MagicMock()

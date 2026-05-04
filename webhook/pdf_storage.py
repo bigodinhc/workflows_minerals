@@ -59,4 +59,9 @@ def upload_and_sign(
         },
     )
     signed = bucket.create_signed_url(path, SIGNED_URL_TTL_SECONDS)
-    return signed["signedURL"]
+    url = signed.get("signedURL") or ""
+    if not url:
+        raise RuntimeError(
+            f"Supabase create_signed_url returned no signedURL for {path}"
+        )
+    return url

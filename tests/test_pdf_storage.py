@@ -64,3 +64,22 @@ def test_upload_and_sign_overwrites_on_duplicate():
         file_options.get("upsert") in ("true", True)
         or kwargs.get("upsert") in ("true", True)
     )
+
+
+def test_upload_and_sign_raises_on_empty_signed_url():
+    """If Supabase returns an empty signedURL, raise so the caller can fall back."""
+    from webhook.pdf_storage import upload_and_sign
+
+    fake_storage_bucket = MagicMock()
+    fake_storage_bucket.upload.return_value = {"Key": "approval-3/file.pdf"}
+    fake_storage_bucket.create_signed_url.return_value = {"signedURL": ""}
+    fake_client = MagicMock()
+    fake_client.storage.from_.return_value = fake_storage_bucket
+
+    with patch("webhook.pdf_storage._client", return_value=fake_client):
+        with pytest.raises(RuntimeError, match="no signedURL"):
+            upload_and_sign(
+                approval_id="approval-3",
+                filename="file.pdf",
+                pdf_bytes=b"%PDF-fake",
+            )

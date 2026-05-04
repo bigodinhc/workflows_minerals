@@ -38,6 +38,18 @@ def _pdf_delivery_mode() -> str:
     return "link" if mode == "link" else "attachment"
 
 
+async def _send_attachment(uazapi, contact, pdf_bytes, filename) -> None:
+    """Encode PDF as base64 and send via uazapi /send/media. Used by both
+    the default attachment mode and the link-mode storage-failure fallback."""
+    pdf_b64_payload = base64.b64encode(pdf_bytes).decode("ascii")
+    await asyncio.to_thread(
+        uazapi.send_document,
+        number=contact.phone_uazapi,
+        file_url=pdf_b64_payload,
+        doc_name=filename,
+    )
+
+
 def _broadcast_delay_range() -> tuple[float, float]:
     """Mirror of execution.core.delivery_reporter._broadcast_delay_range.
     Duplicated here to avoid pulling delivery_reporter into the async PDF path.
@@ -214,21 +226,9 @@ async def dispatch_document(
                                 "error": str(storage_exc)[:200],
                             },
                         )
-                        pdf_b64_payload = base64.b64encode(pdf_bytes).decode("ascii")
-                        await asyncio.to_thread(
-                            uazapi.send_document,
-                            number=contact.phone_uazapi,
-                            file_url=pdf_b64_payload,
-                            doc_name=state["filename"],
-                        )
+                        await _send_attachment(uazapi, contact, pdf_bytes, state["filename"])
                 else:
-                    pdf_b64_payload = base64.b64encode(pdf_bytes).decode("ascii")
-                    await asyncio.to_thread(
-                        uazapi.send_document,
-                        number=contact.phone_uazapi,
-                        file_url=pdf_b64_payload,
-                        doc_name=state["filename"],
-                    )
+                    await _send_attachment(uazapi, contact, pdf_bytes, state["filename"])
                 results["sent"] += 1
             except Exception as exc:
                 logger.error(

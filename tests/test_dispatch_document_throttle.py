@@ -162,8 +162,12 @@ async def test_link_mode_uploads_and_sends_text(
     fake_uazapi.send_message.assert_called_once()
     args, kwargs = fake_uazapi.send_message.call_args
     sent_text = args[1] if len(args) > 1 else kwargs.get("text")
-    assert "https://x.supabase.co/s/sign?token=ABC" in sent_text
-    assert "Report.pdf" in sent_text
+    expected_text = (
+        "📄 Report.pdf\n\n"
+        "https://x.supabase.co/s/sign?token=ABC\n\n"
+        "(Link válido por 7 dias)"
+    )
+    assert sent_text == expected_text, f"text mismatch: {sent_text!r}"
     mock_upload.assert_called_once_with(
         approval_id="abc",
         filename="Report.pdf",

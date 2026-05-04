@@ -35,14 +35,15 @@ Operator chose **15-30s jitter** (more aggressive than research recommends) to k
 ## Goals
 
 - Add deterministic throttle to all WhatsApp send paths so no broadcast bursts faster than ~1 msg per 15-30s.
-- Break byte-identity across the 105 recipients of any single broadcast (per-message reference token + header rotation).
+- Break byte-identity across the 105 recipients of any single broadcast (per-message reference token).
 - Serialize PDF broadcasts (concurrency 1) and add an opt-in flag to deliver PDFs as Supabase Storage signed URLs instead of binary attachments.
 - Respect 429 / rate-limit responses with a backoff before continuing the broadcast.
 - Bump baltic-ingestion in-flight lock TTL so the slower broadcast does not race a re-trigger.
 
 ## Non-Goals
 
-- **Per-recipient name personalization.** Operator explicitly declined. The variation techniques here are content-only (random ref token, header rotation), not contact-data-driven.
+- **Per-recipient name personalization.** Operator explicitly declined. The variation here is content-only (random ref token), not contact-data-driven.
+- **Header rotation across messages.** Operator explicitly declined. Variation comes solely from the ref token.
 - **Operational recovery from the current flag.** Outside code scope. Operator decides the 48-72h pause/ramp manually.
 - **Migration to the official WhatsApp Cloud API.** Out of scope for this iteration.
 - **Per-contact engagement scoring / list pruning.** Future work if quality rating does not recover.
@@ -53,13 +54,13 @@ Operator chose **15-30s jitter** (more aggressive than research recommends) to k
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Caller (morning_check / baltic / send_news / dispatch.py)   │
-│   reporter.dispatch(contacts, body, header_variants=[...])  │
+│   reporter.dispatch(contacts, body)                         │
 └──────────────────────────┬──────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ DeliveryReporter.dispatch  (execution/core/delivery_reporter)│
 │  for contact in contacts:                                    │
-│    msg = _apply_variation(body, header_variants, idx, date) │
+│    msg = body + "\n\nRef: <6-char token>"                   │
 │    try send_fn(contact.phone, msg)                          │
 │    on RATE_LIMIT → sleep(BROADCAST_RATE_LIMIT_SLEEP, 60s)   │
 │    if not last → sleep(uniform(DELAY_MIN, DELAY_MAX))       │
@@ -90,28 +91,7 @@ After every send, append a footer to `message`:
 
 Token generated per contact via `secrets.token_urlsafe(6).upper()[:6]` (~62^6 ≈ 56 billion possibilities — collision irrelevant, the goal is byte-uniqueness across the 105 messages of a single broadcast). Disabling: `BROADCAST_REF_TOKEN_ENABLED=false`.
 
-#### 1b. Header rotation (opt-in per caller)
-
-New optional parameter on `dispatch()`:
-
-```python
-def dispatch(
-    self,
-    contacts: Iterable[Contact],
-    message: str,
-    on_progress: Optional[Callable] = None,
-    header_variants: Optional[list[str]] = None,  # NEW
-) -> DeliveryReport:
-```
-
-When `header_variants` is provided:
-- Shuffle once at dispatch start with `seed = today_yyyymmdd_int`. Stable across retries within a day, varies day-to-day.
-- For contact at index `i`, prepend `shuffled_headers[i % len(shuffled_headers)] + "\n\n"` to `message`.
-- Result: ~21 contacts get header A, ~21 get B, etc. Each cluster falls below the ~20-30 identical-message threshold from research. Combined with the per-contact ref token (1a), every individual message is byte-unique.
-
-When `header_variants` is `None`: no header injection, `message` sent as-is (legacy behavior).
-
-#### 1c. Throttle between sends
+#### 1b. Throttle between sends
 
 After every send (success OR failure), and before the next iteration, sleep:
 
@@ -125,13 +105,13 @@ Defaults: `BROADCAST_DELAY_MIN=15.0`, `BROADCAST_DELAY_MAX=30.0`. Operator can t
 
 The circuit-breaker skip path (early `continue` for skipped contacts) does NOT incur the delay — no actual API call was made.
 
-#### 1d. Rate-limit (429) backoff
+#### 1c. Rate-limit (429) backoff
 
 When `category == SendErrorCategory.RATE_LIMIT`, before the regular inter-message delay, sleep an additional `BROADCAST_RATE_LIMIT_SLEEP` seconds (default 60.0). This precedes (not replaces) the normal jitter delay.
 
 Rationale: the spam classifier treats "ignored 429 → kept sending" as evidence of bot behavior. Honoring the signal is itself a positive trust signal.
 
-#### 1e. Emit throttle metadata to EventBus
+#### 1d. Emit throttle metadata to EventBus
 
 `_emit_delivery_summary_event` already emits `delivery_summary` with success/failure counts. Extend the `detail` dict to include:
 
@@ -210,30 +190,7 @@ All five must be added to `.env.example` with explanatory comments.
 
 ## Caller updates
 
-- `execution/scripts/morning_check.py`, `baltic_ingestion.py`, `send_daily_report.py`, `send_news.py`: optional. Add `header_variants=[...]` argument when calling `reporter.dispatch()` if the operator wants header rotation for that broadcast type. Throttle and ref token are automatic — no code change required for those.
-- `webhook/dispatch.py` (bot-triggered curated broadcast): same — optional `header_variants` adoption.
-
-For this iteration, ship `morning_check` and `baltic_ingestion` with `header_variants` populated (5 variants each). Other scripts can adopt incrementally.
-
-Suggested header variants (Portuguese, mineral-trading context):
-
-```python
-MORNING_CHECK_HEADERS = [
-    "🌅 Relatório Matutino",
-    "📊 Boletim de Preços",
-    "☀️ Atualização de Mercado",
-    "📈 Snapshot de Cotações",
-    "🔔 Resumo Diário",
-]
-
-BALTIC_HEADERS = [
-    "⚓ Baltic Index",
-    "🚢 Atualização Marítima",
-    "📊 Boletim de Frete",
-    "🔔 Cotação Baltic",
-    "📈 Mercado de Frete",
-]
-```
+No source-code changes required in any caller (`morning_check.py`, `baltic_ingestion.py`, `send_daily_report.py`, `send_news.py`, `webhook/dispatch.py`). Throttle, ref token, and 429 backoff are applied transparently inside `DeliveryReporter.dispatch()` — existing callers benefit automatically once the reporter is updated.
 
 ## Operational notes (NOT code)
 
@@ -254,7 +211,6 @@ The spec does not implement recovery from the current flag. The operator should:
   - no delay for circuit-broken-skipped contacts
   - 429 path triggers extra sleep before regular delay
   - ref token appended when enabled, omitted when `BROADCAST_REF_TOKEN_ENABLED=false`
-  - header variants rotated by index, deterministic shuffle by date
   - tokens differ across contacts in same dispatch (byte-uniqueness)
 - `tests/test_dispatch_document_serialized.py`:
   - `CONCURRENCY=1` enforced (assert no overlap in async timeline)
@@ -263,7 +219,7 @@ The spec does not implement recovery from the current flag. The operator should:
 
 ### Integration / manual smoke tests
 
-- Run `morning_check.py --dry-run` after wiring `header_variants`; inspect stdout DELIVERY_REPORT for variation in messages.
+- Run `morning_check.py --dry-run`; inspect stdout DELIVERY_REPORT and verify each contact's outgoing message has a unique `Ref:` token.
 - Run `baltic_ingestion.py` end-to-end against a 3-contact test list (operator-curated). Verify wall-clock duration ≈ `2 × ((MIN + MAX) / 2)` = ~45s.
 - For PDF link mode: set `PDF_DELIVERY_MODE=link` on Railway, trigger an OneDrive approval directed at one test contact, verify the link works and the PDF downloads.
 
@@ -278,8 +234,8 @@ The spec does not implement recovery from the current flag. The operator should:
 
 | Risk | Mitigation |
 |---|---|
-| 15-30s jitter is in the "medium risk" zone per research | Variation techniques (token + header) compensate by removing byte-identity. Operator can bump to 30-60s via env if quality rating does not recover. |
-| Header rotation creates 5 sub-clusters of ~21 identical messages each — still above the lower-end of "20-30 identical" threshold | Per-contact ref token defeats hash-classifier; semantic-similarity classifier may still cluster them, but at much weaker signal. Future iteration: per-contact name personalization if needed. |
+| 15-30s jitter is in the "medium risk" zone per research | Per-contact ref token removes byte-identity (defeats hash-classifier). Operator can bump delay to 30-60s via env if quality rating does not recover. |
+| Per-contact ref token defeats hash-classifier but a semantic-similarity classifier may still cluster the 105 messages as "same content" | Accepted residual risk. If a third spam flag occurs after deploy, escalate by adopting name personalization or pruning the list to engaged contacts. |
 | `time.sleep` blocks the async dispatch in `webhook/dispatch.py` (sync `reporter.dispatch` runs inside `asyncio.to_thread`) | Already runs in a thread (`webhook/dispatch.py:212`). Sleep is fine there. |
 | Supabase Storage signed URL generation can fail (network) | If `PDF_DELIVERY_MODE=link` and the upload/sign fails: log error, fall through to `send_document` attachment (best-effort fallback). Avoids losing the broadcast on a Storage hiccup. |
 | `BROADCAST_DELAY_MIN/MAX` misconfigured (e.g., MIN > MAX, or negative) | Validate at startup: clamp `MIN = max(0, MIN)`, `MAX = max(MIN, MAX)`. Log warning if clamped. |
@@ -298,7 +254,6 @@ The spec does not implement recovery from the current flag. The operator should:
 
 ## Open questions / followups
 
-- Should `header_variants` rotate per **dispatch** (random shuffle each time) or per **day** (deterministic seed by date)? Spec chooses per-day for predictability and idempotency-test friendliness.
 - Should `dispatch_document.py` link-mode also append a ref token? Spec says no — the signed URL token already provides byte-uniqueness.
 - Should we add a Prometheus counter `whatsapp_throttle_sleep_seconds_total` for observability? Defer to a follow-up.
 

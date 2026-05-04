@@ -195,3 +195,37 @@ def test_dispatch_extra_sleep_on_rate_limit(monkeypatch):
     #                + 20 (regular jitter after attempt 2)
     # No sleep after attempt 3 (last).
     assert sleeps == [60.0, 20.0, 20.0]
+
+
+def test_delivery_summary_event_includes_throttle_metadata(monkeypatch):
+    monkeypatch.setenv("BROADCAST_DELAY_MIN", "15.0")
+    monkeypatch.setenv("BROADCAST_DELAY_MAX", "30.0")
+    monkeypatch.setattr(
+        "execution.core.delivery_reporter.random.uniform", lambda lo, hi: 1.0
+    )
+
+    captured = {}
+    fake_bus = MagicMock()
+    def emit(event, label=None, detail=None, level="info"):
+        captured["event"] = event
+        captured["detail"] = detail
+        captured["level"] = level
+    fake_bus.emit.side_effect = emit
+
+    monkeypatch.setattr(
+        "execution.core.event_bus.get_current_bus", lambda: fake_bus
+    )
+
+    reporter = DeliveryReporter(
+        workflow="t", send_fn=MagicMock(), notify_telegram=False
+    )
+    contacts = [Contact(name=f"U{i}", phone=f"55{i:03}") for i in range(2)]
+    reporter.dispatch(contacts, message="hi")
+
+    assert captured["event"] == "delivery_summary"
+    detail = captured["detail"]
+    assert detail["delay_min"] == 15.0
+    assert detail["delay_max"] == 30.0
+    assert detail["total"] == 2
+    assert "duration_seconds" in detail
+    assert isinstance(detail["duration_seconds"], int)

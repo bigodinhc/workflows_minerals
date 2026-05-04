@@ -960,7 +960,12 @@ def test_dispatch_emits_delivery_summary_to_active_bus(monkeypatch):
     s = summaries[0]
     assert s["level"] == "info"
     assert "5/5" in s["label"]
-    assert s["detail"] == {"total": 5, "success": 5, "failure": 0}
+    assert s["detail"]["total"] == 5
+    assert s["detail"]["success"] == 5
+    assert s["detail"]["failure"] == 0
+    assert "delay_min" in s["detail"]
+    assert "delay_max" in s["detail"]
+    assert "duration_seconds" in s["detail"]
 
 
 def test_dispatch_emits_delivery_summary_with_warn_on_failure(monkeypatch):
@@ -984,7 +989,12 @@ def test_dispatch_emits_delivery_summary_with_warn_on_failure(monkeypatch):
     assert s["level"] == "warn"
     assert "2/3" in s["label"]
     assert "1 falha" in s["label"]
-    assert s["detail"] == {"total": 3, "success": 2, "failure": 1}
+    assert s["detail"]["total"] == 3
+    assert s["detail"]["success"] == 2
+    assert s["detail"]["failure"] == 1
+    assert "delay_min" in s["detail"]
+    assert "delay_max" in s["detail"]
+    assert "duration_seconds" in s["detail"]
 
 
 def test_dispatch_noop_when_no_bus_active(monkeypatch):

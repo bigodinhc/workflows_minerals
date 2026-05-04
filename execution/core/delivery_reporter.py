@@ -529,6 +529,8 @@ class DeliveryReporter:
         if report.failure_count > 0:
             label += f", {report.failure_count} falha{'s' if report.failure_count > 1 else ''}"
         try:
+            lo, hi = _broadcast_delay_range()
+            duration = int((report.finished_at - report.started_at).total_seconds())
             bus.emit(
                 "delivery_summary",
                 label=label,
@@ -536,6 +538,9 @@ class DeliveryReporter:
                     "total": report.total,
                     "success": report.success_count,
                     "failure": report.failure_count,
+                    "delay_min": lo,
+                    "delay_max": hi,
+                    "duration_seconds": duration,
                 },
                 level=level,
             )

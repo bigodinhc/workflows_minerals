@@ -5,10 +5,23 @@ across GH Actions scripts and webhook flows.
 Emits structured JSON to stdout (for dashboard parsing) and sends
 Telegram summary notification at end of dispatch.
 """
+import os
+import secrets
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Callable, Iterable, Optional
+
+
+def _broadcast_ref_token() -> str:
+    """6-char URL-safe random token for per-message byte-uniqueness."""
+    # token_urlsafe(6) returns ~8 chars; truncate to 6 for compact footer.
+    return secrets.token_urlsafe(6)[:6]
+
+
+def _ref_token_enabled() -> bool:
+    return os.environ.get("BROADCAST_REF_TOKEN_ENABLED", "true").lower() != "false"
 
 
 class SendErrorCategory(Enum):
@@ -361,7 +374,6 @@ class DeliveryReporter:
         the remaining contacts are skipped and marked with error
         'skipped_due_to_circuit_break'.
         """
-        import time
         started_at = datetime.now().astimezone()
         results: list = []
         contacts_list = list(contacts)
@@ -392,8 +404,11 @@ class DeliveryReporter:
             success = False
             error: Optional[str] = None
             category: SendErrorCategory = SendErrorCategory.UNKNOWN
+            outgoing = message
+            if _ref_token_enabled():
+                outgoing = f"{message}\n\nRef: {_broadcast_ref_token()}"
             try:
-                self.send_fn(contact.phone, message)
+                self.send_fn(contact.phone, outgoing)
                 success = True
             except Exception as exc:
                 category, reason = classify_error(exc)

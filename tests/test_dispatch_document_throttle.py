@@ -125,3 +125,84 @@ async def test_attachment_mode_calls_send_document(
 
     fake_uazapi.send_document.assert_called_once()
     fake_uazapi.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_link_mode_uploads_and_sends_text(
+    redis_client, fresh_state, mock_pdf_get, monkeypatch
+):
+    monkeypatch.setenv("PDF_DELIVERY_MODE", "link")
+    monkeypatch.setattr(
+        "webhook.dispatch_document.asyncio.sleep", AsyncMock(return_value=None)
+    )
+
+    fake_uazapi = MagicMock()
+    fake_uazapi.send_document = MagicMock()
+    fake_uazapi.send_message = MagicMock(return_value={"messageId": "n"})
+
+    contact = _make_contact("U", "55001")
+    repo = MagicMock()
+    repo.list_active.return_value = [contact]
+    repo.list_by_list_code.return_value = [contact]
+
+    await redis_client.set("approval:abc", json.dumps(fresh_state))
+
+    with patch("webhook.dispatch_document._redis", return_value=redis_client), \
+         patch("webhook.dispatch_document.UazapiClient", return_value=fake_uazapi), \
+         patch("webhook.dispatch_document.ContactsRepo", return_value=repo), \
+         patch(
+             "webhook.dispatch_document.upload_and_sign",
+             return_value="https://x.supabase.co/s/sign?token=ABC",
+         ) as mock_upload:
+        from webhook.dispatch_document import dispatch_document
+        result = await dispatch_document("abc", "__all__")
+
+    assert result["sent"] == 1
+    fake_uazapi.send_document.assert_not_called()
+    fake_uazapi.send_message.assert_called_once()
+    args, kwargs = fake_uazapi.send_message.call_args
+    sent_text = args[1] if len(args) > 1 else kwargs.get("text")
+    assert "https://x.supabase.co/s/sign?token=ABC" in sent_text
+    assert "Report.pdf" in sent_text
+    mock_upload.assert_called_once_with(
+        approval_id="abc",
+        filename="Report.pdf",
+        pdf_bytes=b"%PDF-1.4 fake-pdf-bytes",
+    )
+
+
+@pytest.mark.asyncio
+async def test_link_mode_falls_back_to_attachment_on_storage_failure(
+    redis_client, fresh_state, mock_pdf_get, monkeypatch
+):
+    """If upload_and_sign raises, fall through to send_document so the
+    broadcast still goes out — Storage hiccup must not lose the message."""
+    monkeypatch.setenv("PDF_DELIVERY_MODE", "link")
+    monkeypatch.setattr(
+        "webhook.dispatch_document.asyncio.sleep", AsyncMock(return_value=None)
+    )
+
+    fake_uazapi = MagicMock()
+    fake_uazapi.send_document = MagicMock(return_value={"messageId": "m"})
+    fake_uazapi.send_message = MagicMock()
+
+    contact = _make_contact("U", "55001")
+    repo = MagicMock()
+    repo.list_active.return_value = [contact]
+    repo.list_by_list_code.return_value = [contact]
+
+    await redis_client.set("approval:abc", json.dumps(fresh_state))
+
+    with patch("webhook.dispatch_document._redis", return_value=redis_client), \
+         patch("webhook.dispatch_document.UazapiClient", return_value=fake_uazapi), \
+         patch("webhook.dispatch_document.ContactsRepo", return_value=repo), \
+         patch(
+             "webhook.dispatch_document.upload_and_sign",
+             side_effect=RuntimeError("storage 503"),
+         ):
+        from webhook.dispatch_document import dispatch_document
+        result = await dispatch_document("abc", "__all__")
+
+    assert result["sent"] == 1
+    fake_uazapi.send_document.assert_called_once()
+    fake_uazapi.send_message.assert_not_called()

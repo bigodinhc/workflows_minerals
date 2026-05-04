@@ -23,12 +23,19 @@ from execution.core.logger import WorkflowLogger
 from execution.integrations.contacts_repo import ContactsRepo
 from execution.integrations.graph_client import GraphClient
 from execution.integrations.uazapi_client import UazapiClient
+from webhook.pdf_storage import upload_and_sign
 
 
 ALL_CODE = "__all__"
 CONCURRENCY = 1
 DOWNLOAD_URL_STALE_AFTER_SECONDS = 50 * 60     # 50 min safety margin on Graph's ~1h TTL
 IDEMPOTENCY_TTL_SECONDS = 24 * 3600
+
+
+def _pdf_delivery_mode() -> str:
+    """Returns 'link' or 'attachment'. Defaults to 'attachment' (current)."""
+    mode = os.environ.get("PDF_DELIVERY_MODE", "attachment").lower()
+    return "link" if mode == "link" else "attachment"
 
 
 def _broadcast_delay_range() -> tuple[float, float]:
@@ -175,14 +182,53 @@ async def dispatch_document(
                 results["skipped"] += 1
                 return
             try:
-                # attachment mode (current default behavior)
-                pdf_b64_payload = base64.b64encode(pdf_bytes).decode("ascii")
-                await asyncio.to_thread(
-                    uazapi.send_document,
-                    number=contact.phone_uazapi,
-                    file_url=pdf_b64_payload,
-                    doc_name=state["filename"],
-                )
+                if _pdf_delivery_mode() == "link":
+                    try:
+                        signed_url = await asyncio.to_thread(
+                            upload_and_sign,
+                            approval_id=approval_id,
+                            filename=state["filename"],
+                            pdf_bytes=pdf_bytes,
+                        )
+                        link_text = (
+                            f"📄 {state['filename']}\n\n"
+                            f"{signed_url}\n\n"
+                            f"(Link válido por 7 dias)"
+                        )
+                        await asyncio.to_thread(
+                            uazapi.send_message,
+                            contact.phone_uazapi,
+                            link_text,
+                        )
+                    except Exception as storage_exc:
+                        # Fallback: storage hiccup must not lose the broadcast.
+                        logger.error(
+                            f"link-mode storage/sign failed for {contact.phone_uazapi}: "
+                            f"{storage_exc}; falling back to attachment"
+                        )
+                        bus.emit(
+                            "pdf_link_fallback",
+                            level="warn",
+                            detail={
+                                "phone": contact.phone_uazapi,
+                                "error": str(storage_exc)[:200],
+                            },
+                        )
+                        pdf_b64_payload = base64.b64encode(pdf_bytes).decode("ascii")
+                        await asyncio.to_thread(
+                            uazapi.send_document,
+                            number=contact.phone_uazapi,
+                            file_url=pdf_b64_payload,
+                            doc_name=state["filename"],
+                        )
+                else:
+                    pdf_b64_payload = base64.b64encode(pdf_bytes).decode("ascii")
+                    await asyncio.to_thread(
+                        uazapi.send_document,
+                        number=contact.phone_uazapi,
+                        file_url=pdf_b64_payload,
+                        doc_name=state["filename"],
+                    )
                 results["sent"] += 1
             except Exception as exc:
                 logger.error(

@@ -41,7 +41,7 @@ IRONMARKET_URL = "https://merry-adaptation-production.up.railway.app/ingest/pric
 IRONMARKET_API_KEY = "ironmkt_WUbuYLe4m06GTiYos_fVwvBfNa2l8GWoJtE9K8MJFCY" # Keeping hardcoded as requested, or load from env
 
 # Split-lock idempotency TTLs
-_INFLIGHT_LOCK_TTL_SEC = 20 * 60   # 20 min — covers max observed broadcast duration
+_INFLIGHT_LOCK_TTL_SEC = 60 * 60   # 60 min — accommodates throttled broadcast (~40min) + buffer
 _SENT_FLAG_TTL_SEC = 48 * 3600     # 48 h — one reporting day + buffer
 
 def get_emoji(direction):

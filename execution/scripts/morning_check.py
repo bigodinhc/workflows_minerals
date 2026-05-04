@@ -72,7 +72,7 @@ FREIGHT_KEYS = [] # No freight mapped
 REPORT_TYPE = "MORNING_REPORT"
 
 # Split-lock idempotency TTLs
-_INFLIGHT_LOCK_TTL_SEC = 20 * 60   # 20 min — covers max observed broadcast duration
+_INFLIGHT_LOCK_TTL_SEC = 60 * 60   # 60 min — accommodates throttled broadcast (~40min) + buffer
 _SENT_FLAG_TTL_SEC = 48 * 3600     # 48 h — one reporting day + buffer
 
 # Minimum Platts symbols expected before broadcasting

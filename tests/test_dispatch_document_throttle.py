@@ -47,16 +47,29 @@ def _make_contact(name, phone):
 
 @pytest.mark.asyncio
 async def test_concurrency_is_one(redis_client, fresh_state, mock_pdf_get, monkeypatch):
-    """All sends happen sequentially, never in parallel."""
+    """All sends happen sequentially, never in parallel.
+
+    Uses an in_flight counter inside the mock send_document to detect
+    any concurrent execution. Catches semaphore regressions and
+    accidental gather-without-semaphore refactors.
+    """
     monkeypatch.setenv("PDF_DELIVERY_MODE", "attachment")
     monkeypatch.setattr(
         "webhook.dispatch_document.asyncio.sleep", AsyncMock(return_value=None)
     )
 
+    in_flight = {"max": 0, "now": 0}
+
+    def _tracked_send(**kwargs):
+        import time
+        in_flight["now"] += 1
+        in_flight["max"] = max(in_flight["max"], in_flight["now"])
+        time.sleep(0.01)  # let the threadpool potentially run others concurrently
+        in_flight["now"] -= 1
+        return {"messageId": "m"}
+
     fake_uazapi = MagicMock()
-    fake_uazapi.send_document = MagicMock(
-        side_effect=lambda **k: {"messageId": "m"}
-    )
+    fake_uazapi.send_document = MagicMock(side_effect=_tracked_send)
 
     contacts = [_make_contact(f"U{i}", f"55{i:03}") for i in range(4)]
     repo = MagicMock()
@@ -72,11 +85,17 @@ async def test_concurrency_is_one(redis_client, fresh_state, mock_pdf_get, monke
          patch("webhook.dispatch_document.UazapiClient", return_value=fake_uazapi), \
          patch("webhook.dispatch_document.ContactsRepo", return_value=repo):
         from webhook.dispatch_document import dispatch_document, CONCURRENCY
-        # Verify constant flipped
+        # Constant check is informational; the in_flight assertion below
+        # is the actual safety net.
         assert CONCURRENCY == 1
         result = await dispatch_document("abc", "__all__")
 
     assert result["sent"] == 4
+    # Real verification: no two sends ever in flight at the same time.
+    assert in_flight["max"] == 1, (
+        f"Detected concurrent sends (max in-flight = {in_flight['max']}); "
+        f"semaphore is not enforcing serial dispatch"
+    )
 
 
 @pytest.mark.asyncio

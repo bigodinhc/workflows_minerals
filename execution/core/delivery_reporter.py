@@ -6,6 +6,7 @@ Emits structured JSON to stdout (for dashboard parsing) and sends
 Telegram summary notification at end of dispatch.
 """
 import os
+import random
 import secrets
 import time
 from dataclasses import dataclass
@@ -22,6 +23,15 @@ def _broadcast_ref_token() -> str:
 
 def _ref_token_enabled() -> bool:
     return os.environ.get("BROADCAST_REF_TOKEN_ENABLED", "true").lower() != "false"
+
+
+def _broadcast_delay_range() -> tuple[float, float]:
+    """Returns (min, max) seconds between sends. Clamps to safe values."""
+    lo = float(os.environ.get("BROADCAST_DELAY_MIN", "15.0"))
+    hi = float(os.environ.get("BROADCAST_DELAY_MAX", "30.0"))
+    lo = max(0.0, lo)
+    hi = max(lo, hi)
+    return lo, hi
 
 
 class SendErrorCategory(Enum):
@@ -446,6 +456,17 @@ class DeliveryReporter:
                     on_progress(i + 1, total, result)
                 except Exception:
                     pass  # progress callback failures do not abort dispatch
+
+            # Throttle: sleep between sends to avoid spam-velocity classifiers.
+            # Skip after the last contact, and skip when the contact was
+            # circuit-broken (no API call was made).
+            is_last = (i == total - 1)
+            was_real_send = not (
+                circuit_tripped and result.category == SendErrorCategory.SKIPPED_CIRCUIT_BREAK
+            )
+            if not is_last and was_real_send:
+                lo, hi = _broadcast_delay_range()
+                time.sleep(random.uniform(lo, hi))
 
         finished_at = datetime.now().astimezone()
         report = DeliveryReport(

@@ -4,6 +4,12 @@ from execution.core.delivery_reporter import Contact, DeliveryResult, DeliveryRe
 from datetime import datetime
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    """Replace time.sleep so tests don't actually wait during throttle delays."""
+    monkeypatch.setattr("execution.core.delivery_reporter.time.sleep", lambda _: None)
+
+
 def test_contact_dataclass():
     c = Contact(name="João Silva", phone="5511999999999")
     assert c.name == "João Silva"

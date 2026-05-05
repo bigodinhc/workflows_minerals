@@ -62,15 +62,22 @@ export function parsePlattsDate(dateString) {
 
         let day, month;
         if (first > 12) {
+            // first must be the day (only days can be >12)
             day = first;
             month = second - 1;
         } else if (second > 12) {
+            // second must be the day → reading is MM/DD/YYYY (e.g. an article scraped from a US-formatted source)
             month = first - 1;
             day = second;
         } else {
-            // Ambíguo: assume MM/DD/YYYY (formato servidor americano)
-            month = first - 1;
-            day = second;
+            // Ambíguo (both ≤12): assume DD/MM/YYYY.
+            // Platts UI consistently renders DD/MM/YYYY HH:MM:SS UTC for both
+            // listing grids and article timestamps (verified from production logs
+            // 14/04/2026, 15/04/2026, etc. with day > 12). Earlier the fallback was
+            // MM/DD which silently flipped dates like 03/05/2026 → May 3 instead of
+            // March 5 and dropped them from "today"/"specificDate" filters.
+            day = first;
+            month = second - 1;
         }
 
         return new Date(Date.UTC(year, month, day, hour, minute, secs));

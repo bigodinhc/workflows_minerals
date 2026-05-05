@@ -57,6 +57,12 @@
             "minimum": 1,
             "maximum": 20
         },
+        "collectTopNews": {
+            "title": "Coletar Top News",
+            "type": "boolean",
+            "description": "Coletar o slider 'Top News' do allInsights Ferrous Metals. Desligue se você só quer Latest+Flash.",
+            "default": true
+        },
         "includeLatest": {
             "title": "Incluir Latest list",
             "type": "boolean",

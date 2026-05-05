@@ -13,23 +13,23 @@
  * - RMW (padrão B) executado sequencial na page principal
  */
 
-import { PlaywrightCrawler, log } from 'crawlee';
 import { Actor } from 'apify';
+import { log,PlaywrightCrawler } from 'crawlee';
 
 import { loginPlatts } from './auth/login.js';
-import {
-    navigateToFerrousMetals,
-    collectFlashBanner,
-    collectTopNewsList,
-    collectLatestList,
-} from './sources/allInsights.js';
-import { navigateToIronOre, collectNewsList } from './sources/ironOreTopic.js';
-import { collectRMW } from './sources/rmw.js';
 import { collectArticleContent } from './extract/articlePage.js';
+import { EventBus } from './lib/eventBus.js';
+import {
+    collectFlashBanner,
+    collectLatestList,
+    collectTopNewsList,
+    navigateToFerrousMetals,
+} from './sources/allInsights.js';
+import { collectNewsList,navigateToIronOre } from './sources/ironOreTopic.js';
+import { collectRMW } from './sources/rmw.js';
 import { isDateWithinFilter } from './util/dates.js';
 import { saveDebugArtifacts } from './util/debug.js';
 import { createLimiter } from './util/semaphore.js';
-import { EventBus } from './lib/eventBus.js';
 
 await Actor.init();
 
@@ -48,7 +48,7 @@ const {
     scrollForMoreLatest = false,
     rmwTabFilter = '',
     maxArticlesPerRmwTab = 10,
-    concurrency = 3,
+    concurrency = 2,
     collectTopNews = true,
     includeLatest = true,
     includeFlash = true,

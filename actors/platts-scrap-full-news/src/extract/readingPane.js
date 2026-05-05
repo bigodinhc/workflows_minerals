@@ -8,9 +8,10 @@
  * - Metadata: wordCount, paragraphCount, prices, yuanPrices, percentages, companies,
  *   iodexPrice, iopexAssessments, lumpPremium
  */
+import { COMPANIES } from './companies.js';
 
 export async function extractReadingPaneContent(page, paneIndex = -1) {
-    return page.evaluate((idx) => {
+    return page.evaluate(({ idx, companies }) => {
         const allPanes = [...document.querySelectorAll('.readingpane-details')];
         let pane = null;
         if (idx >= 0 && idx < allPanes.length) {
@@ -88,12 +89,7 @@ export async function extractReadingPaneContent(page, paneIndex = -1) {
         const percentMatches = data.fullText.match(/[\d]+\.?\d*%/g);
         if (percentMatches) data.metadata.percentages = [...new Set(percentMatches)];
 
-        // Empresas
-        const companies = [
-            'Vale', 'Rio Tinto', 'BHP', 'FMG', 'Fortescue',
-            'Cargill', 'Trafigura', 'Anglo American', 'CSN',
-            'ArcelorMittal', 'Baosteel', 'POSCO', 'CMRG',
-        ];
+        // Empresas — lista canônica passada via argumento (companies.js)
         data.metadata.companies = companies.filter((c) =>
             data.fullText.toLowerCase().includes(c.toLowerCase()),
         );
@@ -111,5 +107,5 @@ export async function extractReadingPaneContent(page, paneIndex = -1) {
         if (lumpMatch) data.metadata.lumpPremium = lumpMatch[1];
 
         return data;
-    }, paneIndex);
+    }, { idx: paneIndex, companies: COMPANIES });
 }

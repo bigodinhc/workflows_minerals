@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { isDateWithinFilter, parsePlattsDate, formatDateBR } from '../src/util/dates.js';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+import { formatDateBR,isDateWithinFilter, parsePlattsDate } from '../src/util/dates.js';
 
 // Pin "now" so lastXDays tests don't drift with calendar time. Picked a
 // non-ambiguous day (>12) to sidestep the known DD/MM vs MM/DD parser quirk.
@@ -108,6 +109,24 @@ describe('parsePlattsDate', () => {
         expect(d).not.toBeNull();
         expect(d.getUTCFullYear()).toBe(2026);
         expect(d.getUTCMonth()).toBe(3); // April = 3
+        expect(d.getUTCDate()).toBe(16);
+    });
+
+    it('treats ambiguous "05/03/2026" as DD/MM (March 5), not MM/DD (May 3)', () => {
+        // Regression guard for the parser fix. Platts always renders DD/MM/YYYY;
+        // earlier the fallback assumed MM/DD which silently shifted dates by months.
+        const d = parsePlattsDate('05/03/2026 10:00:00 UTC');
+        expect(d).not.toBeNull();
+        expect(d.getUTCMonth()).toBe(2); // March = 2 (zero-indexed)
+        expect(d.getUTCDate()).toBe(5);
+    });
+
+    it('still uses MM/DD when the second component is clearly the day (>12)', () => {
+        // Defensive: if some upstream source ever delivers MM/DD/YYYY (e.g.
+        // a US-formatted feed), the heuristic still picks the right reading.
+        const d = parsePlattsDate('05/16/2026 10:00:00 UTC');
+        expect(d).not.toBeNull();
+        expect(d.getUTCMonth()).toBe(4); // May = 4
         expect(d.getUTCDate()).toBe(16);
     });
 

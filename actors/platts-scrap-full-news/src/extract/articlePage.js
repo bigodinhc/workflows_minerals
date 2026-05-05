@@ -1,4 +1,5 @@
 import { closePopups } from '../auth/login.js';
+import { COMPANIES } from './companies.js';
 import { extractArticleImages, saveImagesToStore } from './images.js';
 import { extractTables } from './tables.js';
 
@@ -45,7 +46,7 @@ export async function collectArticleContent(page, pageLog, item, options = {}) {
         }).catch(() => pageLog.warning('   ⚠️ Conteúdo do artigo não renderizou em 35s (provavelmente Rationale/item não-article)'));
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { /* ok */ });
 
-        const content = await page.evaluate(() => {
+        const content = await page.evaluate((companies) => {
             const data = {
                 title: '',
                 author: '',
@@ -135,17 +136,12 @@ export async function collectArticleContent(page, pageLog, item, options = {}) {
             const commodityPrices = data.fullText.match(/\$[\d,.]+\/(?:mt|ton|tonne|dmt|kg|lb)/gi);
             if (commodityPrices) data.metadata.commodityPrices = [...new Set(commodityPrices)];
 
-            const companies = [
-                'US Steel', 'Nippon Steel', 'Vale', 'Rio Tinto', 'BHP',
-                'ArcelorMittal', 'Fortescue', 'Anglo American', 'POSCO', 'Baowu',
-                'Cleveland-Cliffs', 'Nucor', 'Tata Steel', 'JFE', 'Shougang',
-            ];
             data.metadata.companies = companies.filter((c) =>
                 data.fullText.toLowerCase().includes(c.toLowerCase()),
             );
 
             return data;
-        });
+        }, COMPANIES);
 
         if (collectImages) {
             const articleId = item.href?.match(/articleID=([^&]+)/)?.[1] ||

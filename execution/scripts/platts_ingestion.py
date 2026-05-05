@@ -254,6 +254,7 @@ def main():
             "dateFilter": "today",
             "concurrency": 2,
             "dedupArticles": True,
+            "rmwTabFilter": "Commentary|Lump",
         }
         if bus is not None:
             run_input["trace_id"] = bus.trace_id
@@ -261,7 +262,7 @@ def main():
         if args.target_date:
             run_input["targetDate"] = args.target_date
             run_input["dateFormat"] = "BR"
-            run_input["dateFilter"] = "all"
+            run_input["dateFilter"] = "specificDate"
 
         asyncio.run(_run_with_progress(args, logger, chat_id, today_br, date_iso, run_input))
 

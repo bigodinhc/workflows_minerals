@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple
 from execution.core.logger import WorkflowLogger
 from execution.curation import redis_client
 from execution.curation.id_gen import generate_id
+from execution.curation import news_repo
 
 _RATIONALE_TAB_RE = re.compile(r"\b(Rationale|Lump)\b", re.IGNORECASE)
 
@@ -31,11 +32,22 @@ def _type_tag(item: dict) -> str:
 
 
 def _stage_only(item: dict, item_id: str, item_type: str, today_date: str) -> dict:
-    """Stage one item in Redis and mark seen + scraped. Returns the dict that was staged."""
+    """Stage one item in Redis (load-bearing) and upsert to Supabase (best-effort).
+
+    Redis must succeed — it backs the Telegram /queue. Supabase is best-effort
+    so a transient outage never blocks fresh news from reaching the queue; the
+    item still lands in Supabase next run or via the one-shot backfill.
+    """
     to_stage = {**item, "id": item_id, "type": item_type}
     redis_client.set_staging(item_id, to_stage)
     redis_client.mark_seen(item_id)
     redis_client.mark_scraped(today_date, item_id)
+    try:
+        news_repo.upsert_scraped(item_id, to_stage)
+    except Exception:
+        WorkflowLogger("CurationRouter").warning(
+            f"news_repo.upsert_scraped failed for {item_id} (best-effort, continuing)"
+        )
     return to_stage
 
 

@@ -58,3 +58,76 @@ def test_upsert_scraped_returns_false_on_conflict(fake_sb):
     from execution.curation.news_repo import upsert_scraped
     fake_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock(data=[])
     assert upsert_scraped("dup", {"title": "T"}) is False
+
+
+def test_set_status_archived_sets_fields(fake_sb):
+    from execution.curation.news_repo import set_status
+    upd = fake_sb.table.return_value.update.return_value
+    upd.eq.return_value.execute.return_value = MagicMock(data=[{"id": "abc"}])
+    ok = set_status("abc", "archived", chat_id=999)
+    payload = fake_sb.table.return_value.update.call_args[0][0]
+    assert payload["status"] == "archived"
+    assert payload["archived_by"] == 999
+    assert "archived_at" in payload
+    assert ok is True
+
+
+def test_set_status_rejected_sets_reason(fake_sb):
+    from execution.curation.news_repo import set_status
+    upd = fake_sb.table.return_value.update.return_value
+    upd.eq.return_value.execute.return_value = MagicMock(data=[{"id": "abc"}])
+    set_status("abc", "rejected", reason="fora de escopo")
+    payload = fake_sb.table.return_value.update.call_args[0][0]
+    assert payload["status"] == "rejected"
+    assert payload["reject_reason"] == "fora de escopo"
+    assert "rejected_at" in payload
+
+
+def test_set_status_returns_false_when_no_row(fake_sb):
+    from execution.curation.news_repo import set_status
+    upd = fake_sb.table.return_value.update.return_value
+    upd.eq.return_value.execute.return_value = MagicMock(data=[])
+    assert set_status("missing", "archived", chat_id=1) is False
+
+
+def test_set_status_bulk_uses_in_filter(fake_sb):
+    from execution.curation.news_repo import set_status_bulk
+    upd = fake_sb.table.return_value.update.return_value
+    upd.in_.return_value.execute.return_value = MagicMock(data=[{"id": "a"}, {"id": "b"}])
+    n = set_status_bulk(["a", "b"], "archived", chat_id=1)
+    assert fake_sb.table.return_value.update.return_value.in_.call_args[0][0] == "id"
+    assert n == 2
+
+
+def test_get_by_id_returns_row(fake_sb):
+    from execution.curation.news_repo import get_by_id
+    chain = fake_sb.table.return_value.select.return_value.eq.return_value.limit.return_value
+    chain.execute.return_value = MagicMock(data=[{"id": "abc", "title": "T"}])
+    got = get_by_id("abc")
+    assert got["title"] == "T"
+
+
+def test_get_by_id_returns_none_when_empty(fake_sb):
+    from execution.curation.news_repo import get_by_id
+    chain = fake_sb.table.return_value.select.return_value.eq.return_value.limit.return_value
+    chain.execute.return_value = MagicMock(data=[])
+    assert get_by_id("missing") is None
+
+
+def test_list_by_status_orders_and_limits(fake_sb):
+    from execution.curation.news_repo import list_by_status
+    chain = fake_sb.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value
+    chain.execute.return_value = MagicMock(data=[{"id": "a"}])
+    rows = list_by_status("archived", limit=10)
+    assert rows == [{"id": "a"}]
+
+
+def test_search_uses_text_search(fake_sb):
+    from execution.curation.news_repo import search
+    chain = fake_sb.table.return_value.select.return_value.text_search.return_value.limit.return_value
+    chain.execute.return_value = MagicMock(data=[{"id": "a", "title": "iron ore"}])
+    rows = search("iron ore", limit=5)
+    args = fake_sb.table.return_value.select.return_value.text_search.call_args
+    assert args[0][0] == "fts"
+    assert args[0][1] == "iron ore"
+    assert rows[0]["title"] == "iron ore"

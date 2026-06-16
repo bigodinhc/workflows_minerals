@@ -131,3 +131,14 @@ def test_search_uses_text_search(fake_sb):
     assert args[0][0] == "fts"
     assert args[0][1] == "iron ore"
     assert rows[0]["title"] == "iron ore"
+
+
+def test_item_to_row_does_not_mutate_or_alias_input():
+    """House rule: _item_to_row must not mutate the caller's dict nor alias it into raw."""
+    from execution.curation.news_repo import _item_to_row
+    item = {"title": "T", "fullText": "body", "extra": [1, 2]}
+    snapshot = dict(item)
+    row = _item_to_row("abc", item, status="staged")
+    assert item == snapshot            # input untouched
+    assert row["raw"] is not item      # raw is a decoupled copy
+    assert row["raw"] == item          # but equal in content

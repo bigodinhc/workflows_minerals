@@ -30,7 +30,7 @@ def _item_to_row(item_id: str, item: dict, status: str = "staged") -> dict:
         "paragraphs": item.get("paragraphs"),
         "tables": item.get("tables"),
         "metadata": item.get("metadata"),
-        "raw": item,
+        "raw": dict(item),
     }
     staged_at = item.get("stagedAt")
     if staged_at:

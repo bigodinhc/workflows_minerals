@@ -20,6 +20,8 @@ import os
 import time
 from typing import Optional
 
+from execution.curation import news_repo
+
 _FEEDBACK_TTL_SECONDS = 30 * 24 * 60 * 60   # 30 days
 _PIPELINE_TTL_SECONDS = 2 * 24 * 60 * 60    # 2 days
 
@@ -71,34 +73,8 @@ def list_staging(limit: int = 50) -> list[dict]:
 
 
 def list_archive_recent(limit: int = 10) -> list[dict]:
-    """Return archived items newest-first across all dates, up to limit.
-
-    Each dict contains the parsed JSON plus 'id' and 'archived_date'
-    derived from the key structure platts:archive:<date>:<id>.
-    """
-    client = _get_client()
-    keys = list(client.scan_iter(match="platts:archive:*", count=500))
-    items: list[dict] = []
-    for key in keys:
-        raw = client.get(key)
-        if raw is None:
-            continue
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        parts = key.split(":")
-        if len(parts) < 4:
-            continue
-        archived_date = parts[2]
-        item_id = parts[3]
-        data.setdefault("id", item_id)
-        data["archived_date"] = archived_date
-        items.append(data)
-    items.sort(key=lambda d: d.get("archivedAt") or "", reverse=True)
-    return items[:limit]
+    """Return archived news newest-first from Supabase (platts_news)."""
+    return news_repo.list_by_status("archived", limit=limit)
 
 
 def _feedback_key(feedback_id: str) -> str:
@@ -203,7 +179,10 @@ def stats_for_date(date_iso: str) -> dict:
     client = _get_client()
     scraped = client.scard(f"platts:scraped:{date_iso}")
     staging = sum(1 for _ in client.scan_iter(match="platts:staging:*", count=200))
-    archived = sum(1 for _ in client.scan_iter(match=f"platts:archive:{date_iso}:*", count=200))
+    try:
+        archived = len(news_repo.list_by_status("archived", limit=10000))
+    except Exception:
+        archived = 0
     pipeline = client.scard(f"platts:pipeline:processed:{date_iso}")
     start_ts, end_ts = _date_bounds_epoch(date_iso)
     # Filter by action: zrangebyscore returns members in the date window; HGET

@@ -6,7 +6,7 @@ curation to preserve contact_admin.py-style modularity.
 
 Keyspaces used:
 - platts:staging:<id>               (read)
-- platts:archive:<date>:<id>        (read)
+- (archive agora é lido do Supabase via execution.curation.news_repo)
 - platts:scraped:<date>             (read, for stats — daily telemetry set)
 - platts:pipeline:processed:<date>  (read + write, new)
 - webhook:feedback:<ts>-<id>        (read + write, new Hash)

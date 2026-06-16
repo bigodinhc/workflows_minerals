@@ -24,6 +24,7 @@ from bot.routers._helpers import (
 import redis_queries
 from dispatch import process_approval_async, process_test_send_async
 from execution.curation import redis_client
+from execution.curation import news_repo
 from metrics import edit_failures
 
 logger = logging.getLogger(__name__)
@@ -183,17 +184,22 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
     action = callback_data.action
 
     if action == "archive":
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         try:
-            archived = await asyncio.to_thread(redis_client.archive, item_id, date, chat_id=chat_id)
+            updated = await asyncio.to_thread(
+                news_repo.set_status, item_id, "archived", chat_id=chat_id,
+            )
         except Exception as exc:
-            logger.error(f"curate_archive redis error: {exc}")
-            await query.answer("⚠️ Redis indisponível, tenta de novo")
+            logger.error(f"curate_archive supabase error: {exc}")
+            await query.answer("⚠️ Supabase indisponível, tenta de novo")
             return
-        if archived is None:
-            await query.answer("⚠️ Item expirou ou já processado")
-            await _finalize_card(query, "⚠️ Item expirou ou já processado")
+        if not updated:
+            await query.answer("⚠️ Item não encontrado no banco")
+            await _finalize_card(query, "⚠️ Item não encontrado no banco")
             return
+        try:
+            await asyncio.to_thread(redis_client.discard, item_id)
+        except Exception as exc:
+            logger.warning(f"discard after archive failed for {item_id}: {exc}")
         await query.answer("✅ Arquivado")
         await _finalize_card(
             query,
@@ -209,10 +215,11 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
         except Exception:
             pass
         try:
+            await asyncio.to_thread(news_repo.set_status, item_id, "rejected")
             await asyncio.to_thread(redis_client.discard, item_id)
         except Exception as exc:
-            logger.error(f"curate_reject redis error: {exc}")
-            await query.answer("⚠️ Redis indisponível")
+            logger.error(f"curate_reject error: {exc}")
+            await query.answer("⚠️ Indisponível")
             return
         feedback_key = None
         try:
@@ -279,10 +286,10 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
         if not raw_text:
             await query.answer("⚠️ Item sem texto")
             return
-        # Archive the item
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # Mark archived in Supabase + remove from Redis queue
         try:
-            await asyncio.to_thread(redis_client.archive, item_id, date, chat_id=chat_id)
+            await asyncio.to_thread(news_repo.set_status, item_id, "archived", chat_id=chat_id)
+            await asyncio.to_thread(redis_client.discard, item_id)
         except Exception as exc:
             logger.warning(f"archive after send_raw failed: {exc}")
         await query.answer("📲 Enviando para WhatsApp...")

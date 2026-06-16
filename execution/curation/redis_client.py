@@ -2,15 +2,11 @@
 
 Keyspaces:
 - platts:staging:<id>               JSON string, TTL 48h
-- platts:archive:<date>:<id>        DEPRECATED — archive agora vive no Supabase
-                                    (tabela platts_news, ver news_repo.py)
 - platts:seen                       Sorted Set, score=epoch, rolling 30d dedup
 - platts:scraped:<date>             Set of ids, TTL 30d (daily telemetry)
 - platts:rationale:processed:<date> String flag, TTL 30h (1x/day gate)
 
-As funções archive/get_archive/bulk_archive estão DEPRECATED e sem uso (o
-arquivamento foi migrado para o Supabase via news_repo.set_status). Mantidas
-temporariamente; remoção em follow-up.
+Archive lives entirely in Supabase (tabela platts_news, ver execution.curation.news_repo).
 
 All functions use REDIS_URL env var via _get_client(). Tests monkeypatch _get_client.
 """
@@ -61,10 +57,6 @@ def _staging_key(item_id: str) -> str:
     return f"platts:staging:{item_id}"
 
 
-def _archive_key(date: str, item_id: str) -> str:
-    return f"platts:archive:{date}:{item_id}"
-
-
 _SEEN_KEY = "platts:seen"
 
 
@@ -94,54 +86,10 @@ def get_staging(item_id: str) -> Optional[dict]:
     return json.loads(raw)
 
 
-def archive(item_id: str, date: str, chat_id: int) -> Optional[dict]:
-    """Move item from staging to archive atomically.
-
-    SET + DELETE run in a pipeline transaction so a mid-operation failure
-    cannot leave the item in both keyspaces.
-
-    Returns archived dict or None if staging missing.
-    """
-    item = get_staging(item_id)
-    if item is None:
-        return None
-    item = dict(item)
-    item["archivedAt"] = datetime.now(timezone.utc).isoformat()
-    item["archivedBy"] = chat_id
-    client = _get_client()
-    pipe = client.pipeline(transaction=True)
-    pipe.set(_archive_key(date, item_id), json.dumps(item, ensure_ascii=False))
-    pipe.delete(_staging_key(item_id))
-    pipe.execute()
-    return item
-
-
 def discard(item_id: str) -> None:
     """Delete staging without archiving."""
     client = _get_client()
     client.delete(_staging_key(item_id))
-
-
-def bulk_archive(item_ids: list[str], date: str, chat_id: int) -> dict:
-    """Archive multiple items. Returns {'archived': [...ids], 'failed': [...ids]}.
-
-    Each item is archived independently via archive() — one missing or
-    errored item does not affect the others. Order of 'archived' and
-    'failed' reflects input order.
-    """
-    archived: list[str] = []
-    failed: list[str] = []
-    for item_id in item_ids:
-        try:
-            result = archive(item_id, date, chat_id=chat_id)
-        except Exception:
-            failed.append(item_id)
-            continue
-        if result is None:
-            failed.append(item_id)
-        else:
-            archived.append(item_id)
-    return {"archived": archived, "failed": failed}
 
 
 def bulk_discard(item_ids: list[str]) -> int:
@@ -154,15 +102,6 @@ def bulk_discard(item_ids: list[str]) -> int:
     client = _get_client()
     keys = [_staging_key(i) for i in item_ids]
     return int(client.delete(*keys))
-
-
-def get_archive(date: str, item_id: str) -> Optional[dict]:
-    """Read an archived item by date + id. Returns None if missing."""
-    client = _get_client()
-    raw = client.get(_archive_key(date, item_id))
-    if raw is None:
-        return None
-    return json.loads(raw)
 
 
 def is_seen(item_id: str) -> bool:

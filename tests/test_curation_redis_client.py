@@ -1,5 +1,4 @@
 """Tests for execution.curation.redis_client."""
-import json
 import pytest
 import fakeredis
 
@@ -45,27 +44,6 @@ def test_get_staging_returns_none_for_missing(fake_redis):
     assert get_staging("missing") is None
 
 
-def test_archive_moves_from_staging_to_archive(fake_redis):
-    from execution.curation.redis_client import set_staging, archive
-    item = {"id": "abc123", "title": "Test"}
-    set_staging("abc123", item)
-    archived = archive("abc123", "2026-04-14", chat_id=12345)
-    # Staging gone, archive present
-    assert fake_redis.get("platts:staging:abc123") is None
-    raw = fake_redis.get("platts:archive:2026-04-14:abc123")
-    data = json.loads(raw)
-    assert data["title"] == "Test"
-    assert data["archivedBy"] == 12345
-    assert "archivedAt" in data
-    assert archived == data
-
-
-def test_archive_returns_none_if_staging_missing(fake_redis):
-    from execution.curation.redis_client import archive
-    result = archive("missing", "2026-04-14", chat_id=1)
-    assert result is None
-
-
 def test_discard_deletes_staging(fake_redis):
     from execution.curation.redis_client import set_staging, discard
     set_staging("abc123", {"id": "abc123"})
@@ -84,20 +62,6 @@ def test_mark_seen_uses_sorted_set(fake_redis):
     from execution.curation.redis_client import mark_seen
     mark_seen("abc123")
     assert fake_redis.zscore("platts:seen", "abc123") is not None
-
-
-def test_get_archive_roundtrip(fake_redis):
-    from execution.curation.redis_client import set_staging, archive, get_archive
-    set_staging("abc", {"id": "abc", "title": "Hello"})
-    archive("abc", "2026-04-14", chat_id=1)
-    got = get_archive("2026-04-14", "abc")
-    assert got["title"] == "Hello"
-    assert got["archivedBy"] == 1
-
-
-def test_get_archive_missing_returns_none(fake_redis):
-    from execution.curation.redis_client import get_archive
-    assert get_archive("2026-04-14", "missing") is None
 
 
 def test_rationale_flag_set_once_per_day(fake_redis):
@@ -195,39 +159,6 @@ def test_mark_scraped_idempotent(fake_redis):
     mark_scraped("2026-04-16", "abc123")
     mark_scraped("2026-04-16", "abc123")
     assert fake_redis.scard("platts:scraped:2026-04-16") == 1
-
-
-def test_bulk_archive_moves_all_present_items(fake_redis):
-    from execution.curation.redis_client import set_staging, bulk_archive
-    set_staging("a", {"id": "a", "title": "A"})
-    set_staging("b", {"id": "b", "title": "B"})
-    result = bulk_archive(["a", "b"], "2026-04-22", chat_id=42)
-    assert result == {"archived": ["a", "b"], "failed": []}
-    assert fake_redis.get("platts:staging:a") is None
-    assert fake_redis.get("platts:staging:b") is None
-    assert fake_redis.get("platts:archive:2026-04-22:a") is not None
-    assert fake_redis.get("platts:archive:2026-04-22:b") is not None
-
-
-def test_bulk_archive_reports_missing_items_as_failed(fake_redis):
-    from execution.curation.redis_client import set_staging, bulk_archive
-    set_staging("a", {"id": "a"})
-    result = bulk_archive(["a", "missing"], "2026-04-22", chat_id=42)
-    assert result["archived"] == ["a"]
-    assert result["failed"] == ["missing"]
-
-
-def test_bulk_archive_empty_list_is_noop(fake_redis):
-    from execution.curation.redis_client import bulk_archive
-    assert bulk_archive([], "2026-04-22", chat_id=42) == {"archived": [], "failed": []}
-
-
-def test_bulk_archive_preserves_order(fake_redis):
-    from execution.curation.redis_client import set_staging, bulk_archive
-    for id_ in ("z", "a", "m"):
-        set_staging(id_, {"id": id_})
-    result = bulk_archive(["z", "a", "m"], "2026-04-22", chat_id=42)
-    assert result["archived"] == ["z", "a", "m"]
 
 
 def test_bulk_discard_deletes_present_returns_count(fake_redis):

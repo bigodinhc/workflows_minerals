@@ -16,8 +16,6 @@ async def test_run_pipeline_and_archive_writes_to_supabase(mocker):
         "execution.curation.news_repo.set_status", return_value=True
     )
     discard = mocker.patch("execution.curation.redis_client.discard")
-    # Guard: the dead Redis archive path must NOT be used.
-    archive = mocker.patch("execution.curation.redis_client.archive")
 
     await _helpers.run_pipeline_and_archive(
         chat_id=999, raw_text="body", progress_msg_id=1, item_id="abc123"
@@ -29,7 +27,6 @@ async def test_run_pipeline_and_archive_writes_to_supabase(mocker):
     assert args[1] == "archived"
     assert kwargs.get("chat_id") == 999
     discard.assert_called_once_with("abc123")
-    archive.assert_not_called()
 
 
 @pytest.mark.asyncio

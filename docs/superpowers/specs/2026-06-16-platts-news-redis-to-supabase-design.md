@@ -24,8 +24,9 @@ continuar chegando. A preocupação central é frescura/ingestão, não "storage
    trabalho do scraper** (fila `staging` 48h + ledger de dedup `seen`/`scraped`). O
    consumidor/copilot nunca depende do Redis como storage.
 4. **Tabela dedicada** `platts_news` (não uma `documents` genérica).
-5. **Projeto Supabase separado** do banco de trading (`liqiwvueesohlnnmezyw`). O usuário
-   fornecerá id + coordenadas (URL + service key) do projeto de destino.
+5. **Projeto Supabase separado** do banco de trading (`liqiwvueesohlnnmezyw`), conectado a
+   esta instância. **Nós criamos a tabela e aplicamos a migração aqui**; o SQL fica
+   versionado neste repo (`supabase/migrations/`).
 6. **Retrieval dentro da tabela:** coluna `tsvector` `GENERATED ALWAYS … STORED` + índice
    GIN, incluída no próprio `CREATE TABLE`. Sem serviço de busca à parte, sem pipeline de
    sync. Leitura direta. **Full-text no v1; embeddings (`pgvector`) deferidos.**
@@ -163,14 +164,15 @@ no Supabase** — estado verdadeiro (scrapeada, nunca acionada). Um cron opciona
 | `webhook/bot/routers/callbacks_curation.py` / `callbacks_queue.py` | curadoria escreve status no Supabase | `news_repo` |
 | `webhook/redis_queries.py` (leituras de archive) | re-apontar para `news_repo` | `news_repo` |
 | `execution/scripts/migrate_archive_to_supabase.py` | carga única dos 243 itens | redis + `news_repo` |
-| migração SQL (`CREATE TABLE platts_news`) | schema + índices + tsvector + RLS | projeto de destino |
+| `supabase/migrations/<ts>_platts_news.sql` | schema + índices + tsvector + RLS (versionado aqui) | projeto de destino conectado |
 
 ## 11. Dependências externas / pendências
 
-- **Coordenadas do projeto Supabase de destino** (id, URL, service key) — fornecidas pelo
-  usuário. A migração SQL e a configuração de env vars rodam contra esse projeto.
-- A migração SQL pode ser aplicada pelo repo da outra instância ("eles adicionam na migração
-  deles") — alinhar quem aplica o `CREATE TABLE` (lá ou aqui).
+- **Conexão do projeto Supabase de destino a esta instância** + env vars `NEWS_SUPABASE_URL`
+  / `NEWS_SUPABASE_SERVICE_KEY`. A migração SQL e o teste end-to-end rodam contra esse projeto.
+- **Migração `CREATE TABLE platts_news` versionada aqui** (`supabase/migrations/`) e aplicada
+  por nós nesta instância (não pela outra instância).
+- Idioma do tsvector confirmado: `'english'`.
 
 ## 12. Fora de escopo (v1)
 

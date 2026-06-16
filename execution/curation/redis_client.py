@@ -2,10 +2,15 @@
 
 Keyspaces:
 - platts:staging:<id>               JSON string, TTL 48h
-- platts:archive:<date>:<id>        JSON string, no TTL (consumed by other project)
+- platts:archive:<date>:<id>        DEPRECATED — archive agora vive no Supabase
+                                    (tabela platts_news, ver news_repo.py)
 - platts:seen                       Sorted Set, score=epoch, rolling 30d dedup
 - platts:scraped:<date>             Set of ids, TTL 30d (daily telemetry)
 - platts:rationale:processed:<date> String flag, TTL 30h (1x/day gate)
+
+As funções archive/get_archive/bulk_archive estão DEPRECATED e sem uso (o
+arquivamento foi migrado para o Supabase via news_repo.set_status). Mantidas
+temporariamente; remoção em follow-up.
 
 All functions use REDIS_URL env var via _get_client(). Tests monkeypatch _get_client.
 """

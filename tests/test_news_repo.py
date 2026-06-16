@@ -119,7 +119,7 @@ def test_list_by_status_orders_and_limits(fake_sb):
     chain = fake_sb.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value
     chain.execute.return_value = MagicMock(data=[{"id": "a"}])
     rows = list_by_status("archived", limit=10)
-    assert rows == [{"id": "a"}]
+    assert rows[0]["id"] == "a"
 
 
 def test_search_uses_text_search(fake_sb):
@@ -131,6 +131,28 @@ def test_search_uses_text_search(fake_sb):
     assert args[0][0] == "fts"
     assert args[0][1] == "iron ore"
     assert rows[0]["title"] == "iron ore"
+
+
+def test_row_to_item_reconstructs_camelcase(fake_sb):
+    from execution.curation.news_repo import get_by_id
+    row = {
+        "id": "abc", "type": "news", "status": "archived",
+        "title": "T", "full_text": "BODY", "publish_date": "06/15/2026",
+        "source": "Top News", "author": "Reuters",
+        "archived_at": "2026-06-15T10:00:00+00:00", "archived_by": 7,
+        "raw": {"title": "T", "fullText": "BODY", "publishDate": "06/15/2026",
+                "source": "Top News", "author": "Reuters", "paragraphs": ["p1"]},
+    }
+    chain = fake_sb.table.return_value.select.return_value.eq.return_value.limit.return_value
+    chain.execute.return_value = MagicMock(data=[row])
+    item = get_by_id("abc")
+    assert item["fullText"] == "BODY"
+    assert item["publishDate"] == "06/15/2026"
+    assert item["paragraphs"] == ["p1"]
+    assert item["archivedAt"] == "2026-06-15T10:00:00+00:00"
+    assert item["archived_at"] == "2026-06-15T10:00:00+00:00"
+    assert item["archivedBy"] == 7
+    assert item["status"] == "archived"
 
 
 def test_item_to_row_does_not_mutate_or_alias_input():

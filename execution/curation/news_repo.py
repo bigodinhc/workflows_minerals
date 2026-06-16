@@ -1,8 +1,14 @@
 """Repositório Supabase da tabela platts_news.
 
-Espelha a interface de curadoria do Redis (set_staging/archive/get_archive/...)
-para minimizar o blast radius nos call sites. Toda escrita usa o client do
-projeto de notícias (news_supabase_client.get_news_client).
+Source of truth para notícias arquivadas (o keyspace Redis platts:archive:*
+está deprecado; ver redis_client.py). Espelha a interface de curadoria do
+Redis (set_staging/archive/get_archive/...) para minimizar o blast radius nos
+call sites. Toda escrita usa o client do projeto de notícias
+(news_supabase_client.get_news_client).
+
+Leituras (get_by_id/list_by_status) reconstroem o shape camelCase original do
+scraper via _row_to_item, de modo que os consumidores (preview, mini_api,
+reprocess, /history) funcionam sem alteração.
 """
 from __future__ import annotations
 
@@ -36,6 +42,34 @@ def _item_to_row(item_id: str, item: dict, status: str = "staged") -> dict:
     if staged_at:
         row["scraped_at"] = staged_at
     return row
+
+
+def _row_to_item(row: dict) -> dict:
+    """Reconstruct the camelCase scraper-shaped item from a platts_news row.
+
+    Consumers (preview, mini_api, reprocess, /history) expect the original
+    camelCase scraper keys (fullText, publishDate, archivedAt). The full
+    original object lives in `raw`; curation/timestamp columns (which are NOT
+    in raw) are overlaid here. Both casings of archived_* are exposed so the
+    /history formatter (reads archived_at) and the Mini App (reads archivedAt)
+    both work.
+    """
+    item = dict(row.get("raw") or {})
+    item["id"] = row.get("id")
+    if row.get("type") is not None:
+        item["type"] = row.get("type")
+    item["status"] = row.get("status")
+    item.setdefault("title", row.get("title"))
+    item.setdefault("fullText", row.get("full_text"))
+    item.setdefault("publishDate", row.get("publish_date"))
+    item.setdefault("source", row.get("source"))
+    item.setdefault("author", row.get("author"))
+    if row.get("archived_at"):
+        item["archivedAt"] = row["archived_at"]
+        item["archived_at"] = row["archived_at"]
+    if row.get("archived_by") is not None:
+        item["archivedBy"] = row["archived_by"]
+    return item
 
 
 def upsert_scraped(item_id: str, item: dict) -> bool:
@@ -98,7 +132,7 @@ def get_by_id(item_id: str) -> Optional[dict]:
         get_news_client().table(TABLE).select("*").eq("id", item_id).limit(1).execute()
     )
     data = getattr(resp, "data", None) or []
-    return data[0] if data else None
+    return _row_to_item(data[0]) if data else None
 
 
 def list_by_status(status: str, limit: int = 10) -> list[dict]:
@@ -108,7 +142,8 @@ def list_by_status(status: str, limit: int = 10) -> list[dict]:
         get_news_client().table(TABLE).select("*").eq("status", status)
         .order(order_col, desc=True).limit(limit).execute()
     )
-    return getattr(resp, "data", None) or []
+    rows = getattr(resp, "data", None) or []
+    return [_row_to_item(r) for r in rows]
 
 
 def search(query: str, limit: int = 10) -> list[dict]:

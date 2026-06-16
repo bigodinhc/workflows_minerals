@@ -380,7 +380,8 @@ async def test_on_queue_bulk_confirm_discard_executes(mock_callback_query, mocke
     query = mock_callback_query(chat_id=42)
     await on_queue_bulk_confirm(query, QueueBulkConfirm(action="discard"))
 
-    to_thread.assert_awaited_once()
+    # discard now writes status='rejected' to Supabase before the Redis discard
+    assert to_thread.await_count == 2
     query.answer.assert_awaited_with("✅ 2 descartados")
 
 
@@ -551,3 +552,22 @@ async def test_bulk_confirm_archive_writes_supabase_then_redis(mock_callback_que
 
     assert m_status.call_args[0][1] == "archived"
     m_discard.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_bulk_confirm_discard_marks_rejected_in_supabase(mock_callback_query):
+    from bot.callback_data import QueueBulkConfirm
+    import bot.routers.callbacks_queue as cq
+
+    query = mock_callback_query(data="q_bulkok:discard")
+    cb = QueueBulkConfirm(action="discard")
+
+    with patch.object(cq.queue_selection, "is_select_mode", return_value=True), \
+         patch.object(cq.queue_selection, "get_selection", return_value={"a", "b"}), \
+         patch.object(cq.queue_selection, "exit_mode"), \
+         patch.object(cq.news_repo, "set_status_bulk", return_value=2) as m_status, \
+         patch.object(cq.curation_redis, "bulk_discard", return_value=2), \
+         patch.object(cq, "_rerender", new=AsyncMock()):
+        await cq.on_queue_bulk_confirm(query, cb)
+
+    assert m_status.call_args[0][1] == "rejected"

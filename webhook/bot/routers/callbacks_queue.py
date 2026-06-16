@@ -253,6 +253,10 @@ async def on_queue_bulk_confirm(query: CallbackQuery, callback_data: QueueBulkCo
         toast = f"✅ {ok} {ok_word}" if ok else "⚠️ Nenhum item arquivado"
     else:  # discard
         try:
+            await asyncio.to_thread(news_repo.set_status_bulk, ids, "rejected", chat_id=chat_id)
+        except Exception as exc:
+            logger.warning(f"bulk discard supabase status failed: {exc}")
+        try:
             deleted = await asyncio.to_thread(curation_redis.bulk_discard, ids)
         except Exception as exc:
             logger.error(f"bulk_discard failed: {exc}")

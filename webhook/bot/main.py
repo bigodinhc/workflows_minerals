@@ -71,8 +71,13 @@ async def on_startup(app: web.Application):
 
 
 async def on_shutdown(app: web.Application):
+    # NB: deliberately NOT calling bot.delete_webhook() here. Railway does
+    # rolling deploys: the new container's on_startup re-sets the webhook,
+    # then the OLD container's on_shutdown runs — a delete_webhook() here
+    # races and leaves Telegram with an empty webhook (bot goes silent until
+    # someone re-registers). on_startup re-sets idempotently every boot, so
+    # deleting on shutdown serves no purpose and only causes that outage.
     bot = get_bot()
-    await bot.delete_webhook()
     await bot.session.close()
     logger.info("Bot shut down cleanly")
 

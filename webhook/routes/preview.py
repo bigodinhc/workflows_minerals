@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
 
 import aiohttp_jinja2
 from aiohttp import web
@@ -22,21 +21,12 @@ async def preview_item(request: web.Request) -> web.Response:
     item = None
 
     try:
+        from execution.curation import news_repo
         item = redis_client.get_staging(item_id)
+        if item is None:
+            item = news_repo.get_by_id(item_id)
     except Exception as exc:
-        logger.warning(f"Preview staging lookup failed: {exc}")
-
-    if item is None:
-        now_utc = datetime.now(timezone.utc)
-        for offset in (0, 1):
-            date = (now_utc - timedelta(days=offset)).strftime("%Y-%m-%d")
-            try:
-                item = redis_client.get_archive(date, item_id)
-            except Exception as exc:
-                logger.warning(f"Preview archive lookup failed ({date}): {exc}")
-                continue
-            if item is not None:
-                break
+        logger.warning(f"Preview lookup failed: {exc}")
 
     if item is None:
         return web.Response(

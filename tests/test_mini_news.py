@@ -167,9 +167,10 @@ async def test_get_news_detail_archived():
     from routes.mini_api import get_news_detail
     request = FakeRequest(match_info={"item_id": "platts_003"})
     with _patch_auth():
-        with patch("routes.mini_api.redis_client") as mock_rc:
+        with patch("routes.mini_api.redis_client") as mock_rc, \
+                patch("execution.curation.news_repo.get_by_id",
+                      return_value=ARCHIVE_ITEMS[0]):
             mock_rc.get_staging.return_value = None
-            mock_rc.get_archive.return_value = ARCHIVE_ITEMS[0]
             response = await get_news_detail(request)
     data = json.loads(response.body)
     assert data["id"] == "platts_003"
@@ -181,8 +182,8 @@ async def test_get_news_detail_not_found():
     from routes.mini_api import get_news_detail
     request = FakeRequest(match_info={"item_id": "nonexistent"})
     with _patch_auth():
-        with patch("routes.mini_api.redis_client") as mock_rc:
+        with patch("routes.mini_api.redis_client") as mock_rc, \
+                patch("execution.curation.news_repo.get_by_id", return_value=None):
             mock_rc.get_staging.return_value = None
-            mock_rc.get_archive.return_value = None
             response = await get_news_detail(request)
     assert response.status == 404

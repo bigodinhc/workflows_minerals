@@ -6,7 +6,7 @@ the split regressed behavior — not the test's fault.
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot.callback_data import DraftAction, CurateAction, BroadcastConfirm
 from bot.states import AdjustDraft, RejectReason
@@ -190,9 +190,9 @@ async def test_curate_action_archive_happy_path_finalizes_success(
 ):
     query = mock_callback_query(data="curate:archive:item_arch")
     state = fsm_context_in_state()
-    # archive branch: asyncio.to_thread(redis_client.archive, item_id, date, chat_id=...)
-    #   returns a truthy dict when archived OK, None when item expired
-    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value={"id": "item_arch"}))
+    # New behavior: archive writes status to Supabase (set_status -> True) then
+    # discards from the Redis staging queue. Both run via asyncio.to_thread.
+    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=True))
     mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
 
     await on_curate_action(query, CurateAction(action="archive", item_id="item_arch"), state)
@@ -201,18 +201,19 @@ async def test_curate_action_archive_happy_path_finalizes_success(
 
 
 @pytest.mark.asyncio
-async def test_curate_action_archive_expired_short_circuits(
+async def test_curate_action_archive_not_found_short_circuits(
     mock_callback_query, fsm_context_in_state, mocker,
 ):
     query = mock_callback_query(data="curate:archive:item_gone")
     state = fsm_context_in_state()
-    # Handler treats None return from archive() as "item expired or already processed"
-    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=None))
+    # New behavior: set_status returns False (item not found in Supabase) ->
+    # handler short-circuits with "não encontrado no banco".
+    mocker.patch("asyncio.to_thread", new=AsyncMock(return_value=False))
     mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
 
     await on_curate_action(query, CurateAction(action="archive", item_id="item_gone"), state)
 
-    query.answer.assert_awaited_with("⚠️ Item expirou ou já processado")
+    query.answer.assert_awaited_with("⚠️ Item não encontrado no banco")
 
 
 # ─── on_curate_action — pipeline branch ──────────────────────────────────────
@@ -250,13 +251,14 @@ async def test_curate_action_send_raw_archives_and_dispatches(
 ):
     query = mock_callback_query(data="curate:send_raw:item2")
     state = fsm_context_in_state()
-    # send_raw branch: first call to to_thread returns the item (get_staging),
-    # second call is archive — both go through asyncio.to_thread in the handler.
-    # We use side_effect to return item on first call, None on second (archive).
+    # send_raw branch via asyncio.to_thread, in order:
+    #   1) get_staging -> item
+    #   2) news_repo.set_status (archived)
+    #   3) redis_client.discard
     item = {"title": "Hdr", "fullText": "Body text"}
     to_thread = mocker.patch(
         "asyncio.to_thread",
-        new=AsyncMock(side_effect=[item, None]),
+        new=AsyncMock(side_effect=[item, True, 1]),
     )
     mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
     mocker.patch("bot.routers.callbacks_curation.process_approval_async", new=AsyncMock())
@@ -264,8 +266,8 @@ async def test_curate_action_send_raw_archives_and_dispatches(
 
     await on_curate_action(query, CurateAction(action="send_raw", item_id="item2"), state)
 
-    # archive is called via to_thread as the second call
-    assert to_thread.await_count == 2
+    # get_staging + set_status + discard = 3 to_thread calls
+    assert to_thread.await_count == 3
     query.answer.assert_awaited_with("📲 Enviando para WhatsApp...")
     create_task.assert_called_once()
 
@@ -305,3 +307,42 @@ async def test_broadcast_confirm_cancel_finalizes_without_dispatch(
 
     query.answer.assert_awaited_with("❌ Cancelado")
     create_task.assert_not_called()
+
+
+# ─── on_curate_action — archive Supabase write (Task 3.1) ────────────────────
+
+@pytest.mark.asyncio
+async def test_curate_archive_writes_supabase_then_discards_redis(mock_callback_query):
+    from bot.callback_data import CurateAction
+    import bot.routers.callbacks_curation as cc
+
+    query = mock_callback_query(data="curate:archive:abc123")
+    cb = CurateAction(action="archive", item_id="abc123")
+    state = MagicMock()
+    state.set_state = AsyncMock(); state.update_data = AsyncMock()
+
+    with patch.object(cc.news_repo, "set_status", return_value=True) as m_status, \
+         patch.object(cc.redis_client, "discard") as m_discard, \
+         patch.object(cc, "_finalize_card", new=AsyncMock()):
+        await cc.on_curate_action(query, cb, state)
+
+    m_status.assert_called_once()
+    assert m_status.call_args[0][1] == "archived"
+    m_discard.assert_called_once_with("abc123")
+
+
+@pytest.mark.asyncio
+async def test_curate_archive_aborts_when_supabase_fails(mock_callback_query):
+    from bot.callback_data import CurateAction
+    import bot.routers.callbacks_curation as cc
+
+    query = mock_callback_query(data="curate:archive:abc123")
+    cb = CurateAction(action="archive", item_id="abc123")
+    state = MagicMock()
+
+    with patch.object(cc.news_repo, "set_status", side_effect=RuntimeError("down")), \
+         patch.object(cc.redis_client, "discard") as m_discard, \
+         patch.object(cc, "_finalize_card", new=AsyncMock()):
+        await cc.on_curate_action(query, cb, state)
+
+    m_discard.assert_not_called()

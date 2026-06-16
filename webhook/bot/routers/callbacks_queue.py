@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
 
 from aiogram import Router
 from aiogram.types import CallbackQuery
@@ -23,6 +22,7 @@ from bot.middlewares.auth import RoleMiddleware
 import query_handlers
 import redis_queries
 from execution.curation import redis_client as curation_redis
+from execution.curation import news_repo
 from execution.curation import telegram_poster
 from webhook import queue_selection
 
@@ -234,27 +234,28 @@ async def on_queue_bulk_confirm(query: CallbackQuery, callback_data: QueueBulkCo
     ids = sorted(selected)  # deterministic order for bulk op
 
     if callback_data.action == "archive":
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         try:
-            result = await asyncio.to_thread(
-                curation_redis.bulk_archive, ids, date, chat_id,
+            updated = await asyncio.to_thread(
+                news_repo.set_status_bulk, ids, "archived", chat_id=chat_id,
             )
         except Exception as exc:
-            logger.error(f"bulk_archive failed: {exc}")
-            await query.answer("⚠️ Erro ao arquivar")
+            logger.error(f"bulk archive supabase failed: {exc}")
+            await query.answer("⚠️ Erro ao arquivar (Supabase)")
             await _rerender(query, page=1)
             return
-        ok = len(result["archived"])
-        bad = len(result["failed"])
+        try:
+            deleted = await asyncio.to_thread(curation_redis.bulk_discard, ids)
+        except Exception as exc:
+            logger.warning(f"bulk_discard after archive failed: {exc}")
+            deleted = updated
+        ok = int(updated)
         ok_word = "arquivado" if ok == 1 else "arquivados"
-        bad_verb = "falhou" if bad == 1 else "falharam"
-        if ok and bad:
-            toast = f"✅ {ok} {ok_word}, {bad} {bad_verb} (expirado ou já removido)"
-        elif ok:
-            toast = f"✅ {ok} {ok_word}"
-        else:
-            toast = "⚠️ Nenhum item arquivado (todos expiraram ou foram removidos)"
+        toast = f"✅ {ok} {ok_word}" if ok else "⚠️ Nenhum item arquivado"
     else:  # discard
+        try:
+            await asyncio.to_thread(news_repo.set_status_bulk, ids, "rejected", chat_id=chat_id)
+        except Exception as exc:
+            logger.warning(f"bulk discard supabase status failed: {exc}")
         try:
             deleted = await asyncio.to_thread(curation_redis.bulk_discard, ids)
         except Exception as exc:

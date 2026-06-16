@@ -11,6 +11,10 @@ def fake_redis(monkeypatch):
     redis_queries` (matching production layout) while tests reference
     `webhook.redis_queries`. Both aliases resolve to distinct sys.modules
     entries even though they're the same file.
+
+    Archive reads (history/stats) now come from Supabase via
+    news_repo.list_by_status; default it to empty so Redis-only tests don't
+    hit the network. Tests that need archived rows override it.
     """
     fake = fakeredis.FakeRedis(decode_responses=True)
     from webhook import redis_queries as rq_pkg
@@ -18,6 +22,8 @@ def fake_redis(monkeypatch):
     for rq in (rq_pkg, rq_bare):
         monkeypatch.setattr(rq, "_get_client", lambda: fake)
         monkeypatch.setattr(rq, "_client", None)
+    from execution.curation import news_repo
+    monkeypatch.setattr(news_repo, "list_by_status", lambda *a, **k: [])
     return fake
 
 
@@ -42,16 +48,24 @@ def test_history_empty(fake_redis):
     assert text == "*📚 ARQUIVADOS*\n\nNenhum item arquivado."
 
 
-def test_history_formats_items_with_type_icon(fake_redis):
+def _patch_archive(monkeypatch, rows):
+    """Drive list_archive_recent (now Supabase-backed) by patching news_repo.
+
+    Rows are platts_news-shaped (status='archived', archived_at ISO timestamp).
+    """
+    from execution.curation import news_repo
+    monkeypatch.setattr(news_repo, "list_by_status",
+                        lambda *a, **k: rows)
+
+
+def test_history_formats_items_with_type_icon(fake_redis, monkeypatch):
     from webhook.query_handlers import format_history
-    fake_redis.set("platts:archive:2026-04-14:a", json.dumps({
-        "id": "a", "title": "Bonds Municipais", "type": "news",
-        "archivedAt": "2026-04-14T10:00:00+00:00"
-    }))
-    fake_redis.set("platts:archive:2026-04-13:b", json.dumps({
-        "id": "b", "title": "Daily Rationale", "type": "rationale",
-        "archivedAt": "2026-04-13T08:00:00+00:00"
-    }))
+    _patch_archive(monkeypatch, [
+        {"id": "a", "title": "Bonds Municipais", "type": "news",
+         "archived_at": "2026-04-14T10:00:00+00:00"},
+        {"id": "b", "title": "Daily Rationale", "type": "rationale",
+         "archived_at": "2026-04-13T08:00:00+00:00"},
+    ])
     text = format_history()
     assert "*📚 ARQUIVADOS · 2 mais recentes*" in text
     assert "────" in text
@@ -59,35 +73,35 @@ def test_history_formats_items_with_type_icon(fake_redis):
     assert "2. 📊 Daily Rationale — 13/abr" in text
 
 
-def test_history_falls_back_to_news_icon_when_type_missing(fake_redis):
+def test_history_falls_back_to_news_icon_when_type_missing(fake_redis, monkeypatch):
     """Legacy archived items (pre-v1.1) don't carry `type`; default to news icon."""
     from webhook.query_handlers import format_history
-    fake_redis.set("platts:archive:2026-04-14:legacy", json.dumps({
-        "id": "legacy", "title": "Legacy",
-        "archivedAt": "2026-04-14T10:00:00+00:00"
-    }))
+    _patch_archive(monkeypatch, [
+        {"id": "legacy", "title": "Legacy",
+         "archived_at": "2026-04-14T10:00:00+00:00"},
+    ])
     text = format_history()
     assert "1. 🗞️ Legacy — 14/abr" in text
 
 
-def test_history_truncates_long_title(fake_redis):
+def test_history_truncates_long_title(fake_redis, monkeypatch):
     from webhook.query_handlers import format_history
     long_title = "A" * 80
-    fake_redis.set("platts:archive:2026-04-15:x", json.dumps({
-        "id": "x", "title": long_title, "type": "news",
-        "archivedAt": "2026-04-15T10:00:00+00:00"
-    }))
+    _patch_archive(monkeypatch, [
+        {"id": "x", "title": long_title, "type": "news",
+         "archived_at": "2026-04-15T10:00:00+00:00"},
+    ])
     text = format_history()
     assert "A" * 60 + "…" in text
     assert "A" * 61 not in text
 
 
-def test_history_escapes_markdown_in_title(fake_redis):
+def test_history_escapes_markdown_in_title(fake_redis, monkeypatch):
     from webhook.query_handlers import format_history, _escape_md
-    fake_redis.set("platts:archive:2026-04-15:x", json.dumps({
-        "id": "x", "title": "Vale_Q2 *bonds*", "type": "news",
-        "archivedAt": "2026-04-15T10:00:00+00:00",
-    }))
+    _patch_archive(monkeypatch, [
+        {"id": "x", "title": "Vale_Q2 *bonds*", "type": "news",
+         "archived_at": "2026-04-15T10:00:00+00:00"},
+    ])
     text = format_history()
     assert "*bonds*" not in text
     assert "Vale_Q2" not in text
@@ -115,13 +129,13 @@ def test_stats_empty_day(fake_redis):
     assert "Pipeline" not in text
 
 
-def test_stats_populated(fake_redis):
+def test_stats_populated(fake_redis, monkeypatch):
     from webhook.query_handlers import format_stats
     fake_redis.sadd("platts:scraped:2026-04-15", "a", "b", "c", "d")
     fake_redis.set("platts:staging:s1", json.dumps({"id": "s1"}))
-    fake_redis.set("platts:archive:2026-04-15:x1", json.dumps({"id": "x1"}))
-    fake_redis.set("platts:archive:2026-04-15:x2", json.dumps({"id": "x2"}))
     fake_redis.sadd("platts:pipeline:processed:2026-04-15", "p1")
+    # archived count now comes from Supabase via news_repo.list_by_status
+    _patch_archive(monkeypatch, [{"id": "x1"}, {"id": "x2"}])
     text = format_stats("2026-04-15")
     assert "🔎 Scraped" in text and "4" in text
     assert "🗂️ Staging" in text and "1" in text

@@ -72,7 +72,7 @@ def format_history(limit: int = 10) -> str:
     for i, item in enumerate(items, start=1):
         icon = _type_icon(item)
         title = _escape_md(_truncate(item.get("title") or ""))
-        date = _format_short_date(item.get("archived_date") or "")
+        date = _format_short_date(item.get("archived_date") or item.get("archived_at") or "")
         lines.append(f"{i}. {icon} {title} — {date}")
     return "\n".join(lines)
 

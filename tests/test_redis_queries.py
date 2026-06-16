@@ -1,6 +1,7 @@
 """Tests for webhook.redis_queries."""
 import json
 import time
+from unittest.mock import patch
 import pytest
 import fakeredis
 
@@ -58,35 +59,13 @@ def test_list_staging_fills_id_from_key(fake_redis):
     assert result[0]["id"] == "abc123"
 
 
-def test_list_archive_recent_empty(fake_redis):
-    from webhook.redis_queries import list_archive_recent
-    assert list_archive_recent() == []
-
-
-def test_list_archive_recent_crossdate_sorted(fake_redis):
-    from webhook.redis_queries import list_archive_recent
-    fake_redis.set("platts:archive:2026-04-13:x", json.dumps({"id": "x", "title": "X", "archivedAt": "2026-04-13T09:00:00+00:00"}))
-    fake_redis.set("platts:archive:2026-04-15:y", json.dumps({"id": "y", "title": "Y", "archivedAt": "2026-04-15T14:00:00+00:00"}))
-    fake_redis.set("platts:archive:2026-04-14:z", json.dumps({"id": "z", "title": "Z", "archivedAt": "2026-04-14T11:00:00+00:00"}))
-    result = list_archive_recent(limit=10)
-    assert [d["id"] for d in result] == ["y", "z", "x"]
-
-
-def test_list_archive_recent_respects_limit(fake_redis):
-    from webhook.redis_queries import list_archive_recent
-    for i in range(15):
-        ts = f"2026-04-15T{i:02d}:00:00+00:00"
-        fake_redis.set(f"platts:archive:2026-04-15:i{i}", json.dumps({"id": f"i{i}", "archivedAt": ts}))
-    result = list_archive_recent(limit=10)
-    assert len(result) == 10
-
-
-def test_list_archive_recent_derives_date_from_key(fake_redis):
-    """Each dict should have archived_date extracted from key middle segment."""
-    from webhook.redis_queries import list_archive_recent
-    fake_redis.set("platts:archive:2026-04-15:abc", json.dumps({"id": "abc", "archivedAt": "2026-04-15T10:00:00+00:00"}))
-    result = list_archive_recent()
-    assert result[0]["archived_date"] == "2026-04-15"
+def test_list_archive_recent_delegates_to_news_repo():
+    import redis_queries
+    with patch("redis_queries.news_repo.list_by_status",
+               return_value=[{"id": "a", "title": "T", "archived_at": "2026-06-16T00:00:00+00:00"}]) as m:
+        out = redis_queries.list_archive_recent(limit=5)
+    m.assert_called_once_with("archived", limit=5)
+    assert out[0]["id"] == "a"
 
 
 def test_save_feedback_creates_hash_and_index(fake_redis):
@@ -165,26 +144,25 @@ def test_list_feedback_filter_since_ts(fake_redis):
 
 def test_stats_for_date_all_zero(fake_redis):
     from webhook.redis_queries import stats_for_date
-    stats = stats_for_date("2026-04-15")
+    with patch("webhook.redis_queries.news_repo.list_by_status", return_value=[]):
+        stats = stats_for_date("2026-04-15")
     assert stats == {"scraped": 0, "staging": 0, "archived": 0, "rejected": 0, "pipeline": 0}
 
 
 def test_stats_for_date_populated(fake_redis):
-    """Uses today's UTC date because save_feedback timestamps with time.time()."""
+    """Uses today's UTC date because save_feedback timestamps with time.time().
+
+    archived now comes from Supabase via news_repo.list_by_status; we patch it
+    to return 4 rows to mirror the prior Redis-seeded expectation.
+    """
     from webhook.redis_queries import stats_for_date, save_feedback, mark_pipeline_processed
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    other_day = "2020-01-01"
     # scraped: 3 in scraped set (v2 key)
     fake_redis.sadd(f"platts:scraped:{today}", "a", "b", "c")
     # staging: 2
     fake_redis.set("platts:staging:s1", json.dumps({"id": "s1"}))
     fake_redis.set("platts:staging:s2", json.dumps({"id": "s2"}))
-    # archived: 4 today
-    for i in range(4):
-        fake_redis.set(f"platts:archive:{today}:x{i}", json.dumps({"id": f"x{i}"}))
-    # archived: 1 on a different date (should not count)
-    fake_redis.set(f"platts:archive:{other_day}:y", json.dumps({"id": "y"}))
     # rejected: 2 today
     save_feedback("curate_reject", "r1", 1, "", "T1")
     save_feedback("draft_reject", "r2", 1, "", "T2")
@@ -192,7 +170,9 @@ def test_stats_for_date_populated(fake_redis):
     mark_pipeline_processed("p1", today)
     mark_pipeline_processed("p2", today)
 
-    stats = stats_for_date(today)
+    archived_rows = [{"id": f"x{i}"} for i in range(4)]
+    with patch("webhook.redis_queries.news_repo.list_by_status", return_value=archived_rows):
+        stats = stats_for_date(today)
     assert stats == {"scraped": 3, "staging": 2, "archived": 4, "rejected": 2, "pipeline": 2}
 
 
@@ -208,7 +188,8 @@ def test_stats_rejected_only_counts_reject_actions(fake_redis):
     save_feedback("draft_reject", "b", 1, "", "T")
     save_feedback("adjust", "c", 1, "", "T")          # not a rejection
     save_feedback("approve", "d", 1, "", "T")         # not a rejection
-    stats = stats_for_date(today)
+    with patch("webhook.redis_queries.news_repo.list_by_status", return_value=[]):
+        stats = stats_for_date(today)
     assert stats["rejected"] == 2
 
 

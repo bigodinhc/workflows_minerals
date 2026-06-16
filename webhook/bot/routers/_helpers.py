@@ -5,11 +5,9 @@ Extracted to avoid circular imports between commands.py and callbacks.py.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone, timedelta
 
 from bot.config import get_bot
 from bot.keyboards import build_approval_keyboard
@@ -65,26 +63,13 @@ def drafts_update(draft_id, **fields):
 
 
 def find_curation_item(item_id):
-    """Look up a Platts curation item by id in staging -> today/yesterday archive."""
+    """Look up a Platts curation item by id in staging (Redis) -> Supabase archive."""
     from execution.curation import redis_client
-    try:
-        item = redis_client.get_staging(item_id)
-    except Exception as exc:
-        logger.warning(f"reprocess staging lookup failed for {item_id}: {exc}")
-        item = None
-    if item is not None:
-        return item
-    now_utc = datetime.now(timezone.utc)
-    for offset in (0, 1):
-        date = (now_utc - timedelta(days=offset)).strftime("%Y-%m-%d")
-        try:
-            item = redis_client.get_archive(date, item_id)
-        except Exception as exc:
-            logger.warning(f"reprocess archive lookup failed ({date}, {item_id}): {exc}")
-            continue
-        if item is not None:
-            return item
-    return None
+    from execution.curation import news_repo
+    item = redis_client.get_staging(item_id)
+    if item is None:
+        item = news_repo.get_by_id(item_id)
+    return item
 
 
 async def _safe_edit(bot, text, chat_id, message_id):
@@ -188,8 +173,12 @@ async def process_adjustment(chat_id, draft_id, feedback):
 
 
 async def run_pipeline_and_archive(chat_id, raw_text, progress_msg_id, item_id):
-    """Run pipeline then archive staging item on success."""
-    from execution.curation import redis_client
+    """Run pipeline then archive staging item on success.
+
+    Archive lives in Supabase (platts_news) — set status there, then discard
+    the Redis staging copy. Mirrors the direct archive path.
+    """
+    from execution.curation import news_repo, redis_client
     try:
         await process_news(chat_id, raw_text, progress_msg_id)
     except Exception as exc:
@@ -204,8 +193,8 @@ async def run_pipeline_and_archive(chat_id, raw_text, progress_msg_id, item_id):
         except Exception:
             pass
         return
-    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
-        await asyncio.to_thread(redis_client.archive, item_id, date, chat_id=chat_id)
+        news_repo.set_status(item_id, "archived", chat_id=chat_id)
+        redis_client.discard(item_id)
     except Exception as exc:
-        logger.warning(f"archive post-success failed for {item_id}: {exc}")
+        logger.warning(f"archive after pipeline failed for {item_id}: {exc}")

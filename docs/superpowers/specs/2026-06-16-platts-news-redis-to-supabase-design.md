@@ -24,9 +24,13 @@ continuar chegando. A preocupação central é frescura/ingestão, não "storage
    trabalho do scraper** (fila `staging` 48h + ledger de dedup `seen`/`scraped`). O
    consumidor/copilot nunca depende do Redis como storage.
 4. **Tabela dedicada** `platts_news` (não uma `documents` genérica).
-5. **Projeto Supabase separado** do banco de trading (`liqiwvueesohlnnmezyw`), conectado a
-   esta instância. **Nós criamos a tabela e aplicamos a migração aqui**; o SQL fica
-   versionado neste repo (`supabase/migrations/`).
+5. **Tabela mora no projeto `liqiwvueesohlnnmezyw` (antigravity-reports)** — o projeto que
+   ESTE repo já gerencia (migration owner único → sem ledger drift) e onde o scraper já
+   escreve (`event_log`, `contacts`). **Descartado o `ironmkt_mvp` (tcpdfokvzsrqrevpqozw,
+   trading prod)** para não fazer escrita cross-project no trading nem disputar o ledger de
+   migration (cf. IRO-134). `NewsRepo` reutiliza as creds existentes
+   (`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`); `NEWS_SUPABASE_*` é override opcional para
+   migrar a um banco pristine no futuro sem reescrever código.
 6. **Retrieval dentro da tabela:** coluna `tsvector` `GENERATED ALWAYS … STORED` + índice
    GIN, incluída no próprio `CREATE TABLE`. Sem serviço de busca à parte, sem pipeline de
    sync. Leitura direta. **Full-text no v1; embeddings (`pgvector`) deferidos.**
@@ -90,10 +94,10 @@ Notas:
 
 ## 4. Acesso ao projeto separado
 
-- Client dedicado `NewsRepo`, lendo env vars próprias **separadas** do banco de trading:
-  - `NEWS_SUPABASE_URL`
-  - `NEWS_SUPABASE_SERVICE_KEY`
-- Adicionar em `.env`, `.env.example` e nos secrets/env do GitHub Actions (`market_news.yml`).
+- Client `NewsRepo` resolve credenciais com fallback:
+  - `NEWS_SUPABASE_URL`/`NEWS_SUPABASE_SERVICE_KEY` **se setadas** (override → banco pristine futuro),
+  - **senão** `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` (creds que o repo já usa para `liqiwvueesohlnnmezyw`).
+- Hoje: **nenhum secret novo** — backfill, ingestão e CI já têm `SUPABASE_*`. `NEWS_*` documentado como opcional.
 - `NewsRepo` expõe a **mesma interface** das funções de curadoria de hoje para minimizar o
   blast radius: `upsert_scraped`, `archive`, `reject`, `list_archive_recent`, `get_by_id`,
   `search`.

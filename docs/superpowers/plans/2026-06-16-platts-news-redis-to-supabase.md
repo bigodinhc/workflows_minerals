@@ -143,12 +143,19 @@ Expected: `0`.
 
 - [ ] **Step 1: Escrever o client cacheado** (mesmo padrão de `_get_client` do redis_client)
 
-```python
-"""Client Supabase dedicado ao projeto de NOTÍCIAS (separado do banco de trading).
+A tabela mora em `liqiwvueesohlnnmezyw` (antigravity-reports), o projeto que o repo já usa.
+O client resolve credenciais com fallback: `NEWS_SUPABASE_*` se setadas (override para um
+banco pristine futuro), senão as `SUPABASE_*` existentes. Assim não precisa de secret novo.
 
-Usa NEWS_SUPABASE_URL / NEWS_SUPABASE_SERVICE_KEY. Mantido separado de
-execution/integrations/supabase_client.py (que aponta para o projeto de trading)
-para não misturar credenciais nem domínios.
+```python
+"""Client Supabase para a tabela de NOTÍCIAS (platts_news).
+
+Resolve credenciais com fallback:
+  NEWS_SUPABASE_URL / NEWS_SUPABASE_SERVICE_KEY  (override → banco pristine futuro)
+  → senão SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  (projeto liqiwvueesohlnnmezyw que o repo já usa)
+
+Mantido separado de supabase_client.py para que mover as notícias a um projeto
+dedicado no futuro seja só setar NEWS_*, sem tocar em código.
 """
 from __future__ import annotations
 
@@ -158,19 +165,23 @@ _client = None
 
 
 def get_news_client():
-    """Return a cached supabase Client for the news project.
+    """Return a cached supabase Client for the news table.
 
-    Raises RuntimeError if env vars are unset, so a misconfig fails loud
-    instead of silently writing to the wrong project.
+    Prefers NEWS_SUPABASE_* (dedicated project); falls back to the repo's
+    existing SUPABASE_* creds. Raises RuntimeError if neither is configured,
+    so a misconfig fails loud instead of writing nowhere.
     """
     global _client
     if _client is not None:
         return _client
     from supabase import create_client
-    url = os.getenv("NEWS_SUPABASE_URL", "").strip()
-    key = os.getenv("NEWS_SUPABASE_SERVICE_KEY", "").strip()
+    url = (os.getenv("NEWS_SUPABASE_URL") or os.getenv("SUPABASE_URL") or "").strip()
+    key = (os.getenv("NEWS_SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
     if not url or not key:
-        raise RuntimeError("NEWS_SUPABASE_URL / NEWS_SUPABASE_SERVICE_KEY not set")
+        raise RuntimeError(
+            "No Supabase creds: set NEWS_SUPABASE_URL/NEWS_SUPABASE_SERVICE_KEY "
+            "or SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY"
+        )
     _client = create_client(url, key)
     return _client
 ```
@@ -1089,38 +1100,28 @@ Expected: ~243 em `archived`.
 
 ## Phase 6 — Env vars & CI
 
-### Task 6.1: Documentar e cablear `NEWS_SUPABASE_*`
+### Task 6.1: Documentar `NEWS_SUPABASE_*` como override OPCIONAL
+
+> A tabela vive em `liqiwvueesohlnnmezyw`, então `NewsRepo` já funciona com as `SUPABASE_*`
+> existentes (`.env` local + secrets do CI já presentes em `market_news.yml`). **Nenhum
+> secret novo é necessário.** Só documentamos o override opcional para uso futuro.
 
 **Files:**
-- Modify: `.env.example`, `.github/workflows/market_news.yml`
+- Modify: `.env.example`
 
-- [ ] **Step 1: `.env.example`** — adicionar (na seção Supabase):
-
-```bash
-# Projeto Supabase DEDICADO a notícias (separado do banco de trading)
-NEWS_SUPABASE_URL=https://<news-project-ref>.supabase.co
-NEWS_SUPABASE_SERVICE_KEY=
-```
-
-- [ ] **Step 2: `market_news.yml`** — no bloco `env:` do step "Run Platts Ingestion" (após as linhas de `SUPABASE_*`, ~linha 64), adicionar:
-
-```yaml
-          NEWS_SUPABASE_URL: ${{ secrets.NEWS_SUPABASE_URL }}
-          NEWS_SUPABASE_SERVICE_KEY: ${{ secrets.NEWS_SUPABASE_SERVICE_KEY }}
-```
-
-- [ ] **Step 3: Setar os secrets no GitHub** (manual)
-
-Run: `gh secret set NEWS_SUPABASE_URL` e `gh secret set NEWS_SUPABASE_SERVICE_KEY`
-Expected: "✓ Set secret".
-
-- [ ] **Step 4: Setar `.env` local** (não commitado) com os mesmos valores.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 1: `.env.example`** — adicionar comentário (na seção Supabase):
 
 ```bash
-git add .env.example .github/workflows/market_news.yml
-git commit -m "chore: env vars NEWS_SUPABASE_* para ingestão e CI"
+# (Opcional) Banco Supabase DEDICADO a notícias. Se vazio, platts_news usa SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY.
+# NEWS_SUPABASE_URL=
+# NEWS_SUPABASE_SERVICE_KEY=
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add .env.example
+git commit -m "docs: NEWS_SUPABASE_* como override opcional para platts_news"
 ```
 
 ### Task 6.2: Suíte completa verde

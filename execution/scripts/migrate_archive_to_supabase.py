@@ -52,5 +52,7 @@ def backfill() -> int:
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
     n = backfill()
     print(f"✅ Backfill concluído: {n} itens processados")

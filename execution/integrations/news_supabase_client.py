@@ -26,11 +26,16 @@ def get_news_client():
         return _client
     from supabase import create_client
     url = (os.getenv("NEWS_SUPABASE_URL") or os.getenv("SUPABASE_URL") or "").strip()
-    key = (os.getenv("NEWS_SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    key = (
+        os.getenv("NEWS_SUPABASE_SERVICE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_KEY")  # repo's existing convention (.env local)
+        or ""
+    ).strip()
     if not url or not key:
         raise RuntimeError(
             "No Supabase creds: set NEWS_SUPABASE_URL/NEWS_SUPABASE_SERVICE_KEY "
-            "or SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY"
+            "or SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_KEY)"
         )
     _client = create_client(url, key)
     return _client

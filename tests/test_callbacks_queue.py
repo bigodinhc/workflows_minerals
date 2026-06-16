@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot.callback_data import QueuePage, QueueOpen
 from bot.routers.callbacks_queue import on_queue_page, on_queue_open
@@ -312,9 +312,10 @@ async def test_on_queue_bulk_confirm_archive_executes_then_exits(mock_callback_q
     mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
     mocker.patch("webhook.queue_selection.get_selection", return_value={"a", "b"})
     exit_mock = mocker.patch("webhook.queue_selection.exit_mode")
+    # New behavior: set_status_bulk (->2) then bulk_discard (->2), via to_thread.
     to_thread = mocker.patch(
         "asyncio.to_thread",
-        new=AsyncMock(return_value={"archived": ["a", "b"], "failed": []}),
+        new=AsyncMock(side_effect=[2, 2]),
     )
     mocker.patch(
         "bot.routers.callbacks_queue.query_handlers.format_queue_page",
@@ -326,22 +327,28 @@ async def test_on_queue_bulk_confirm_archive_executes_then_exits(mock_callback_q
     query = mock_callback_query(chat_id=42)
     await on_queue_bulk_confirm(query, QueueBulkConfirm(action="archive"))
 
-    to_thread.assert_awaited_once()
+    assert to_thread.await_count == 2  # set_status_bulk + bulk_discard
     query.answer.assert_awaited_with("✅ 2 arquivados")
     exit_mock.assert_called_once_with(42)
 
 
 @pytest.mark.asyncio
-async def test_on_queue_bulk_confirm_archive_partial_reports_both_counts(mock_callback_query, mocker):
+async def test_on_queue_bulk_confirm_archive_toast_uses_supabase_count(mock_callback_query, mocker):
+    """New behavior: Supabase is source of truth; toast reflects set_status_bulk count.
+
+    The old per-item 'failed' reporting is gone — Redis discard is best-effort
+    and never gates the success message.
+    """
     from bot.callback_data import QueueBulkConfirm
     from bot.routers.callbacks_queue import on_queue_bulk_confirm
 
     mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
     mocker.patch("webhook.queue_selection.get_selection", return_value={"a", "b", "c"})
     mocker.patch("webhook.queue_selection.exit_mode")
+    # set_status_bulk -> 2, bulk_discard -> 2
     mocker.patch(
         "asyncio.to_thread",
-        new=AsyncMock(return_value={"archived": ["a", "b"], "failed": ["c"]}),
+        new=AsyncMock(side_effect=[2, 2]),
     )
     mocker.patch(
         "bot.routers.callbacks_queue.query_handlers.format_queue_page",
@@ -352,7 +359,7 @@ async def test_on_queue_bulk_confirm_archive_partial_reports_both_counts(mock_ca
     query = mock_callback_query(chat_id=42)
     await on_queue_bulk_confirm(query, QueueBulkConfirm(action="archive"))
 
-    query.answer.assert_awaited_with("✅ 2 arquivados, 1 falhou (expirado ou já removido)")
+    query.answer.assert_awaited_with("✅ 2 arquivados")
 
 
 @pytest.mark.asyncio
@@ -422,9 +429,10 @@ async def test_on_queue_bulk_confirm_archive_singular_uses_singular_toast(mock_c
     mocker.patch("webhook.queue_selection.is_select_mode", return_value=True)
     mocker.patch("webhook.queue_selection.get_selection", return_value={"a"})
     mocker.patch("webhook.queue_selection.exit_mode")
+    # set_status_bulk -> 1, bulk_discard -> 1
     mocker.patch(
         "asyncio.to_thread",
-        new=AsyncMock(return_value={"archived": ["a"], "failed": []}),
+        new=AsyncMock(side_effect=[1, 1]),
     )
     mocker.patch(
         "bot.routers.callbacks_queue.query_handlers.format_queue_page",
@@ -521,3 +529,25 @@ async def test_on_queue_page_normal_mode_does_not_persist_page(mock_callback_que
     await on_queue_page(mock_callback_query(chat_id=42), QueuePage(page=2))
 
     set_page_mock.assert_not_called()
+
+
+# ─── bulk archive Supabase write (Task 3.2) ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_bulk_confirm_archive_writes_supabase_then_redis(mock_callback_query):
+    from bot.callback_data import QueueBulkConfirm
+    import bot.routers.callbacks_queue as cq
+
+    query = mock_callback_query(data="q_bulkok:archive")
+    cb = QueueBulkConfirm(action="archive")
+
+    with patch.object(cq.queue_selection, "is_select_mode", return_value=True), \
+         patch.object(cq.queue_selection, "get_selection", return_value={"a", "b"}), \
+         patch.object(cq.queue_selection, "exit_mode"), \
+         patch.object(cq.news_repo, "set_status_bulk", return_value=2) as m_status, \
+         patch.object(cq.curation_redis, "bulk_discard", return_value=2) as m_discard, \
+         patch.object(cq, "_rerender", new=AsyncMock()):
+        await cq.on_queue_bulk_confirm(query, cb)
+
+    assert m_status.call_args[0][1] == "archived"
+    m_discard.assert_called_once()

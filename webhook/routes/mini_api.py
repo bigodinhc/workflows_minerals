@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import aiohttp
 from aiohttp import web
@@ -287,12 +287,8 @@ async def get_news_detail(request: web.Request) -> web.Response:
     item = await asyncio.to_thread(redis_client.get_staging, item_id)
     status = "pending"
     if item is None:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        item = await asyncio.to_thread(redis_client.get_archive, today, item_id)
-        status = "archived"
-    if item is None:
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-        item = await asyncio.to_thread(redis_client.get_archive, yesterday, item_id)
+        from execution.curation import news_repo
+        item = await asyncio.to_thread(news_repo.get_by_id, item_id)
         status = "archived"
     if item is None:
         return web.json_response({"error": "Item not found"}, status=404)

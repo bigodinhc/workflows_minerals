@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from bot.config import get_bot
 from bot.keyboards import build_approval_keyboard
@@ -65,26 +65,13 @@ def drafts_update(draft_id, **fields):
 
 
 def find_curation_item(item_id):
-    """Look up a Platts curation item by id in staging -> today/yesterday archive."""
+    """Look up a Platts curation item by id in staging (Redis) -> Supabase archive."""
     from execution.curation import redis_client
-    try:
-        item = redis_client.get_staging(item_id)
-    except Exception as exc:
-        logger.warning(f"reprocess staging lookup failed for {item_id}: {exc}")
-        item = None
-    if item is not None:
-        return item
-    now_utc = datetime.now(timezone.utc)
-    for offset in (0, 1):
-        date = (now_utc - timedelta(days=offset)).strftime("%Y-%m-%d")
-        try:
-            item = redis_client.get_archive(date, item_id)
-        except Exception as exc:
-            logger.warning(f"reprocess archive lookup failed ({date}, {item_id}): {exc}")
-            continue
-        if item is not None:
-            return item
-    return None
+    from execution.curation import news_repo
+    item = redis_client.get_staging(item_id)
+    if item is None:
+        item = news_repo.get_by_id(item_id)
+    return item
 
 
 async def _safe_edit(bot, text, chat_id, message_id):

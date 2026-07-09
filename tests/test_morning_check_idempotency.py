@@ -120,6 +120,10 @@ def morning_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
     monkeypatch.setenv("SUPABASE_URL", "https://fake.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-key")
+    # This suite exercises the legacy uazapi fan-out (mocks ContactsRepo/
+    # UazapiClient/DeliveryReporter below) — pin the channel explicitly now
+    # that CLIENT_DELIVERY_CHANNEL defaults to "telegram".
+    monkeypatch.setenv("CLIENT_DELIVERY_CHANNEL", "uazapi")
     monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
 
 

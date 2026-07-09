@@ -6,6 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 import fakeredis.aioredis
 
 
+@pytest.fixture(autouse=True)
+def _legacy_uazapi_mode(monkeypatch):
+    """These tests exercise the legacy WhatsApp fan-out path."""
+    monkeypatch.setenv("CLIENT_DELIVERY_CHANNEL", "uazapi")
+
+
 @pytest.fixture
 def fake_redis_async():
     """Async fakeredis client — supports SET NX EX."""

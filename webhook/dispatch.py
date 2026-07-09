@@ -123,8 +123,35 @@ async def send_whatsapp(phone, message, draft_id: str = "", token=None, url=None
 
 # ── Async processing ──
 
+# ── Telegram channel path (CLIENT_DELIVERY_CHANNEL=telegram) ──
+
+async def _post_approval_to_channel(chat_id, draft_message):
+    """Post the approved draft to the private client channel and confirm to admin."""
+    from bot.channel_delivery import post_report_to_channel
+    bot = get_bot()
+    result = await post_report_to_channel(draft_message)
+    if result["ok"]:
+        note = " (aviso: PDF/extra falhou)" if result["error"] else ""
+        await bot.send_message(
+            chat_id, f"✅ Publicado no canal do Telegram{note}.",
+        )
+    else:
+        await bot.send_message(
+            chat_id, f"❌ Falha ao publicar no canal: {result['error']}",
+        )
+
+
 async def process_approval_async(chat_id, draft_message, draft_id, uazapi_token=None, uazapi_url=None):
-    """Process WhatsApp sending with progress updates via DeliveryReporter."""
+    """Broadcast an approved draft.
+
+    CLIENT_DELIVERY_CHANNEL=telegram (default): single post to the private
+    client channel. 'uazapi': legacy WhatsApp fan-out (rollback path).
+    """
+    from bot.routing import client_delivery_mode
+    if client_delivery_mode() == "telegram":
+        await _post_approval_to_channel(chat_id, draft_message)
+        return
+    # ── legacy uazapi path below (unchanged) ──
     bot = get_bot()
     progress = await bot.send_message(chat_id, "⏳ Iniciando envio para WhatsApp...")
     progress_msg_id = progress.message_id
@@ -255,8 +282,21 @@ async def process_approval_async(chat_id, draft_message, draft_id, uazapi_token=
 
 
 async def process_test_send_async(chat_id, draft_id, draft_message, uazapi_token=None, uazapi_url=None):
-    """Send message only to the first contact for testing."""
+    """Send message only to the first contact for testing.
+
+    In telegram mode there is no per-contact test — show the admin a preview
+    with the approval keyboard instead.
+    """
+    from bot.routing import client_delivery_mode
     bot = get_bot()
+    if client_delivery_mode() == "telegram":
+        display = draft_message[:3500] if len(draft_message) > 3500 else draft_message
+        await bot.send_message(
+            chat_id,
+            f"🧪 *PREVIEW (vai para o canal Telegram)*\n\n{display}",
+            reply_markup=build_approval_keyboard(draft_id),
+        )
+        return
     try:
         contacts = await get_contacts()
         if not contacts:

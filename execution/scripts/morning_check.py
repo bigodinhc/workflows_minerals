@@ -94,43 +94,30 @@ def desc_keys(item):
     return keys
 
 def format_line(item):
-    """Formats a single item line: Bold name + backtick price"""
+    """Formats a single item line: 4c panel row with trailing arrow marker."""
     if not item: return None
-    
+
     desc = item.get('product', 'Unknown')
     # Cleanup assess type if needed (e.g. remove redundant text)
     assess_type = item.get('assessmentType', '').strip()
     # If unit is basically the same as assess type, simplify
     if assess_type.lower() == item.get('unit', '').lower():
         assess_type = item.get('unit', '')
-        
+
     price = item['price']
     change = item.get('change', 0)
     pct = item.get('changePercent', 0)
-    
-    # Logic for Indicators & Color
-    if change > 0:
-        sign_str = f"+{change:.2f}"
-        pct_str = f"(+{pct:.2f}%)"
-    elif change < 0:
-        sign_str = f"{change:.2f}" # change is negative
-        pct_str = f"({pct:.2f}%)"
-    else:
-        sign_str = ""
-        pct_str = ""
-        
-    # Clean Format with single backticks:
-    # • *Product Name*
-    # `$100.00`   |  +0.50 (+0.50%)
-    
+
     price_fmt = f"${price:.2f}"
-    
-    if change == 0:
-         stats_block = "Estável"
+
+    if change > 0:
+        stats, marker = f"+{change:.2f} (+{pct:.2f}%)", "↑"
+    elif change < 0:
+        stats, marker = f"{change:.2f} ({pct:.2f}%)", "↓"
     else:
-         stats_block = f"{sign_str} {pct_str}"
-         
-    return f"• *{desc}*\n`{price_fmt}`   |  {stats_block}"
+        stats, marker = "estável", "·"
+
+    return f"> *{desc}*  `{price_fmt}`  {stats} {marker}"
 
 def filter_by_keys(items, keys_whitelist):
     """Filters items matching whitelist KEYS (more stable than description)."""
@@ -165,7 +152,7 @@ def build_message(report_items, date_str):
     # If customer adds more keys to PlattsClient.SYMBOLS_MAPPING later, add them to lists above.
     
     # Build parts
-    header = f"📊 *MINERALS TRADING DAILY REPORT* 📊\n🔍 *IRON ORE MARKET UPDATE* - {date_str}"
+    header = f"📊 *MINERALS TRADING DAILY REPORT*\n🔍 IRON ORE MARKET UPDATE - {date_str}"
     parts = [header]
     
     s1 = get_section("🪨 *FINES*", fines_lines)
@@ -181,6 +168,71 @@ def build_message(report_items, date_str):
     if s4: parts.extend(["", s4])
     
     return "\n".join(parts)
+
+
+def deliver_message(message, dry_run, progress, bus, logger) -> bool:
+    """Deliver the morning report. Returns True when actually delivered
+    (caller sets the daily sent flag). Raises RuntimeError when the channel
+    publish fails so the GH Actions job goes red.
+    """
+    from execution.integrations.channel_publisher import delivery_mode, publish_to_channel
+
+    if delivery_mode() == "telegram":
+        if dry_run:
+            logger.info("[DRY RUN] Would publish to Telegram channel")
+            progress.finish_empty("dry-run")
+            return False
+        bus.emit("step", label="Publicando no canal Telegram")
+        progress.update("Publicando no canal Telegram...")
+        draft_id = (
+            f"morning_check-{os.getenv('GITHUB_RUN_ID') or datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        )
+        result = publish_to_channel("morning_check", message, draft_id)
+        if not result.get("ok"):
+            raise RuntimeError(f"channel publish failed: {result.get('error')}")
+        logger.info("Morning report published to Telegram channel.")
+        progress.finish_empty("publicado no canal Telegram")
+        return True
+
+    # ── legacy uazapi fan-out (rollback path) — moved verbatim from main() ──
+    contacts_repo = ContactsRepo()
+    contacts = contacts_repo.list_by_list_code("minerals_report")
+
+    if not contacts:
+        logger.warning("No contacts found.")
+        progress.finish_empty("nenhum contato ativo")
+        return False
+
+    uazapi = UazapiClient()
+
+    delivery_contacts = [build_delivery_contact(c) for c in contacts]
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+        progress.finish_empty("dry-run")
+        return False
+
+    bus.emit("step", label=f"Enviando WhatsApp para {len(delivery_contacts)} contatos")
+    progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
+
+    reporter = DeliveryReporter(
+        workflow="morning_check",
+        send_fn=uazapi.send_message,
+        notify_telegram=False,
+        gh_run_id=os.getenv("GITHUB_RUN_ID"),
+    )
+    report = reporter.dispatch(
+        delivery_contacts,
+        message,
+        on_progress=progress.on_dispatch_tick,
+    )
+
+    asyncio.run(progress.finish(report, message=message))
+
+    logger.info(
+        f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"
+    )
+    return True
 
 
 @with_event_bus("morning_check")
@@ -295,46 +347,10 @@ def _run_pipeline(args):
             print(message)
             print("\n-----------------------\n")
 
-        contacts_repo = ContactsRepo()
-        contacts = contacts_repo.list_by_list_code("minerals_report")
-
-        if not contacts:
-            logger.warning("No contacts found.")
-            progress.finish_empty("nenhum contato ativo")
-            return
-
-        uazapi = UazapiClient()
-
-        delivery_contacts = [build_delivery_contact(c) for c in contacts]
-
-        if args.dry_run:
-            logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
-            progress.finish_empty("dry-run")
-            return
-
-        bus.emit("step", label=f"Enviando WhatsApp para {len(delivery_contacts)} contatos")
-        progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
-
-        reporter = DeliveryReporter(
-            workflow="morning_check",
-            send_fn=uazapi.send_message,
-            notify_telegram=False,
-            gh_run_id=os.getenv("GITHUB_RUN_ID"),
-        )
-        report = reporter.dispatch(
-            delivery_contacts,
-            message,
-            on_progress=progress.on_dispatch_tick,
-        )
-
-        asyncio.run(progress.finish(report, message=message))
-
-        logger.info(
-            f"Broadcast complete. Sent: {report.success_count}, Failed: {report.failure_count}"
-        )
+        sent = deliver_message(message, args.dry_run, progress, bus, logger)
 
         # ── PHASE 5: commit success — set sent flag ───────────────────────────
-        if not args.dry_run:
+        if sent and not args.dry_run:
             state_store.set_sent_flag(sent_key, ttl_seconds=_SENT_FLAG_TTL_SEC)
 
     except Exception as exc:

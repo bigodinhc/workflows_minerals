@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import os
 
-CLIENT_WORKFLOWS = frozenset({"daily_report", "market_news", "platts_reports"})
+CLIENT_WORKFLOWS = frozenset({
+    "daily_report",
+    "market_news",
+    "platts_reports",
+    "morning_check",
+    "baltic_ingestion",
+})
 
 DEST_CLIENT_CHANNEL = "client_channel"
 DEST_INTERNAL = "internal"

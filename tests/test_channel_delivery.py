@@ -69,6 +69,32 @@ def test_to_telegram_html_mixed_message():
     assert "<i>firme</i>" in out
 
 
+def test_quote_lines_become_blockquote():
+    from bot.channel_delivery import to_telegram_html
+    src = "lead\n\n> *Ago/26*  `$103.50`  +0.55 🟢\n> *Set/26*  `$103.05`  +0.40 🟢\n\nfim"
+    out = to_telegram_html(src)
+    assert (
+        "<blockquote><b>Ago/26</b>  <code>$103.50</code>  +0.55 🟢\n"
+        "<b>Set/26</b>  <code>$103.05</code>  +0.40 🟢</blockquote>"
+    ) in out
+    assert out.startswith("lead")
+    assert out.rstrip().endswith("fim")
+
+
+def test_single_quote_line_becomes_blockquote():
+    from bot.channel_delivery import to_telegram_html
+    out = to_telegram_html('> _"citação do CEO"_ — Fonte')
+    assert out.startswith("<blockquote>")
+    assert "<i>" in out and out.rstrip().endswith("</blockquote>")
+
+
+def test_text_without_quotes_unchanged_by_quote_pass():
+    from bot.channel_delivery import to_telegram_html
+    out = to_telegram_html("*bold* e `code`, sem citação. a > b")
+    assert "<blockquote" not in out
+    assert "a &gt; b" in out  # '>' no meio da linha não é citação
+
+
 @pytest.mark.asyncio
 async def test_post_text_only(channel, mock_bot):
     result = await channel.post_report_to_channel("*Preços* <em alta> & subindo")

@@ -32,6 +32,10 @@ _PRE_RE = re.compile(r"```(.+?)```", re.DOTALL)
 _CODE_RE = re.compile(r"`([^`\n]+)`")
 _BOLD_RE = re.compile(r"\*(\S(?:[^*\n]*\S)?)\*")
 _ITALIC_RE = re.compile(r"(?<![\w&])_(\S(?:[^_\n]*\S)?)_(?![\w;])")
+# WhatsApp quote marker ('> line'); '>' has already been HTML-escaped to
+# '&gt;' by escape_html by the time this pass runs. Consecutive quote lines
+# collapse into a single <blockquote>; separate groups become separate ones.
+_QUOTE_BLOCK_RE = re.compile(r"(?m)^(?:&gt; ?.*(?:\n|$))+")
 
 
 def escape_html(text: str) -> str:
@@ -39,18 +43,36 @@ def escape_html(text: str) -> str:
     return html.escape(text, quote=False)
 
 
+def _quote_lines_to_blockquote(text: str) -> str:
+    """Group consecutive '&gt; ' lines into a single <blockquote>.
+
+    Separate groups (split by non-quote lines) become separate blockquotes.
+    Runs after the marker conversions so *bold*/`code`/_italic_ inside a
+    quote line are already HTML by the time the prefix is stripped.
+    """
+    def _repl(match: re.Match) -> str:
+        block = match.group(0)
+        trailing_nl = "\n" if block.endswith("\n") else ""
+        lines = [re.sub(r"^&gt; ?", "", ln) for ln in block.rstrip("\n").split("\n")]
+        return "<blockquote>" + "\n".join(lines) + "</blockquote>" + trailing_nl
+    return _QUOTE_BLOCK_RE.sub(_repl, text)
+
+
 def to_telegram_html(text: str) -> str:
     """Escape HTML, then convert WhatsApp markers to Telegram HTML tags.
 
     ```x``` → <pre>x</pre>, `x` → <code>x</code>, *x* → <b>x</b>,
     _x_ → <i>x</i>. Conversion is deterministic and per-pair: a stray
-    marker stays literal instead of breaking the whole post.
+    marker stays literal instead of breaking the whole post. Finally,
+    consecutive '> ' quote lines (WhatsApp marker, already emitted by the
+    Curator prompt) collapse into a <blockquote> panel.
     """
     escaped = escape_html(text)
     with_pre = _PRE_RE.sub(r"<pre>\1</pre>", escaped)
     with_code = _CODE_RE.sub(r"<code>\1</code>", with_pre)
     with_bold = _BOLD_RE.sub(r"<b>\1</b>", with_code)
-    return _ITALIC_RE.sub(r"<i>\1</i>", with_bold)
+    converted = _ITALIC_RE.sub(r"<i>\1</i>", with_bold)
+    return _quote_lines_to_blockquote(converted)
 
 
 async def _call_with_flood_retry(coro_factory):

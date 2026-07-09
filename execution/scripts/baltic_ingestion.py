@@ -191,6 +191,75 @@ def ingest_to_ironmarket(data):
         return False, str(e)
 
 
+async def deliver_message(message, dry_run, reporter, bus, logger) -> bool:
+    """Deliver the Baltic report. Returns True when actually delivered
+    (caller sets the daily sent flag). Raises RuntimeError when the channel
+    publish fails. Calls reporter.finish() in both branches (mirrors the
+    original flow).
+    """
+    from execution.integrations.channel_publisher import delivery_mode, publish_to_channel
+
+    if delivery_mode() == "telegram":
+        if dry_run:
+            logger.info("[DRY RUN] Would publish to Telegram channel")
+            return False
+        bus.emit("step", label="Publicando no canal Telegram")
+        draft_id = (
+            f"baltic_ingestion-{os.getenv('GITHUB_RUN_ID') or datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        )
+        result = await asyncio.to_thread(publish_to_channel, WORKFLOW_NAME, message, draft_id)
+        if not result.get("ok"):
+            raise RuntimeError(f"channel publish failed: {result.get('error')}")
+        logger.info("Baltic report published to Telegram channel.")
+        await reporter.step("Canal Telegram", "publicado (1 post)")
+        await reporter.finish(message=message)
+        return True
+
+    # ── legacy uazapi fan-out (rollback path) — moved verbatim from main ──
+    bus.emit("step", label="Enviando WhatsApp")
+    contacts_repo = ContactsRepo()
+    contacts = await asyncio.to_thread(
+        contacts_repo.list_by_list_code, "minerals_report"
+    )
+    uazapi = UazapiClient()
+
+    delivery_contacts = [build_delivery_contact(c) for c in contacts]
+
+    if not delivery_contacts:
+        logger.warning("No active contacts found.")
+        await reporter.step("No contacts", "no active contacts found", level="info")
+        await reporter.finish()
+        return False
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+        await reporter.finish()
+        return False
+
+    delivery_reporter = DeliveryReporter(
+        workflow=WORKFLOW_NAME,
+        send_fn=uazapi.send_message,
+        notify_telegram=False,
+        gh_run_id=os.getenv("GITHUB_RUN_ID"),
+    )
+    report = await asyncio.to_thread(
+        delivery_reporter.dispatch,
+        delivery_contacts,
+        message,
+    )
+
+    await reporter.step(
+        "Postgres upsert",
+        f"{report.success_count} sent, {report.failure_count} failed of {report.total} contacts",
+    )
+    logger.info(
+        f"Baltic broadcast complete. Sent: {report.success_count}, "
+        f"Failed: {report.failure_count}"
+    )
+    await reporter.finish(report=report, message=message)
+    return True
+
+
 async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
     """Async Baltic ingestion body instrumented with ProgressReporter step() calls."""
     from aiogram import Bot
@@ -360,47 +429,11 @@ async def _run_with_progress(args, chat_id: int, today_str: str) -> None:
 
         message = format_whatsapp_message(data)
 
-        bus.emit("step", label="Enviando WhatsApp")
-        contacts_repo = ContactsRepo()
-        contacts = await asyncio.to_thread(
-            contacts_repo.list_by_list_code, "minerals_report"
-        )
-        uazapi = UazapiClient()
-
-        delivery_contacts = [build_delivery_contact(c) for c in contacts]
-
-        if not delivery_contacts:
-            logger.warning("No active contacts found.")
-            await reporter.step("No contacts", "no active contacts found", level="info")
-            await reporter.finish()
-            return
-
-        delivery_reporter = DeliveryReporter(
-            workflow=WORKFLOW_NAME,
-            send_fn=uazapi.send_message,
-            notify_telegram=False,
-            gh_run_id=os.getenv("GITHUB_RUN_ID"),
-        )
-        report = await asyncio.to_thread(
-            delivery_reporter.dispatch,
-            delivery_contacts,
-            message,
-        )
-
-        await reporter.step(
-            "Postgres upsert",
-            f"{report.success_count} sent, {report.failure_count} failed of {report.total} contacts",
-        )
-        logger.info(
-            f"Baltic broadcast complete. Sent: {report.success_count}, "
-            f"Failed: {report.failure_count}"
-        )
+        sent = await deliver_message(message, args.dry_run, reporter, bus, logger)
 
         # ── PHASE 6c: commit success — set sent flag ─────────────────────────
-        if not args.dry_run:
+        if sent and not args.dry_run:
             await asyncio.to_thread(state_store.set_sent_flag, sent_key, _SENT_FLAG_TTL_SEC)
-
-        await reporter.finish(report=report, message=message)
 
     except Exception as exc:
         await reporter.step(

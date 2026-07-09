@@ -1,7 +1,7 @@
 # Design: Crons → canal Telegram (fecha vazamento uazapi) + estética v2 do post
 
 - **Data:** 2026-07-09
-- **Status:** Aprovado (design); aguardando plano de implementação
+- **Status:** Implementado (plano: docs/superpowers/plans/2026-07-09-crons-canal-estetica-v2.md); pendente validação do 1º cron real
 - **Autor:** brainstorming colaborativo (usuário + Claude)
 - **Contexto:** continuação de `2026-07-09-telegram-channel-delivery-design.md` (PR #3, merged)
 

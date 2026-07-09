@@ -171,3 +171,8 @@ class OneDriveConfirm(CallbackData, prefix="od_cf"):
 class OneDriveDiscard(CallbackData, prefix="od_dc"):
     """Admin clicked Descartar on the approval card."""
     approval_id: str
+
+
+class ChannelJoinApproval(CallbackData, prefix="chjoin"):
+    action: str  # approve, decline
+    user_id: int

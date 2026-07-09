@@ -10,3 +10,4 @@ supabase>=2.0.0,<3.0
 sentry-sdk[aiohttp]>=2.0.0,<3.0.0
 prometheus-client>=0.20.0,<1.0.0
 phonenumbers>=8.13,<9.0
+qrcode[pil]>=7.4,<9.0

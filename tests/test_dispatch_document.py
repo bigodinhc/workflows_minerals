@@ -8,6 +8,12 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+@pytest.fixture(autouse=True)
+def _legacy_uazapi_mode(monkeypatch):
+    """These tests exercise the legacy uazapi fan-out path."""
+    monkeypatch.setenv("CLIENT_DELIVERY_CHANNEL", "uazapi")
+
+
 @pytest.fixture
 def redis_client():
     return fakeredis.aioredis.FakeRedis(decode_responses=True)

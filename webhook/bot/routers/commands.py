@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 from aiogram.fsm.context import FSMContext
 
 from bot.config import get_bot, ANTHROPIC_API_KEY, TELEGRAM_WEBHOOK_URL
@@ -305,6 +305,65 @@ async def cmd_workflows(message: Message):
 @admin_router.message(Command("s"))
 async def cmd_menu(message: Message):
     await message.answer("🥸 *SuperMustache BOT*", reply_markup=build_main_menu_keyboard())
+
+
+# ── /convite — invite link do canal de clientes + QR ──
+
+
+def _qr_png_bytes(url: str) -> bytes:
+    """Render url as a QR code PNG (bytes)."""
+    import io
+
+    import qrcode
+
+    img = qrcode.make(url)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@admin_router.message(Command("convite"))
+async def cmd_convite(message: Message):
+    """Generate a 7-day join-request invite link + QR for the client channel.
+
+    member_limit is intentionally absent: Telegram's API forbids combining it
+    with creates_join_request, and per-join admin approval is the control.
+    """
+    from bot.config import TELEGRAM_CLIENT_CHANNEL_ID
+    if not TELEGRAM_CLIENT_CHANNEL_ID:
+        await message.answer(
+            "❌ TELEGRAM_CLIENT_CHANNEL_ID não configurado.\n"
+            "Crie o canal, adicione o bot como admin e configure a env var."
+        )
+        return
+
+    bot = get_bot()
+    now = datetime.now(timezone.utc)
+    try:
+        link = await bot.create_chat_invite_link(
+            chat_id=TELEGRAM_CLIENT_CHANNEL_ID,
+            name=f"convite {now:%Y-%m-%d}",
+            expire_date=now + timedelta(days=7),
+            creates_join_request=True,
+        )
+    except Exception as exc:
+        logger.error(f"create_chat_invite_link failed: {exc}")
+        await message.answer(
+            f"❌ Falha ao gerar convite: {str(exc)[:200]}\n"
+            "Confira se o bot é admin do canal com permissão de convidar."
+        )
+        return
+
+    qr_png = _qr_png_bytes(link.invite_link)
+    await message.answer_photo(
+        BufferedInputFile(qr_png, filename="convite-canal.png"),
+        caption=(
+            f"🔗 {link.invite_link}\n\n"
+            f"Validade: 7 dias · entrada por aprovação (join request).\n"
+            f"Cada pedido chega aqui como card pra você aprovar."
+        ),
+    )
+    logger.info("channel invite link generated")
 
 
 # ── Shared router (admin + subscriber) ──

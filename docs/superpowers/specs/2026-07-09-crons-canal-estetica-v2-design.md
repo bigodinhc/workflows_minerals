@@ -23,10 +23,10 @@ de cliente** (broadcast pros 74 via WhatsApp desde sempre).
 1. **Tudo pro canal**: `daily_report`, `morning_check` e `baltic_ingestion` passam a postar
    no canal privado — o cliente segue recebendo o que recebia, só que no Telegram
    (3-4 posts/dia).
-2. **Estética v2 = polish do texto apenas**: citação expansível pra posts longos.
+2. **Estética v2 = polish do texto apenas**: painel de preços (variante 4c, ver §3;
+   decisão original de expansível foi revertida com validação visual no canal).
    **Sem botão inline** (entra quando o fluxo de atendimento estiver definido) e **sem
    card-imagem** (fase futura, requer identidade visual definida).
-3. **Corte do expansível**: estrutural + trava de tamanho (detalhe em §3).
 
 ## 2. Fase 1 — Crons → canal (urgente)
 
@@ -110,8 +110,8 @@ painel nos formatos do morning_check/baltic.
   intocado pelo passo — `>` no meio da linha não dispara o painel); unit do
   `format_price_message` (layout 4c: header 2 linhas + 1 linha por contrato dentro do
   painel, marcador 🟢/🔴/▪️ no fim de cada linha).
-- **Smoke real**: 1 post longo estilo Curator no canal oficial pra validação visual do
-  expansível antes do push (padrão da sessão de hoje).
+- **Smoke real**: 1 post do daily_report no formato 4c no canal oficial pra validação
+  visual do painel antes do push (padrão da sessão de hoje).
 
 ## 5. Rollout
 

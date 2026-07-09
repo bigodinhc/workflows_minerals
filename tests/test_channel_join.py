@@ -49,6 +49,7 @@ async def test_join_request_notifies_admin(mock_bot):
     assert args[0] == 999
     assert "555" in args[1]
     assert kwargs["reply_markup"] is not None
+    assert kwargs["parse_mode"] is None
 
 
 @pytest.mark.asyncio

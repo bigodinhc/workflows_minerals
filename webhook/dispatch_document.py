@@ -136,15 +136,6 @@ async def _dispatch_to_channel(
         "recipients": 1,
     })
 
-    claimed = await _claim_idempotency(
-        redis_client, "telegram_channel", state["drive_item_id"]
-    )
-    if not claimed:
-        bus.emit("dispatch_completed", detail={
-            "approval_id": approval_id, "sent": 0, "failed": 0, "skipped": 1,
-        })
-        return {"sent": 0, "failed": 0, "skipped": 1, "errors": []}
-
     def _download_pdf() -> bytes:
         r = requests.get(state["downloadUrl"], timeout=60, stream=False)
         r.raise_for_status()
@@ -167,6 +158,17 @@ async def _dispatch_to_channel(
             "errors": [{"phone": "telegram_channel", "error": f"download: {str(exc)[:250]}"}],
         }
 
+    # Claim only after a successful download — mirrors the legacy per-recipient
+    # path, so a download failure never burns the 24h idempotency window.
+    claimed = await _claim_idempotency(
+        redis_client, "telegram_channel", state["drive_item_id"]
+    )
+    if not claimed:
+        bus.emit("dispatch_completed", detail={
+            "approval_id": approval_id, "sent": 0, "failed": 0, "skipped": 1,
+        })
+        return {"sent": 0, "failed": 0, "skipped": 1, "errors": []}
+
     result = await post_report_to_channel(
         f"📄 {state['filename']}",
         pdf=pdf_bytes,
@@ -176,6 +178,12 @@ async def _dispatch_to_channel(
     errors = [] if result["ok"] else [
         {"phone": "telegram_channel", "error": result["error"] or "unknown"}
     ]
+    if not result["ok"]:
+        # Release the claim so a retry can actually re-attempt the post
+        # instead of skipping for the full 24h TTL.
+        await redis_client.delete(
+            _idempotency_key("telegram_channel", state["drive_item_id"])
+        )
     bus.emit("dispatch_completed", detail={
         "approval_id": approval_id, "sent": sent, "failed": failed, "skipped": 0,
     })

@@ -134,10 +134,12 @@ async def _post_approval_to_channel(chat_id, draft_message):
         note = " (aviso: PDF/extra falhou)" if result["error"] else ""
         await bot.send_message(
             chat_id, f"✅ Publicado no canal do Telegram{note}.",
+            parse_mode=None,
         )
     else:
         await bot.send_message(
             chat_id, f"❌ Falha ao publicar no canal: {result['error']}",
+            parse_mode=None,
         )
 
 
@@ -291,11 +293,20 @@ async def process_test_send_async(chat_id, draft_id, draft_message, uazapi_token
     bot = get_bot()
     if client_delivery_mode() == "telegram":
         display = draft_message[:3500] if len(draft_message) > 3500 else draft_message
-        await bot.send_message(
-            chat_id,
-            f"🧪 *PREVIEW (vai para o canal Telegram)*\n\n{display}",
-            reply_markup=build_approval_keyboard(draft_id),
-        )
+        try:
+            await bot.send_message(
+                chat_id,
+                f"🧪 PREVIEW (vai para o canal Telegram)\n\n{display}",
+                reply_markup=build_approval_keyboard(draft_id),
+                parse_mode=None,
+            )
+        except Exception as exc:
+            logger.error(f"Test send preview failed: {exc}")
+            await bot.send_message(
+                chat_id,
+                f"❌ Erro ao gerar preview: {str(exc)[:200]}",
+                parse_mode=None,
+            )
         return
     try:
         contacts = await get_contacts()

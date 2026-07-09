@@ -72,3 +72,4 @@ async def test_test_send_telegram_mode_previews_to_admin(monkeypatch, mock_bot):
     assert args[0] == 999
     assert "PREVIEW" in args[1]
     assert kwargs.get("reply_markup") is not None  # approval keyboard attached
+    assert kwargs["parse_mode"] is None

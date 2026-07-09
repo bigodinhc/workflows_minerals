@@ -35,11 +35,12 @@ async def on_join_request(request: ChatJoinRequest):
     label = format_user_label(user)
     await bot.send_message(
         ADMIN_CHAT_ID,
-        f"🔔 *Pedido de entrada no canal*\n\n"
+        f"🔔 Pedido de entrada no canal\n\n"
         f"Nome: {user.full_name}\n"
         f"User: {label}\n"
-        f"ID: `{user.id}`",
+        f"ID: {user.id}",
         reply_markup=build_channel_join_keyboard(user.id),
+        parse_mode=None,
     )
     logger.info(f"channel join request from {user.id}")
 

@@ -88,3 +88,60 @@ async def test_telegram_mode_channel_failure_counts_failed(redis_client, fresh_a
     assert result["sent"] == 0
     assert result["failed"] == 1
     assert result["errors"][0]["error"] == "not admin"
+
+
+@pytest.mark.asyncio
+async def test_telegram_mode_download_failure_does_not_burn_idempotency(
+    redis_client, fresh_approval_state
+):
+    """A download error must not claim the idempotency key: retry should
+    still be able to post once the download succeeds."""
+    from dispatch_document import dispatch_document
+    await redis_client.set("approval:abc12", json.dumps(fresh_approval_state))
+    channel_mock = AsyncMock(return_value={"ok": True, "message_id": 9, "error": None})
+
+    with patch("bot.channel_delivery.post_report_to_channel", channel_mock), \
+         patch("dispatch_document._redis", return_value=redis_client), \
+         patch("dispatch_document.requests.get", side_effect=RuntimeError("boom")):
+        first = await dispatch_document("abc12", "minerals_report")
+
+    assert first == {
+        "sent": 0, "failed": 1, "skipped": 0,
+        "errors": [{"phone": "telegram_channel", "error": "download: boom"}],
+    }
+    channel_mock.assert_not_awaited()
+
+    fake_resp = MagicMock()
+    fake_resp.content = b"%PDF-1.4 fake-pdf-bytes"
+    fake_resp.raise_for_status = MagicMock()
+    with patch("bot.channel_delivery.post_report_to_channel", channel_mock), \
+         patch("dispatch_document._redis", return_value=redis_client), \
+         patch("dispatch_document.requests.get", return_value=fake_resp):
+        second = await dispatch_document("abc12", "minerals_report")
+
+    assert second == {"sent": 1, "failed": 0, "skipped": 0, "errors": []}
+    channel_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_telegram_mode_channel_post_failure_releases_claim(
+    redis_client, fresh_approval_state
+):
+    """A failed channel post (ok=False) must release the idempotency claim
+    so a retry can actually re-attempt the post instead of skipping."""
+    from dispatch_document import dispatch_document
+    await redis_client.set("approval:abc12", json.dumps(fresh_approval_state))
+    failing_mock = AsyncMock(return_value={"ok": False, "message_id": None, "error": "not admin"})
+    with patch("bot.channel_delivery.post_report_to_channel", failing_mock), \
+         patch("dispatch_document._redis", return_value=redis_client):
+        first = await dispatch_document("abc12", "minerals_report")
+    assert first["failed"] == 1
+    assert first["sent"] == 0
+
+    ok_mock = AsyncMock(return_value={"ok": True, "message_id": 9, "error": None})
+    with patch("bot.channel_delivery.post_report_to_channel", ok_mock), \
+         patch("dispatch_document._redis", return_value=redis_client):
+        second = await dispatch_document("abc12", "minerals_report")
+
+    assert second == {"sent": 1, "failed": 0, "skipped": 0, "errors": []}
+    ok_mock.assert_awaited_once()

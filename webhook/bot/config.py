@@ -24,6 +24,7 @@ WEBHOOK_PATH = "/webhook"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 8080))
 TELEGRAM_WEBHOOK_URL = os.getenv("TELEGRAM_WEBHOOK_URL", "").rstrip("/")
+TELEGRAM_CLIENT_CHANNEL_ID = os.getenv("TELEGRAM_CLIENT_CHANNEL_ID", "").strip()
 
 # ── Singletons (lazy) ──
 

@@ -207,7 +207,10 @@ async def deliver_message(message, dry_run, reporter, bus, logger) -> bool:
         draft_id = (
             f"baltic_ingestion-{os.getenv('GITHUB_RUN_ID') or datetime.now().strftime('%Y%m%d%H%M%S%f')}"
         )
-        result = await asyncio.to_thread(publish_to_channel, WORKFLOW_NAME, message, draft_id)
+        # Literal "baltic_ingestion" (not WORKFLOW_NAME="baltic") — this is the
+        # routing key webhook/bot/routing.CLIENT_WORKFLOWS matches on.
+        # WORKFLOW_NAME stays "baltic" for legacy DeliveryReporter records.
+        result = await asyncio.to_thread(publish_to_channel, "baltic_ingestion", message, draft_id)
         if not result.get("ok"):
             raise RuntimeError(f"channel publish failed: {result.get('error')}")
         logger.info("Baltic report published to Telegram channel.")

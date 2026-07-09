@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Orchestrates the daily price report collection and dissemination.
-Unified Workflow: LSEG Fetch -> Format -> Send Uazapi
+Unified Workflow: LSEG Fetch -> Format -> Publish (Telegram channel; uazapi legacy via CLIENT_DELIVERY_CHANNEL)
 """
 
 import asyncio

@@ -52,7 +52,7 @@ def test_publish_posts_store_draft(monkeypatch):
         "workflow_type": "daily_report",
         "direct_delivery": True,
     }
-    assert kwargs["timeout"] == 30
+    assert kwargs["timeout"] == 90
 
 
 def test_publish_without_base_url(monkeypatch):

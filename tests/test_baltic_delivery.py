@@ -27,7 +27,7 @@ async def test_telegram_mode_publishes_and_finishes(monkeypatch, mocks):
          patch.object(bi, "ContactsRepo") as repo:
         sent = await bi.deliver_message("bdi msg", False, reporter, bus, log)
     assert sent is True
-    assert publish.call_args.args[0] == bi.WORKFLOW_NAME
+    assert publish.call_args.args[0] == "baltic_ingestion"
     repo.assert_not_called()
     reporter.finish.assert_awaited_once()
 
@@ -54,6 +54,22 @@ async def test_telegram_mode_dry_run_returns_false(monkeypatch, mocks):
         sent = await bi.deliver_message("m", True, reporter, bus, log)
     assert sent is False
     publish.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_published_workflow_type_is_client_routed(monkeypatch, mocks):
+    """Guard: the workflow_type we publish must route to the channel."""
+    monkeypatch.setenv("CLIENT_DELIVERY_CHANNEL", "telegram")
+    reporter, bus, log = mocks
+    import execution.scripts.baltic_ingestion as bi
+    publish = MagicMock(return_value={"ok": True, "message_id": 1, "error": None})
+    with patch("execution.integrations.channel_publisher.publish_to_channel", publish):
+        await bi.deliver_message("m", False, reporter, bus, log)
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent / "webhook"))
+    from bot.routing import CLIENT_WORKFLOWS
+    assert publish.call_args.args[0] in CLIENT_WORKFLOWS
 
 
 @pytest.mark.asyncio

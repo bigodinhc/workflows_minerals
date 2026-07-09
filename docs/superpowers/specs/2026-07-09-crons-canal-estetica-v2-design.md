@@ -66,9 +66,9 @@ fluxos atuais.
 ### 2.4 Tratamento de erros
 
 - POST falhou (rede/timeout/HTTP≠200) → helper retorna `{"ok": False, "error": ...}`;
-  script loga, emite evento `channel_publish_failed` e **falha o job** (GH Actions marca
-  vermelho → alerta existente no chat admin). Sem fallback automático pro uazapi — falha
-  visível é melhor que broadcast fantasma no chip restrito.
+  script loga e **falha o job** via RuntimeError (GH Actions marca vermelho →
+  `cron_crashed` do with_event_bus alerta no chat admin). Sem fallback automático pro
+  uazapi — falha visível é melhor que broadcast fantasma no chip restrito.
 - `telegram_delivery.ok == false` na resposta → mesmo tratamento.
 
 ### 2.5 Alternativas descartadas

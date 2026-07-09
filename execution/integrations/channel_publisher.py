@@ -14,7 +14,10 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT_SECONDS = 30
+# 90s: the webhook's flood-wait retry can hold the response past 30s; a
+# premature timeout false-fails a post that actually lands (double-post
+# risk on rerun).
+_TIMEOUT_SECONDS = 90
 
 
 def delivery_mode() -> str:

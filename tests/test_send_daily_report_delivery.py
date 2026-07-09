@@ -50,6 +50,21 @@ def test_telegram_mode_dry_run_skips_publish(monkeypatch, mocks):
     progress.finish_empty.assert_called_once_with("dry-run")
 
 
+def test_published_workflow_type_is_client_routed(monkeypatch, mocks):
+    """Guard: the workflow_type we publish must route to the channel."""
+    monkeypatch.setenv("CLIENT_DELIVERY_CHANNEL", "telegram")
+    progress, bus, log = mocks
+    import execution.scripts.send_daily_report as sdr
+    publish = MagicMock(return_value={"ok": True, "message_id": 1, "error": None})
+    with patch("execution.integrations.channel_publisher.publish_to_channel", publish):
+        sdr.deliver_message("m", False, progress, bus, log)
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent / "webhook"))
+    from bot.routing import CLIENT_WORKFLOWS
+    assert publish.call_args.args[0] in CLIENT_WORKFLOWS
+
+
 def test_uazapi_mode_uses_legacy_path(monkeypatch, mocks):
     monkeypatch.setenv("CLIENT_DELIVERY_CHANNEL", "uazapi")
     progress, bus, log = mocks

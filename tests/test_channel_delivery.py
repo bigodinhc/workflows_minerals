@@ -91,6 +91,7 @@ async def test_post_with_pdf(channel, mock_bot):
     mock_bot.send_document.assert_awaited_once()
     _, kwargs = mock_bot.send_document.await_args
     assert kwargs["caption"] == "Minerals_Report.pdf"
+    assert kwargs["parse_mode"] == "HTML"
 
 
 @pytest.mark.asyncio
@@ -129,6 +130,17 @@ async def test_hard_failure_returns_error_dict(channel, mock_bot):
     assert result["ok"] is False
     assert result["message_id"] is None
     assert "bot is not a member" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_bot_failure_returns_error_dict():
+    import bot.channel_delivery as cd
+    with patch.object(cd, "get_bot", side_effect=RuntimeError("token")), \
+         patch.object(cd, "TELEGRAM_CLIENT_CHANNEL_ID", "-1001234"):
+        result = await cd.post_report_to_channel("Msg")
+    assert result["ok"] is False
+    assert result["message_id"] is None
+    assert "token" in result["error"]
 
 
 @pytest.mark.asyncio

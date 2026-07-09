@@ -88,8 +88,12 @@ async def post_report_to_channel(
             "error": "TELEGRAM_CLIENT_CHANNEL_ID not set",
         }
 
-    bot = get_bot()
-    text = to_telegram_html(message[:RAW_TEXT_LIMIT])
+    try:
+        bot = get_bot()
+        text = to_telegram_html(message[:RAW_TEXT_LIMIT])
+    except Exception as exc:
+        logger.error(f"post_report_to_channel setup failed: {exc}")
+        return {"ok": False, "message_id": None, "error": str(exc)[:300]}
 
     try:
         sent = await _call_with_flood_retry(lambda: bot.send_message(
@@ -111,6 +115,7 @@ async def post_report_to_channel(
                 TELEGRAM_CLIENT_CHANNEL_ID,
                 doc,
                 caption=escape_html(pdf_filename)[:TELEGRAM_CAPTION_LIMIT],
+                parse_mode="HTML",
                 disable_notification=True,
             ))
         except Exception as exc:

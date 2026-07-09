@@ -85,6 +85,76 @@ def format_price_message(prices):
     return "\n".join(lines)
 
 
+def deliver_message(message, dry_run, progress, bus, logger):
+    """Deliver the formatted report.
+
+    Default (CLIENT_DELIVERY_CHANNEL=telegram): single publish to the private
+    Telegram channel via the webhook. Raises RuntimeError on publish failure
+    so the GH Actions job goes red. 'uazapi' keeps the legacy WhatsApp
+    fan-out (rollback path).
+    """
+    from execution.integrations.channel_publisher import delivery_mode, publish_to_channel
+
+    if delivery_mode() == "telegram":
+        if dry_run:
+            logger.info("[DRY RUN] Would publish to Telegram channel")
+            progress.finish_empty("dry-run")
+            return
+        bus.emit("step", label="Publicando no canal Telegram")
+        progress.update("Publicando no canal Telegram...")
+        draft_id = (
+            f"daily_report-{os.getenv('GITHUB_RUN_ID') or datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        )
+        result = publish_to_channel("daily_report", message, draft_id)
+        if not result.get("ok"):
+            raise RuntimeError(f"channel publish failed: {result.get('error')}")
+        logger.info("Daily report published to Telegram channel.")
+        progress.finish_empty("publicado no canal Telegram")
+        return
+
+    # ── legacy uazapi fan-out (rollback path) — moved verbatim from main() ──
+    from execution.integrations.uazapi_client import UazapiClient
+
+    logger.info("Fetching contacts...")
+    contacts_repo = ContactsRepo()
+    contacts = contacts_repo.list_by_list_code("minerals_report")
+
+    if not contacts:
+        logger.warning("No contacts found to send to.")
+        progress.finish_empty("nenhum contato ativo")
+        return
+
+    uazapi = UazapiClient()
+    delivery_contacts = [build_delivery_contact(c) for c in contacts]
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
+        progress.finish_empty("dry-run")
+        return
+
+    bus.emit("step", label=f"Enviando WhatsApp para {len(delivery_contacts)} contatos")
+    progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
+
+    reporter = DeliveryReporter(
+        workflow="daily_report",
+        send_fn=uazapi.send_message,
+        notify_telegram=False,
+        gh_run_id=os.getenv("GITHUB_RUN_ID"),
+    )
+    report = reporter.dispatch(
+        delivery_contacts,
+        message,
+        on_progress=progress.on_dispatch_tick,
+    )
+
+    asyncio.run(progress.finish(report, message=message))
+
+    logger.info(
+        f"Daily report broadcast complete. Sent: {report.success_count}, "
+        f"Failed: {report.failure_count}"
+    )
+
+
 @with_event_bus("daily_report")
 def main():
     logger = WorkflowLogger("DailyReport")
@@ -135,49 +205,8 @@ def main():
         logger.info("Message formatted successfully")
         print("\n--- PREVIEW ---\n" + message + "\n---------------\n")
         
-        # 3. Fetch Contacts
-        logger.info("Fetching contacts...")
-        contacts_repo = ContactsRepo()
-        contacts = contacts_repo.list_by_list_code("minerals_report")
-        
-        if not contacts:
-            logger.warning("No contacts found to send to.")
-            if lseg: lseg.close()
-            progress.finish_empty("nenhum contato ativo")
-            return
-
-        # 4. Send Messages via DeliveryReporter
-        from execution.integrations.uazapi_client import UazapiClient
-        uazapi = UazapiClient()
-
-        delivery_contacts = [build_delivery_contact(c) for c in contacts]
-
-        if args.dry_run:
-            logger.info(f"[DRY RUN] Would send to {len(delivery_contacts)} contacts")
-            progress.finish_empty("dry-run")
-            return
-
-        bus.emit("step", label=f"Enviando WhatsApp para {len(delivery_contacts)} contatos")
-        progress.update(f"Enviando pra {len(delivery_contacts)} contatos... (0/{len(delivery_contacts)})")
-
-        reporter = DeliveryReporter(
-            workflow="daily_report",
-            send_fn=uazapi.send_message,
-            notify_telegram=False,
-            gh_run_id=os.getenv("GITHUB_RUN_ID"),
-        )
-        report = reporter.dispatch(
-            delivery_contacts,
-            message,
-            on_progress=progress.on_dispatch_tick,
-        )
-
-        asyncio.run(progress.finish(report, message=message))
-
-        logger.info(
-            f"Daily report broadcast complete. Sent: {report.success_count}, "
-            f"Failed: {report.failure_count}"
-        )
+        # 3. Deliver (canal Telegram por default; uazapi via CLIENT_DELIVERY_CHANNEL)
+        deliver_message(message, args.dry_run, progress, bus, logger)
 
     except Exception as e:
         logger.critical("Workflow disrupted", {"error": str(e)})

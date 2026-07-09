@@ -28,6 +28,7 @@ from bot.config import (
     TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, UAZAPI_URL, UAZAPI_TOKEN,
 )
 from bot.routers.onboarding import onboarding_router
+from bot.routers.channel_join import channel_join_router
 from bot.routers.commands import public_router, admin_router, shared_router
 from bot.routers.callbacks_curation import callbacks_curation_router
 from bot.routers.callbacks_reports import callbacks_reports_router
@@ -59,8 +60,13 @@ def create_background_task(coro):
 
 async def on_startup(app: web.Application):
     bot = get_bot()
+    dp = get_dispatcher()
     webhook_url = f"{TELEGRAM_WEBHOOK_URL}{WEBHOOK_PATH}"
-    await bot.set_webhook(webhook_url)
+    # allowed_updates from registered handlers — without this Telegram
+    # never delivers chat_join_request updates to the webhook.
+    await bot.set_webhook(
+        webhook_url, allowed_updates=dp.resolve_used_update_types(),
+    )
     logger.info(f"Webhook set to {webhook_url}")
 
     # Log config
@@ -86,6 +92,7 @@ def create_app() -> web.Application:
     # Dispatcher + routers
     dp = get_dispatcher()
     dp.include_router(onboarding_router)   # /start + approval + subscription (public)
+    dp.include_router(channel_join_router)  # chat_join_request do canal de clientes
     dp.include_router(public_router)        # other public commands
     dp.include_router(admin_router)         # admin-only commands
     dp.include_router(shared_router)        # /settings, /menu (admin + subscriber)

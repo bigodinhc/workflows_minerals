@@ -12,6 +12,7 @@ from bot.callback_data import (
     ReportType as ReportTypeCB, ReportYears, ReportBack,
     WorkflowList,
     UserApproval, SubscriptionToggle, SubscriptionDone, OnboardingStart,
+    ChannelJoinApproval,
 )
 
 
@@ -155,6 +156,22 @@ def build_approval_request_keyboard(chat_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="❌ Recusar",
             callback_data=UserApproval(action="reject", chat_id=chat_id).pack(),
+        ),
+    )
+    return builder.as_markup()
+
+
+def build_channel_join_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Approve/decline card for a client-channel join request."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Aprovar entrada",
+            callback_data=ChannelJoinApproval(action="approve", user_id=user_id).pack(),
+        ),
+        InlineKeyboardButton(
+            text="❌ Recusar",
+            callback_data=ChannelJoinApproval(action="decline", user_id=user_id).pack(),
         ),
     )
     return builder.as_markup()

@@ -65,3 +65,19 @@ async def test_deliver_no_subscribers(fake_redis, mock_bot):
         results = await deliver_to_subscribers("morning_check", "Nobody")
     assert results["sent"] == 0
     mock_bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deliver_retries_on_flood_wait(fake_redis, mock_bot):
+    from unittest.mock import MagicMock
+    from aiogram.exceptions import TelegramRetryAfter
+    _seed_users(fake_redis)
+    flood = TelegramRetryAfter(method=MagicMock(), message="flood", retry_after=0)
+    # user 100 floods once then succeeds on retry
+    mock_bot.send_message = AsyncMock(side_effect=[flood, None])
+    with patch("bot.delivery.get_bot", return_value=mock_bot):
+        from bot.delivery import deliver_to_subscribers
+        results = await deliver_to_subscribers("morning_check", "Test")
+    assert results["sent"] == 1
+    assert results["failed"] == 0
+    assert mock_bot.send_message.await_count == 2

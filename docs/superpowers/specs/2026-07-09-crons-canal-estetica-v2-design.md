@@ -77,35 +77,26 @@ fluxos atuais.
   flood-retry em outro runtime.
 - Mover os crons pra dentro do bot (scheduler): reestrutura grande sem necessidade (YAGNI).
 
-## 3. Fase 2 — Estética v2: citação expansível
+## 3. Fase 2 — Estética v2: painel de preços (variante 4c)
 
-Validada contra os templates reais (Curator v4: header 4 linhas → lead em prosa com
-número-chave → seções `*CAPS*` → `Watch:`; e formatos script-built do daily_report/
-morning_check/baltic).
+Decidido com validação visual no canal (2026-07-09). O expansível foi implementado,
+demonstrado e **revertido** por decisão do usuário — notícia não precisa recolher.
 
-### 3.1 Regra de corte (estrutural + trava de tamanho)
+### 3.1 Painel de preços
 
-Nova função pura em `webhook/bot/channel_delivery.py`:
-`split_for_expandable(text: str, threshold: int = 900) -> tuple[str, str | None]`
+- `to_telegram_html` converte linhas iniciadas por `> ` (marcador WhatsApp de citação,
+  já emitido pelo Curator) em `<blockquote>` — linhas consecutivas viram um painel único.
+  Isso também corrige as citações do Curator, que renderizavam literais no canal.
+- `format_price_message` (daily_report) adota o layout compacto: 1 linha por contrato
+  dentro do painel — `> *Mês/AA*  $preço  ±var (±pct%) marcador`, com marcador no FIM
+  da linha: 🟢 alta / 🔴 queda / ▪️ estável.
+- morning_check/baltic mantêm seus formatos atuais no v1 do painel; adotam o mesmo padrão
+  numa iteração futura, se o usuário quiser.
 
-- `len(text) <= threshold` → `(text, None)`: post passa intacto (daily_report do script,
-  ~600-800 chars, cai aqui — correto, já é compacto).
-- Post longo → divide o texto **cru** em blocos por linha em branco (`\n\n`):
-  - **Visível**: bloco 0 (header do Curator) + bloco 1 (lead em prosa, carrega o
-    número-chave).
-  - **Recolhido**: todos os blocos restantes (seções, bullets, Watch:), embrulhados em
-    `<blockquote expandable>`.
-- **< 3 blocos** → sem divisão (post malformado/sem estrutura nunca quebra).
-- Split acontece **após** o truncamento de `RAW_TEXT_LIMIT` e **antes** da conversão;
-  cada parte é convertida separadamente com `to_telegram_html` (fronteira de bloco →
-  nenhum par `*...*` é cortado ao meio).
-- Falha em qualquer ponto do split → degrada pro comportamento atual (post inteiro),
-  dentro do try never-raise existente.
+### 3.2 Fora do escopo (anotado como futuro)
 
-### 3.2 Fora do escopo da fase 2 (anotado como futuro)
-
-Botão inline (precisa do destino de atendimento definido); card-imagem com identidade
-visual (send_photo + template PNG); normalização de header entre workflows.
+Botão inline; card-imagem; expansível (revertido — reintroduzir só com pedido explícito);
+painel nos formatos do morning_check/baltic.
 
 ## 4. Testes
 
@@ -114,10 +105,11 @@ visual (send_photo + template PNG); normalização de header entre workflows.
   (POST chamado com workflow_type certo, uazapi não tocado) e do branch uazapi (legado
   intacto) — espelha o padrão de fixture `CLIENT_DELIVERY_CHANNEL` dos testes do PR #3;
   roteamento atualizado (5 workflows → canal).
-- **Fase 2**: unit do `split_for_expandable` (curto intacto; longo divide em bloco 0+1
-  visível; <3 blocos intacto; threshold exato; conversão dentro do blockquote; par de
-  negrito nunca cortado); integração `post_report_to_channel` com post longo (blockquote
-  presente no texto enviado).
+- **Fase 2**: unit do `to_telegram_html` (linhas `> ` consecutivas viram um único
+  `<blockquote>`; linha única de citação também converte; texto sem citação fica
+  intocado pelo passo — `>` no meio da linha não dispara o painel); unit do
+  `format_price_message` (layout 4c: header 2 linhas + 1 linha por contrato dentro do
+  painel, marcador 🟢/🔴/▪️ no fim de cada linha).
 - **Smoke real**: 1 post longo estilo Curator no canal oficial pra validação visual do
   expansível antes do push (padrão da sessão de hoje).
 

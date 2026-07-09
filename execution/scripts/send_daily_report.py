@@ -49,39 +49,24 @@ def format_price_message(prices):
         return f"{pt_month}/{year_part}"
     
     lines = []
-    lines.append("📊 *MINERALS TRADING DAILY REPORT* 📊")
-    lines.append(f"📈  SGX IRON ORE 62% FE FUTURES - {now}")
-    lines.append("")
-    lines.append("⛏️ *CONTRATOS FUTUROS*")
-    
+    lines.append("📊 *MINERALS TRADING DAILY REPORT*")
+    lines.append(f"📈 SGX IRON ORE 62% FE FUTURES - {now}")
+
     for p in prices:
-        change_val = float(p.get('change', 0))
-        pct_val = float(p.get('pct_change', 0))
-        
-        month_raw = str(p.get('month', '???'))
-        month_pt = translate_month(month_raw)
-        price_float = float(p.get('price', 0))
-        
-        # Format change string
+        change_val = float(p.get("change", 0))
+        pct_val = float(p.get("pct_change", 0))
+        month_pt = translate_month(str(p.get("month", "???")))
+        price_float = float(p.get("price", 0))
+
         if change_val > 0:
-            chg_str = f"+{change_val:.2f}"
-            pct_str = f"(+{pct_val:.2f}%)"
+            stats, marker = f"+{change_val:.2f} (+{pct_val:.2f}%)", "🟢"
         elif change_val < 0:
-            chg_str = f"{change_val:.2f}"
-            pct_str = f"({pct_val:.2f}%)"
+            stats, marker = f"{change_val:.2f} ({pct_val:.2f}%)", "🔴"
         else:
-            chg_str = ""
-            pct_str = ""
-        
-        # Format line
-        if change_val == 0:
-            stats = "Estável"
-        else:
-            stats = f"{chg_str} {pct_str}"
-            
-        lines.append(f"• *IO Swap {month_pt}*")
-        lines.append(f"`${price_float:.2f}`   |  {stats}")
-        
+            stats, marker = "estável", "▪️"
+
+        lines.append(f"> *{month_pt}*  `${price_float:.2f}`  {stats} {marker}")
+
     return "\n".join(lines)
 
 

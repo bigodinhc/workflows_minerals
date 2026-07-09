@@ -95,12 +95,18 @@ async def store_draft(request: web.Request) -> web.Response:
 
     logger.info(f"Draft stored: {draft_id} ({len(message)} chars, workflow={workflow_type}, direct={direct_delivery})")
 
-    # Telegram delivery to subscribers (non-blocking)
+    # Telegram delivery (non-blocking): client workflows → private channel,
+    # internal workflows → DM broadcast to subscribers (legacy behavior).
     telegram_result = None
     if direct_delivery and workflow_type:
-        from bot.delivery import deliver_to_subscribers
+        from bot.routing import resolve_destination, DEST_CLIENT_CHANNEL
         try:
-            telegram_result = await deliver_to_subscribers(workflow_type, message)
+            if resolve_destination(workflow_type) == DEST_CLIENT_CHANNEL:
+                from bot.channel_delivery import post_report_to_channel
+                telegram_result = await post_report_to_channel(message)
+            else:
+                from bot.delivery import deliver_to_subscribers
+                telegram_result = await deliver_to_subscribers(workflow_type, message)
             logger.info(f"Telegram delivery: {telegram_result}")
         except Exception as exc:
             logger.error(f"Telegram delivery failed: {exc}")

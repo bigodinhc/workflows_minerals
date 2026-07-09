@@ -101,7 +101,7 @@ def format_whatsapp_message(data):
         date_formatted = report_date
 
     def format_line(name, value, change, unit="", decimals=2, is_index=False):
-        """Format a single data line in the style of morning check."""
+        """Format a single data line: 4c panel row with trailing bolinha marker."""
         if is_index:
             val_str = f"{int(value)}" if value else "N/A"
             chg_str = format_change(change, 0)
@@ -120,16 +120,21 @@ def format_whatsapp_message(data):
             pct_str = ""
 
         if change == 0 or not change:
-            status = "Estável"
-            return f"• *{name}*\n`{val_str}{unit}`   |  {status}"
-        else:
-            return f"• *{name}*\n`{val_str}{unit}`   |  {chg_str} {pct_str}"
+            return f"> *{name}*  `{val_str}{unit}`  estável ▪️"
+
+        try:
+            change_val = float(change)
+        except (TypeError, ValueError):
+            change_val = 0
+
+        marker = "🟢" if change_val > 0 else "🔴"
+        return f"> *{name}*  `{val_str}{unit}`  {chg_str} {pct_str} {marker}"
 
     lines = []
 
     # Header
-    lines.append("📊 *MINERALS TRADING DAILY REPORT* 📊")
-    lines.append(f"🚢  BALTIC EXCHANGE UPDATE - {date_formatted}")
+    lines.append("📊 *MINERALS TRADING DAILY REPORT*")
+    lines.append(f"🚢 BALTIC EXCHANGE UPDATE - {date_formatted}")
     lines.append("")
 
     # BDI Section

@@ -94,43 +94,30 @@ def desc_keys(item):
     return keys
 
 def format_line(item):
-    """Formats a single item line: Bold name + backtick price"""
+    """Formats a single item line: 4c panel row with trailing arrow marker."""
     if not item: return None
-    
+
     desc = item.get('product', 'Unknown')
     # Cleanup assess type if needed (e.g. remove redundant text)
     assess_type = item.get('assessmentType', '').strip()
     # If unit is basically the same as assess type, simplify
     if assess_type.lower() == item.get('unit', '').lower():
         assess_type = item.get('unit', '')
-        
+
     price = item['price']
     change = item.get('change', 0)
     pct = item.get('changePercent', 0)
-    
-    # Logic for Indicators & Color
-    if change > 0:
-        sign_str = f"+{change:.2f}"
-        pct_str = f"(+{pct:.2f}%)"
-    elif change < 0:
-        sign_str = f"{change:.2f}" # change is negative
-        pct_str = f"({pct:.2f}%)"
-    else:
-        sign_str = ""
-        pct_str = ""
-        
-    # Clean Format with single backticks:
-    # • *Product Name*
-    # `$100.00`   |  +0.50 (+0.50%)
-    
+
     price_fmt = f"${price:.2f}"
-    
-    if change == 0:
-         stats_block = "Estável"
+
+    if change > 0:
+        stats, marker = f"+{change:.2f} (+{pct:.2f}%)", "↑"
+    elif change < 0:
+        stats, marker = f"{change:.2f} ({pct:.2f}%)", "↓"
     else:
-         stats_block = f"{sign_str} {pct_str}"
-         
-    return f"• *{desc}*\n`{price_fmt}`   |  {stats_block}"
+        stats, marker = "estável", "·"
+
+    return f"> *{desc}*  `{price_fmt}`  {stats} {marker}"
 
 def filter_by_keys(items, keys_whitelist):
     """Filters items matching whitelist KEYS (more stable than description)."""
@@ -165,7 +152,7 @@ def build_message(report_items, date_str):
     # If customer adds more keys to PlattsClient.SYMBOLS_MAPPING later, add them to lists above.
     
     # Build parts
-    header = f"📊 *MINERALS TRADING DAILY REPORT* 📊\n🔍 *IRON ORE MARKET UPDATE* - {date_str}"
+    header = f"📊 *MINERALS TRADING DAILY REPORT*\n🔍 IRON ORE MARKET UPDATE - {date_str}"
     parts = [header]
     
     s1 = get_section("🪨 *FINES*", fines_lines)

@@ -18,6 +18,7 @@ import random
 
 import requests
 
+from bot.routing import client_delivery_mode
 from execution.core.event_bus import EventBus
 from execution.core.logger import WorkflowLogger
 from execution.integrations.contacts_repo import ContactsRepo
@@ -114,6 +115,73 @@ async def _refresh_download_url(redis_client, approval_id: str, state: dict) -> 
     return new_state
 
 
+async def _dispatch_to_channel(
+    redis_client,
+    approval_id: str,
+    state: dict,
+    trace_id: str | None,
+) -> dict:
+    """Single post to the private Telegram channel (CLIENT_DELIVERY_CHANNEL=telegram).
+
+    Replaces the per-contact uazapi fan-out: one send_document reaches every
+    channel subscriber. Idempotency claims the pseudo-recipient
+    'telegram_channel' so a double-click can't double-post.
+    """
+    from bot.channel_delivery import post_report_to_channel
+
+    bus = EventBus(workflow="onedrive_webhook", trace_id=trace_id or state.get("trace_id"))
+    bus.emit("dispatch_started", detail={
+        "approval_id": approval_id,
+        "list_code": "telegram_channel",
+        "recipients": 1,
+    })
+
+    claimed = await _claim_idempotency(
+        redis_client, "telegram_channel", state["drive_item_id"]
+    )
+    if not claimed:
+        bus.emit("dispatch_completed", detail={
+            "approval_id": approval_id, "sent": 0, "failed": 0, "skipped": 1,
+        })
+        return {"sent": 0, "failed": 0, "skipped": 1, "errors": []}
+
+    def _download_pdf() -> bytes:
+        r = requests.get(state["downloadUrl"], timeout=60, stream=False)
+        r.raise_for_status()
+        return r.content
+
+    try:
+        pdf_bytes = await asyncio.to_thread(_download_pdf)
+        bus.emit("pdf_downloaded", detail={
+            "approval_id": approval_id, "bytes": len(pdf_bytes),
+        })
+    except Exception as exc:
+        bus.emit("pdf_download_failed", level="error", detail={
+            "approval_id": approval_id, "error": str(exc)[:300],
+        })
+        bus.emit("dispatch_completed", detail={
+            "approval_id": approval_id, "sent": 0, "failed": 1, "skipped": 0,
+        })
+        return {
+            "sent": 0, "failed": 1, "skipped": 0,
+            "errors": [{"phone": "telegram_channel", "error": f"download: {str(exc)[:250]}"}],
+        }
+
+    result = await post_report_to_channel(
+        f"📄 {state['filename']}",
+        pdf=pdf_bytes,
+        pdf_filename=state["filename"],
+    )
+    sent, failed = (1, 0) if result["ok"] else (0, 1)
+    errors = [] if result["ok"] else [
+        {"phone": "telegram_channel", "error": result["error"] or "unknown"}
+    ]
+    bus.emit("dispatch_completed", detail={
+        "approval_id": approval_id, "sent": sent, "failed": failed, "skipped": 0,
+    })
+    return {"sent": sent, "failed": failed, "skipped": 0, "errors": errors}
+
+
 async def dispatch_document(
     approval_id: str,
     list_code: str,
@@ -132,6 +200,9 @@ async def dispatch_document(
     # before the 'get_item in pipeline' fix may have an empty downloadUrl.
     if not state.get("downloadUrl") or _is_stale(state.get("downloadUrl_fetched_at", "")):
         state = await _refresh_download_url(redis_client, approval_id, state)
+
+    if client_delivery_mode() == "telegram":
+        return await _dispatch_to_channel(redis_client, approval_id, state, trace_id)
 
     contacts_repo = ContactsRepo()
     if list_code == ALL_CODE:

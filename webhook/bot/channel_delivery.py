@@ -53,6 +53,29 @@ def to_telegram_html(text: str) -> str:
     return _ITALIC_RE.sub(r"<i>\1</i>", with_bold)
 
 
+EXPANDABLE_THRESHOLD = 900
+
+
+def split_for_expandable(
+    text: str, threshold: int = EXPANDABLE_THRESHOLD,
+) -> tuple[str, str | None]:
+    """Split a long raw message into (visible, collapsed) at block boundaries.
+
+    Blocks are paragraphs separated by blank lines. Visible = first two
+    blocks (Curator header + lead, which carries the headline number).
+    Short (<= threshold) or unstructured (< 3 blocks) messages come back
+    unchanged as (text, None) — a malformed post never breaks.
+    """
+    if len(text) <= threshold:
+        return (text, None)
+    blocks = [b for b in text.split("\n\n") if b.strip()]
+    if len(blocks) < 3:
+        return (text, None)
+    visible = "\n\n".join(blocks[:2])
+    collapsed = "\n\n".join(blocks[2:])
+    return (visible, collapsed)
+
+
 async def _call_with_flood_retry(coro_factory):
     """Await coro_factory(); on TelegramRetryAfter sleep retry_after and retry
     (up to MAX_FLOOD_RETRIES attempts total). Re-raises the last error."""
@@ -90,7 +113,19 @@ async def post_report_to_channel(
 
     try:
         bot = get_bot()
-        text = to_telegram_html(message[:RAW_TEXT_LIMIT])
+        raw = message[:RAW_TEXT_LIMIT]
+        try:
+            visible_raw, collapsed_raw = split_for_expandable(raw)
+        except Exception as split_exc:
+            # Split must never block delivery — degrade to the whole post.
+            logger.warning(f"split_for_expandable failed, posting whole: {split_exc}")
+            visible_raw, collapsed_raw = raw, None
+        text = to_telegram_html(visible_raw)
+        if collapsed_raw is not None:
+            text = (
+                f"{text}\n\n<blockquote expandable>"
+                f"{to_telegram_html(collapsed_raw)}</blockquote>"
+            )
     except Exception as exc:
         logger.error(f"post_report_to_channel setup failed: {exc}")
         return {"ok": False, "message_id": None, "error": str(exc)[:300]}

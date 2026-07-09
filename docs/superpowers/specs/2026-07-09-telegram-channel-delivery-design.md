@@ -1,7 +1,7 @@
 # Design: Distribuição "full Telegram" — canal privado para relatórios de cliente
 
 - **Data:** 2026-07-09
-- **Status:** Aprovado (design); aguardando revisão do spec para partir ao plano de implementação
+- **Status:** Implementado (plano: docs/superpowers/plans/2026-07-09-telegram-channel-delivery.md); pendente rollout manual (§7)
 - **Autor:** brainstorming colaborativo (usuário + Claude)
 
 ## 1. Problema & objetivo

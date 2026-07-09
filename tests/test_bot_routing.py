@@ -10,14 +10,11 @@ import pytest
 
 def test_client_workflows_route_to_channel():
     from bot.routing import resolve_destination, DEST_CLIENT_CHANNEL
-    for wf in ("daily_report", "market_news", "platts_reports"):
+    for wf in (
+        "daily_report", "market_news", "platts_reports",
+        "morning_check", "baltic_ingestion",
+    ):
         assert resolve_destination(wf) == DEST_CLIENT_CHANNEL
-
-
-def test_internal_workflows_route_to_internal():
-    from bot.routing import resolve_destination, DEST_INTERNAL
-    for wf in ("morning_check", "baltic_ingestion"):
-        assert resolve_destination(wf) == DEST_INTERNAL
 
 
 def test_unknown_and_none_route_to_internal():

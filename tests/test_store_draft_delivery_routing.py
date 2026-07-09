@@ -50,9 +50,9 @@ async def test_internal_workflow_keeps_dm_broadcast():
     with patch("routes.api.drafts_set"), \
          patch("bot.channel_delivery.post_report_to_channel", channel_mock), \
          patch("bot.delivery.deliver_to_subscribers", dm_mock):
-        resp = await store_draft(_FakeRequest(_payload("morning_check")))
+        resp = await store_draft(_FakeRequest(_payload("watchdog")))
     body = json.loads(resp.body)
-    dm_mock.assert_awaited_once_with("morning_check", "conteúdo")
+    dm_mock.assert_awaited_once_with("watchdog", "conteúdo")
     channel_mock.assert_not_awaited()
     assert body["telegram_delivery"]["sent"] == 2
 

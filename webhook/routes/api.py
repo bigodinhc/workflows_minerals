@@ -179,6 +179,7 @@ async def register_commands(request: web.Request) -> web.Response:
         {"command": "add", "description": "Adicionar contato"},
         {"command": "list", "description": "Listar contatos"},
         {"command": "cancel", "description": "Abortar fluxo atual"},
+        {"command": "convite", "description": "Gerar convite + QR do canal de clientes"},
     ]
     try:
         async with aiohttp.ClientSession() as session:

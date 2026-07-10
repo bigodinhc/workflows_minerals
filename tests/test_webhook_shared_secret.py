@@ -34,6 +34,15 @@ def test_helper_fail_closed_sem_env(monkeypatch):
     assert resp.status == 500
 
 
+@pytest.mark.parametrize("valor", ["", "   "])
+def test_helper_fail_closed_env_vazio(monkeypatch, valor):
+    monkeypatch.setenv("WEBHOOK_SHARED_SECRET", valor)
+    from routes.api import require_shared_secret
+    resp = require_shared_secret(_FakeRequest(headers={"X-Webhook-Secret": "qualquer"}))
+    assert resp is not None
+    assert resp.status == 500
+
+
 def test_helper_rejeita_header_ausente(secret_env):
     from routes.api import require_shared_secret
     resp = require_shared_secret(_FakeRequest())

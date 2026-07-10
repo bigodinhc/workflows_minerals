@@ -96,7 +96,7 @@ def process(rationale_items: List[dict], today_br: str, logger: WorkflowLogger =
     if webhook_url:
         import requests
         try:
-            requests.post(
+            resp = requests.post(
                 f"{webhook_url}/store-draft",
                 json={
                     "draft_id": draft_obj["id"],
@@ -109,6 +109,8 @@ def process(rationale_items: List[dict], today_br: str, logger: WorkflowLogger =
                 headers={"X-Webhook-Secret": os.getenv("WEBHOOK_SHARED_SECRET", "")},
                 timeout=10,
             )
+            if resp.status_code != 200:
+                log.warning(f"Webhook store-draft returned HTTP {resp.status_code}")
         except Exception as exc:
             log.warning(f"Could not store draft on webhook: {exc}")
 

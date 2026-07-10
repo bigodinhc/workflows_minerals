@@ -59,6 +59,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WEBHOOK_BASE_URL: ${{ vars.WEBHOOK_BASE_URL }}
           CLIENT_DELIVERY_CHANNEL: ${{ vars.CLIENT_DELIVERY_CHANNEL }}
+          WEBHOOK_SHARED_SECRET: ${{ secrets.WEBHOOK_SHARED_SECRET }}
 
         run: |
           ARGS=""

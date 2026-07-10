@@ -10,7 +10,9 @@ These are plain HTTP routes — not Telegram handlers. They serve:
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -28,6 +30,24 @@ logger = logging.getLogger(__name__)
 SEEN_ARTICLES: dict = {}
 
 routes = web.RouteTableDef()
+
+
+def require_shared_secret(request: web.Request) -> web.Response | None:
+    """None = autorizado; web.Response = erro pronto pra retornar.
+
+    Lê WEBHOOK_SHARED_SECRET em tempo de chamada (env muda sem redeploy
+    de código). Fail-closed: sem secret configurado, nada passa.
+    """
+    expected = os.getenv("WEBHOOK_SHARED_SECRET", "").strip()
+    if not expected:
+        logger.critical("WEBHOOK_SHARED_SECRET not configured — rejecting request")
+        return web.json_response(
+            {"error": "WEBHOOK_SHARED_SECRET not configured"}, status=500
+        )
+    provided = request.headers.get("X-Webhook-Secret", "")
+    if not hmac.compare_digest(provided.encode(), expected.encode()):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    return None
 
 
 @routes.get("/health")
@@ -53,6 +73,8 @@ async def metrics_endpoint(request: web.Request) -> web.Response:
 
 @routes.get("/test-ai")
 async def test_ai(request: web.Request) -> web.Response:
+    if (denied := require_shared_secret(request)) is not None:
+        return denied
     if not ANTHROPIC_API_KEY:
         return web.json_response({"error": "ANTHROPIC_API_KEY not set"}, status=500)
     try:
@@ -68,6 +90,8 @@ async def test_ai(request: web.Request) -> web.Response:
 
 @routes.post("/store-draft")
 async def store_draft(request: web.Request) -> web.Response:
+    if (denied := require_shared_secret(request)) is not None:
+        return denied
     data = await request.json()
     draft_id = data.get("draft_id")
     message = data.get("message")

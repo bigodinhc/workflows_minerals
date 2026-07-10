@@ -9,10 +9,18 @@ sys.path.insert(0, str(_REPO / "webhook"))
 
 import pytest
 
+SECRET = "s3gr3d0-de-teste"
+
+
+@pytest.fixture(autouse=True)
+def _shared_secret_env(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_SHARED_SECRET", SECRET)
+
 
 class _FakeRequest:
     def __init__(self, payload: dict):
         self._payload = payload
+        self.headers = {"X-Webhook-Secret": SECRET}
 
     async def json(self):
         return self._payload

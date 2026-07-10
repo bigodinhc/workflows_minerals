@@ -23,8 +23,9 @@ Chamadores legítimos do `/store-draft` hoje:
 1. `execution/integrations/channel_publisher.py` — crons daily_report, morning_check e
    baltic_ingestion (GH Actions), env `WEBHOOK_BASE_URL`, `direct_delivery: true`.
    **Caminho crítico.**
-2. `execution/curation/rationale_dispatcher.py` — market_news (GH Actions), env
-   `TELEGRAM_WEBHOOK_URL`, `direct_delivery: false`, best-effort (falha vira warning).
+2. `execution/curation/rationale_dispatcher.py` — env `TELEGRAM_WEBHOOK_URL`,
+   `direct_delivery: false`, best-effort (falha vira warning). Módulo órfão (o router
+   não o chama mais; mantido como utilitário manual) — ganha o header mesmo assim.
 
 ### Decisões travadas (brainstorming 2026-07-10)
 

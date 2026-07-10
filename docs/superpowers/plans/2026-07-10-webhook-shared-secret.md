@@ -384,6 +384,7 @@ Ordem importa (fail-closed — o secret tem que existir nos dois lados ANTES do 
 1. `openssl rand -hex 32` → gerar o secret.
 2. `gh secret set WEBHOOK_SHARED_SECRET --body "<secret>"` (repo) e
    `railway variables --set "WEBHOOK_SHARED_SECRET=<secret>"` no service web (projeto keen-stillness).
+   Sem whitespace/newline no valor (o servidor faz strip do env; os clientes enviam cru).
 3. Merge do PR → deploy Railway (confirmar que o container novo subiu; se necessário `railway redeploy --yes`).
 4. Smoke: `curl -s -o /dev/null -w "%{http_code}" -X POST <base>/store-draft -H 'Content-Type: application/json' -d '{"draft_id":"smoke","message":"x"}'` → espera `401`; repetir com `-H "X-Webhook-Secret: <secret>"` → espera `200`.
 5. Validação final no próximo cron real (GH Actions verde + post no canal).

@@ -51,6 +51,7 @@ def publish_to_channel(workflow_type: str, message: str, draft_id: str) -> dict:
                 "workflow_type": workflow_type,
                 "direct_delivery": True,
             },
+            headers={"X-Webhook-Secret": os.getenv("WEBHOOK_SHARED_SECRET", "")},
             timeout=_TIMEOUT_SECONDS,
         )
     except Exception as exc:

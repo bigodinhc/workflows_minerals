@@ -106,6 +106,7 @@ def process(rationale_items: List[dict], today_br: str, logger: WorkflowLogger =
                     "workflow_type": "rationale_news",
                     "direct_delivery": False,
                 },
+                headers={"X-Webhook-Secret": os.getenv("WEBHOOK_SHARED_SECRET", "")},
                 timeout=10,
             )
         except Exception as exc:

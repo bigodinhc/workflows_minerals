@@ -40,6 +40,7 @@ def _ok_response():
 
 def test_publish_posts_store_draft(monkeypatch):
     monkeypatch.setenv("WEBHOOK_BASE_URL", "https://example.up.railway.app/")
+    monkeypatch.setenv("WEBHOOK_SHARED_SECRET", "s3gr3d0")
     from execution.integrations import channel_publisher as cp
     with patch.object(cp.requests, "post", return_value=_ok_response()) as post:
         result = cp.publish_to_channel("daily_report", "corpo *msg*", "draft-42")
@@ -52,6 +53,7 @@ def test_publish_posts_store_draft(monkeypatch):
         "workflow_type": "daily_report",
         "direct_delivery": True,
     }
+    assert kwargs["headers"] == {"X-Webhook-Secret": "s3gr3d0"}
     assert kwargs["timeout"] == 90
 
 
@@ -96,3 +98,12 @@ def test_publish_response_without_delivery(monkeypatch):
         result = cp.publish_to_channel("daily_report", "m", "d")
     assert result["ok"] is False
     assert "telegram_delivery" in result["error"]
+
+
+def test_publish_sem_secret_manda_header_vazio(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_BASE_URL", "https://example.up.railway.app")
+    monkeypatch.delenv("WEBHOOK_SHARED_SECRET", raising=False)
+    from execution.integrations import channel_publisher as cp
+    with patch.object(cp.requests, "post", return_value=_ok_response()) as post:
+        cp.publish_to_channel("daily_report", "corpo", "draft-43")
+    assert post.call_args.kwargs["headers"] == {"X-Webhook-Secret": ""}

@@ -52,6 +52,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_EVENTS_CHANNEL_ID: ${{ secrets.TELEGRAM_EVENTS_CHANNEL_ID }}
           TELEGRAM_WEBHOOK_URL: ${{ vars.TELEGRAM_WEBHOOK_URL }}
+          WEBHOOK_SHARED_SECRET: ${{ secrets.WEBHOOK_SHARED_SECRET }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
 
           # WhatsApp (passed to webhook for sending)

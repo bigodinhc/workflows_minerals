@@ -2,7 +2,6 @@
 
 These are plain HTTP routes — not Telegram handlers. They serve:
 - POST /store-draft (GitHub Actions -> store a draft for approval)
-- GET/POST /seen-articles (GitHub Actions -> dedup for market_news)
 - GET /health (monitoring)
 - GET /test-ai (Anthropic API connectivity test)
 - POST /admin/register-commands (register bot commands with Telegram)
@@ -10,8 +9,9 @@ These are plain HTTP routes — not Telegram handlers. They serve:
 
 from __future__ import annotations
 
+import hmac
 import logging
-from datetime import datetime, timedelta
+import os
 
 import aiohttp
 from aiohttp import web
@@ -24,17 +24,31 @@ import contact_admin
 
 logger = logging.getLogger(__name__)
 
-# In-memory state for seen articles (ephemeral, not worth Redis for 3d TTL)
-SEEN_ARTICLES: dict = {}
-
 routes = web.RouteTableDef()
+
+
+def require_shared_secret(request: web.Request) -> web.Response | None:
+    """None = autorizado; web.Response = erro pronto pra retornar.
+
+    Lê WEBHOOK_SHARED_SECRET em tempo de chamada (env muda sem redeploy
+    de código). Fail-closed: sem secret configurado, nada passa.
+    """
+    expected = os.getenv("WEBHOOK_SHARED_SECRET", "").strip()
+    if not expected:
+        logger.critical("WEBHOOK_SHARED_SECRET not configured — rejecting request")
+        return web.json_response(
+            {"error": "WEBHOOK_SHARED_SECRET not configured"}, status=500
+        )
+    provided = request.headers.get("X-Webhook-Secret", "")
+    if not hmac.compare_digest(provided.encode(), expected.encode()):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    return None
 
 
 @routes.get("/health")
 async def health(request: web.Request) -> web.Response:
     return web.json_response({
         "status": "ok",
-        "seen_articles_dates": len(SEEN_ARTICLES),
         "uazapi_token_set": bool(UAZAPI_TOKEN),
         "uazapi_url": UAZAPI_URL,
         "anthropic_key_set": bool(ANTHROPIC_API_KEY),
@@ -53,6 +67,8 @@ async def metrics_endpoint(request: web.Request) -> web.Response:
 
 @routes.get("/test-ai")
 async def test_ai(request: web.Request) -> web.Response:
+    if (denied := require_shared_secret(request)) is not None:
+        return denied
     if not ANTHROPIC_API_KEY:
         return web.json_response({"error": "ANTHROPIC_API_KEY not set"}, status=500)
     try:
@@ -68,6 +84,8 @@ async def test_ai(request: web.Request) -> web.Response:
 
 @routes.post("/store-draft")
 async def store_draft(request: web.Request) -> web.Response:
+    if (denied := require_shared_secret(request)) is not None:
+        return denied
     data = await request.json()
     draft_id = data.get("draft_id")
     message = data.get("message")
@@ -116,40 +134,6 @@ async def store_draft(request: web.Request) -> web.Response:
     if telegram_result:
         response["telegram_delivery"] = telegram_result
     return web.json_response(response)
-
-
-@routes.get("/seen-articles")
-async def get_seen_articles(request: web.Request) -> web.Response:
-    date = request.query.get("date", "")
-    if not date:
-        return web.json_response({"error": "Missing 'date' query parameter"}, status=400)
-    titles = list(SEEN_ARTICLES.get(date, set()))
-    return web.json_response({"date": date, "titles": titles})
-
-
-@routes.post("/seen-articles")
-async def store_seen_articles(request: web.Request) -> web.Response:
-    data = await request.json()
-    date = data.get("date", "")
-    titles = data.get("titles", [])
-    if not date or not titles:
-        return web.json_response({"error": "Missing 'date' or 'titles'"}, status=400)
-
-    if date not in SEEN_ARTICLES:
-        SEEN_ARTICLES[date] = set()
-    SEEN_ARTICLES[date].update(titles)
-
-    # Prune entries older than 3 days
-    try:
-        cutoff = datetime.now() - timedelta(days=3)
-        stale_keys = [k for k in SEEN_ARTICLES if datetime.strptime(k, "%Y-%m-%d") < cutoff]
-        for k in stale_keys:
-            del SEEN_ARTICLES[k]
-    except ValueError as e:
-        logger.warning(f"Date format mismatch during seen-articles pruning: {e}")
-
-    logger.info(f"Stored {len(titles)} seen articles for {date} (total: {len(SEEN_ARTICLES.get(date, []))})")
-    return web.json_response({"success": True, "stored": len(titles)})
 
 
 @routes.post("/admin/register-commands")

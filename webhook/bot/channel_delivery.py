@@ -20,10 +20,14 @@ from bot.config import get_bot, TELEGRAM_CLIENT_CHANNEL_ID
 logger = logging.getLogger(__name__)
 
 MAX_FLOOD_RETRIES = 3
-# Telegram caps message text at 4096 chars counting HTML tags; converting
-# adds tag overhead, so we truncate the raw input with headroom first.
-RAW_TEXT_LIMIT = 3500
+TELEGRAM_TEXT_LIMIT = 4096
+# Telegram counts HTML tags against the cap and converting adds ~21% on real
+# messages, so the raw input is truncated with headroom first: 3300 × 1.21
+# still clears 4096. At the previous 3500 a full-length post converted to
+# ~4230 and Telegram would have rejected it.
+RAW_TEXT_LIMIT = 3300
 TELEGRAM_CAPTION_LIMIT = 1024
+COPY_LABEL = "📋 Copiar pro WhatsApp:"
 
 # WhatsApp-style markers produced by the Curator prompt. Paired, same-line
 # (except ``` blocks), no whitespace hugging the marker — unbalanced or
@@ -73,6 +77,52 @@ def to_telegram_html(text: str) -> str:
     with_bold = _BOLD_RE.sub(r"<b>\1</b>", with_code)
     converted = _ITALIC_RE.sub(r"<i>\1</i>", with_bold)
     return _quote_lines_to_blockquote(converted)
+
+
+def has_whatsapp_markers(text: str) -> bool:
+    """True when the source carries markup worth preserving for a paste.
+
+    Keeps the copy block off posts that gain nothing from it — the
+    platts_reports post is a bare '📄 filename' next to a PDF attachment.
+    """
+    if not text:
+        return False
+    if _BOLD_RE.search(text) or _CODE_RE.search(text) or _ITALIC_RE.search(text):
+        return True
+    return text.lstrip().startswith("> ") or "\n> " in text
+
+
+def build_copy_block(raw: str) -> str:
+    """Label plus a <pre> block holding the raw source, HTML-escaped.
+
+    Telegram renders <pre> with a copy affordance, and what lands on the
+    clipboard is the literal marker syntax — which is what WhatsApp parses.
+    Copying the rendered post instead would paste as flat text.
+    """
+    return f"{COPY_LABEL}\n<pre>{escape_html(raw)}</pre>"
+
+
+def build_channel_payload(raw: str) -> list[str]:
+    """Messages to post, in order.
+
+    One element when the readable post and its copy block fit a single
+    message; two when they don't. Content is never truncated — a long report
+    costs an extra message rather than losing rows.
+    """
+    pretty = to_telegram_html(raw)
+    if not has_whatsapp_markers(raw):
+        return [pretty]
+
+    copy_block = build_copy_block(raw)
+    if len(copy_block) > TELEGRAM_TEXT_LIMIT:
+        # Escaping blew the cap on its own — ship the readable post rather
+        # than a block Telegram would reject outright.
+        return [pretty]
+
+    combined = f"{pretty}\n\n{copy_block}"
+    if len(combined) <= TELEGRAM_TEXT_LIMIT:
+        return [combined]
+    return [pretty, copy_block]
 
 
 async def _call_with_flood_retry(coro_factory):

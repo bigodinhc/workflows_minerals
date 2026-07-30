@@ -178,3 +178,79 @@ async def test_missing_channel_id_fails_cleanly(mock_bot):
     assert result["ok"] is False
     assert "TELEGRAM_CLIENT_CHANNEL_ID" in result["error"]
     mock_bot.send_message.assert_not_awaited()
+
+
+# ── bloco copiável pro WhatsApp ──
+
+def test_has_whatsapp_markers_detecta_cada_marcador():
+    from bot.channel_delivery import has_whatsapp_markers
+    assert has_whatsapp_markers("*IRON ORE*")
+    assert has_whatsapp_markers("preço `$107.90` hoje")
+    assert has_whatsapp_markers("_em alta_")
+    assert has_whatsapp_markers("> citação do CEO")
+    assert has_whatsapp_markers("linha 1\n> citação")
+
+
+def test_has_whatsapp_markers_falso_sem_marcador():
+    from bot.channel_delivery import has_whatsapp_markers
+    assert not has_whatsapp_markers("📄 relatorio-platts-30-07.pdf")
+    assert not has_whatsapp_markers("")
+    assert not has_whatsapp_markers("texto puro sem formatação")
+
+
+def test_build_copy_block_preserva_o_texto_cru():
+    from bot.channel_delivery import build_copy_block, COPY_LABEL
+    raw = "📊 *MINERALS TRADING*\nBDI  `1850`  +25 ↑"
+    bloco = build_copy_block(raw)
+    assert bloco.startswith(COPY_LABEL)
+    assert "<pre>" in bloco and "</pre>" in bloco
+    # os marcadores sobrevivem literalmente — é o ponto do bloco
+    assert "*MINERALS TRADING*" in bloco
+    assert "`1850`" in bloco
+
+
+def test_build_copy_block_escapa_html():
+    from bot.channel_delivery import build_copy_block
+    bloco = build_copy_block("lucro > custo & margem < 10%")
+    assert "&gt;" in bloco and "&amp;" in bloco and "&lt;" in bloco
+
+
+def test_build_channel_payload_uma_mensagem_quando_cabe():
+    from bot.channel_delivery import build_channel_payload, COPY_LABEL
+    partes = build_channel_payload("📊 *MINERALS TRADING*\nBDI  `1850`  +25 ↑")
+    assert len(partes) == 1
+    assert "<b>MINERALS TRADING</b>" in partes[0]   # parte bonita
+    assert COPY_LABEL in partes[0]                   # bloco junto
+
+
+def test_build_channel_payload_divide_quando_estoura():
+    from bot.channel_delivery import build_channel_payload, COPY_LABEL, TELEGRAM_TEXT_LIMIT
+    # 60 linhas de cotação com marcador → pretty + bloco passam de 4096
+    raw = "\n".join(f"*Produto {i}*  `$10{i}.50`  +0.55 (+0.53%) ↑" for i in range(60))
+    partes = build_channel_payload(raw)
+    assert len(partes) == 2
+    assert COPY_LABEL not in partes[0]     # 1ª é só o post legível
+    assert partes[1].startswith(COPY_LABEL)
+    assert all(len(p) <= TELEGRAM_TEXT_LIMIT for p in partes)
+
+
+def test_build_channel_payload_pula_bloco_sem_marcadores():
+    from bot.channel_delivery import build_channel_payload, COPY_LABEL
+    partes = build_channel_payload("📄 relatorio-platts-30-07.pdf")
+    assert len(partes) == 1
+    assert COPY_LABEL not in partes[0]
+
+
+def test_build_channel_payload_nunca_trunca_conteudo():
+    from bot.channel_delivery import build_channel_payload
+    raw = "\n".join(f"*Produto {i}*  `$10{i}.50`  +0.55 (+0.53%) ↑" for i in range(60))
+    partes = build_channel_payload(raw)
+    # toda linha do original aparece em alguma das partes
+    for i in range(60):
+        assert f"Produto {i}" in "".join(partes)
+
+
+def test_raw_text_limit_cabe_no_teto_com_overhead_de_tags():
+    from bot.channel_delivery import RAW_TEXT_LIMIT, TELEGRAM_TEXT_LIMIT
+    # overhead medido nas mensagens reais: ~21%
+    assert RAW_TEXT_LIMIT * 1.21 <= TELEGRAM_TEXT_LIMIT

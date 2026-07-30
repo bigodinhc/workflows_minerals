@@ -27,45 +27,35 @@ def format_price_message(prices):
     Expects 'prices' to be a list of dicts: {month, price, change, pct_change}
     """
     from datetime import timezone, timedelta
-    
-    # Horário de Brasília (UTC-3)
+
+    from execution.core.report_format import (
+        build_header,
+        format_row,
+        marker_for,
+        translate_contract_month,
+    )
+
     BRT = timezone(timedelta(hours=-3))
-    now = datetime.now(BRT).strftime("%d/%m/%Y")
-    
-    # Month translation EN -> PT
-    MONTHS_PT = {
-        'JAN': 'Jan', 'FEB': 'Fev', 'MAR': 'Mar', 'APR': 'Abr',
-        'MAY': 'Mai', 'JUN': 'Jun', 'JUL': 'Jul', 'AUG': 'Ago',
-        'SEP': 'Set', 'OCT': 'Out', 'NOV': 'Nov', 'DEC': 'Dez'
-    }
-    
-    def translate_month(month_code):
-        """Converts 'FEB/26' or 'FEB26' to 'Fev/26'"""
-        month_code = month_code.upper().replace("/", "")
-        # Extract month part (first 3 chars) and year part (rest)
-        month_part = month_code[:3]
-        year_part = month_code[3:]
-        pt_month = MONTHS_PT.get(month_part, month_part)
-        return f"{pt_month}/{year_part}"
-    
-    lines = []
-    lines.append("📊 *MINERALS TRADING DAILY REPORT*")
-    lines.append(f"📈 SGX IRON ORE 62% FE FUTURES - {now}")
+    today = datetime.now(BRT).date()
+
+    lines = [build_header("Curva SGX — Iron Ore 62% Fe", "IRON ORE FUTURES", today), ""]
 
     for p in prices:
         change_val = float(p.get("change", 0))
         pct_val = float(p.get("pct_change", 0))
-        month_pt = translate_month(str(p.get("month", "???")))
+        month_pt = translate_contract_month(str(p.get("month", "???")))
         price_float = float(p.get("price", 0))
 
         if change_val > 0:
-            stats, marker = f"+{change_val:.2f} (+{pct_val:.2f}%)", "🟢"
+            stats = f"+{change_val:.2f} (+{pct_val:.2f}%)"
         elif change_val < 0:
-            stats, marker = f"{change_val:.2f} ({pct_val:.2f}%)", "🔴"
+            stats = f"{change_val:.2f} ({pct_val:.2f}%)"
         else:
-            stats, marker = "estável", "▪️"
+            stats = "estável"
 
-        lines.append(f"> *{month_pt}*  `${price_float:.2f}`  {stats} {marker}")
+        lines.append(
+            format_row(month_pt, f"${price_float:.2f}", stats, marker_for(change_val))
+        )
 
     return "\n".join(lines)
 

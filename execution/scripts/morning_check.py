@@ -94,30 +94,24 @@ def desc_keys(item):
     return keys
 
 def format_line(item):
-    """Formats a single item line: 4c panel row with trailing arrow marker."""
+    """Formats a single item line via the shared row renderer."""
     if not item: return None
 
-    desc = item.get('product', 'Unknown')
-    # Cleanup assess type if needed (e.g. remove redundant text)
-    assess_type = item.get('assessmentType', '').strip()
-    # If unit is basically the same as assess type, simplify
-    if assess_type.lower() == item.get('unit', '').lower():
-        assess_type = item.get('unit', '')
+    from execution.core.report_format import format_row, marker_for
 
+    desc = item.get('product', 'Unknown')
     price = item['price']
     change = item.get('change', 0)
     pct = item.get('changePercent', 0)
 
-    price_fmt = f"${price:.2f}"
-
     if change > 0:
-        stats, marker = f"+{change:.2f} (+{pct:.2f}%)", "↑"
+        stats = f"+{change:.2f} (+{pct:.2f}%)"
     elif change < 0:
-        stats, marker = f"{change:.2f} ({pct:.2f}%)", "↓"
+        stats = f"{change:.2f} ({pct:.2f}%)"
     else:
-        stats, marker = "estável", "·"
+        stats = "estável"
 
-    return f"> *{desc}*  `{price_fmt}`  {stats} {marker}"
+    return format_row(desc, f"${price:.2f}", stats, marker_for(change))
 
 def filter_by_keys(items, keys_whitelist):
     """Filters items matching whitelist KEYS (more stable than description)."""
@@ -138,6 +132,14 @@ def get_section(title, lines):
     joined = "\n".join(lines)
     return f"{title}\n{joined}"
 
+def _pill_date_from(date_str):
+    """'09/07/2026' -> date. Cai pra hoje (BRT) quando não parseia."""
+    from datetime import datetime as _dt, timezone, timedelta
+    try:
+        return _dt.strptime(date_str, "%d/%m/%Y").date()
+    except (ValueError, TypeError):
+        return _dt.now(timezone(timedelta(hours=-3))).date()
+
 def build_message(report_items, date_str):
     """
     Orchestrates the message construction with sections.
@@ -147,12 +149,15 @@ def build_message(report_items, date_str):
     lump_lines = filter_by_keys(report_items, LUMP_PELLET_KEYS)
     viu_lines = filter_by_keys(report_items, VIU_KEYS)
     freight_lines = filter_by_keys(report_items, FREIGHT_KEYS)
-    
+
     # Fallback/Hints deprecated for now as we only have 8 specific keys mapped
     # If customer adds more keys to PlattsClient.SYMBOLS_MAPPING later, add them to lists above.
-    
+
     # Build parts
-    header = f"📊 *MINERALS TRADING DAILY REPORT*\n🔍 IRON ORE MARKET UPDATE - {date_str}"
+    from execution.core.report_format import build_header
+    header = build_header(
+        "Assessments Platts — Abertura", "IRON ORE", _pill_date_from(date_str)
+    )
     parts = [header]
     
     s1 = get_section("🪨 *FINES*", fines_lines)

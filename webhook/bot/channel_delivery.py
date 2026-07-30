@@ -20,10 +20,17 @@ from bot.config import get_bot, TELEGRAM_CLIENT_CHANNEL_ID
 logger = logging.getLogger(__name__)
 
 MAX_FLOOD_RETRIES = 3
-# Telegram caps message text at 4096 chars counting HTML tags; converting
-# adds tag overhead, so we truncate the raw input with headroom first.
-RAW_TEXT_LIMIT = 3500
+TELEGRAM_TEXT_LIMIT = 4096
+# Cheap first-pass bound on the raw input, applied before build_channel_payload
+# does anything else — keeps pathologically huge messages from being processed
+# at all. It is NOT what keeps the converted post under TELEGRAM_TEXT_LIMIT:
+# tag overhead depends on how marker-dense the text is (measured on this
+# project's own news examples, it ranges from ~3% to ~32%), so no fixed raw
+# ceiling can guarantee that on its own. fit_raw_to_limit() does, by trimming
+# against the actual converted length.
+RAW_TEXT_LIMIT = 3300
 TELEGRAM_CAPTION_LIMIT = 1024
+COPY_LABEL = "📋 Copiar pro WhatsApp:"
 
 # WhatsApp-style markers produced by the Curator prompt. Paired, same-line
 # (except ``` blocks), no whitespace hugging the marker — unbalanced or
@@ -75,6 +82,87 @@ def to_telegram_html(text: str) -> str:
     return _quote_lines_to_blockquote(converted)
 
 
+def has_whatsapp_markers(text: str) -> bool:
+    """True when the source carries markup worth preserving for a paste.
+
+    Keeps the copy block off posts that gain nothing from it — the
+    platts_reports post is a bare '📄 filename' next to a PDF attachment.
+    """
+    if not text:
+        return False
+    if _BOLD_RE.search(text) or _CODE_RE.search(text) or _ITALIC_RE.search(text):
+        return True
+    return text.lstrip().startswith("> ") or "\n> " in text
+
+
+def build_copy_block(raw: str) -> str:
+    """Label plus a <pre> block holding the raw source, HTML-escaped.
+
+    Telegram renders <pre> with a copy affordance, and what lands on the
+    clipboard is the literal marker syntax — which is what WhatsApp parses.
+    Copying the rendered post instead would paste as flat text.
+    """
+    return f"{COPY_LABEL}\n<pre>{escape_html(raw)}</pre>"
+
+
+def fit_raw_to_limit(raw: str) -> str:
+    """Trim raw by whole lines until its converted form clears the cap.
+
+    A fixed raw ceiling can't be safe: tag overhead depends on how marker-dense
+    the text is, and measured on this project's own news examples it ranges from
+    3% to 32%. Fitting against the converted length is exact regardless.
+    """
+    if len(to_telegram_html(raw)) <= TELEGRAM_TEXT_LIMIT:
+        return raw
+    lines = raw.split("\n")
+    while lines and len(to_telegram_html("\n".join(lines))) > TELEGRAM_TEXT_LIMIT:
+        lines.pop()
+    return "\n".join(lines)
+
+
+def build_channel_payload(raw: str) -> list[str]:
+    """Messages to post, in order.
+
+    One element when the readable post and its copy block fit a single
+    message; two when they don't. Every returned element is guaranteed to
+    clear TELEGRAM_TEXT_LIMIT: the readable post is fit against its own
+    converted length (fit_raw_to_limit), and the copy block already falls
+    back to readable-only via the guard below when escaping alone blows the
+    cap. Trimming only kicks in on the pathological case where converted
+    tag overhead alone exceeds the cap — normal reports pass through whole,
+    with a long one costing an extra message rather than losing rows.
+    """
+    pretty = to_telegram_html(fit_raw_to_limit(raw))
+    if not has_whatsapp_markers(raw):
+        return [pretty]
+
+    copy_block = build_copy_block(raw)
+    if len(copy_block) > TELEGRAM_TEXT_LIMIT:
+        # Escaping blew the cap on its own — ship the readable post rather
+        # than a block Telegram would reject outright.
+        return [pretty]
+
+    combined = f"{pretty}\n\n{copy_block}"
+    if len(combined) <= TELEGRAM_TEXT_LIMIT:
+        return [combined]
+    return [pretty, copy_block]
+
+
+def _truncate_to_line_boundary(text: str, limit: int) -> str:
+    """Cut text at limit chars without slicing through a row.
+
+    Backs up to the last '\\n' at or before the cut point, so a truncated
+    report never ends mid-price with a dangling marker (e.g. a lone
+    backtick). A single line longer than limit has no boundary to back up
+    to and is returned hard-cut as a last resort.
+    """
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = cut.rfind("\n")
+    return cut[:boundary] if boundary != -1 else cut
+
+
 async def _call_with_flood_retry(coro_factory):
     """Await coro_factory(); on TelegramRetryAfter sleep retry_after and retry
     (up to MAX_FLOOD_RETRIES attempts total). Re-raises the last error."""
@@ -112,7 +200,13 @@ async def post_report_to_channel(
 
     try:
         bot = get_bot()
-        text = to_telegram_html(message[:RAW_TEXT_LIMIT])
+        raw_message = _truncate_to_line_boundary(message, RAW_TEXT_LIMIT)
+        if len(raw_message) != len(message):
+            logger.warning(
+                f"post_report_to_channel: message truncated {len(message)} -> "
+                f"{len(raw_message)} chars (RAW_TEXT_LIMIT={RAW_TEXT_LIMIT})"
+            )
+        parts = build_channel_payload(raw_message)
     except Exception as exc:
         logger.error(f"post_report_to_channel setup failed: {exc}")
         return {"ok": False, "message_id": None, "error": str(exc)[:300]}
@@ -120,7 +214,7 @@ async def post_report_to_channel(
     try:
         sent = await _call_with_flood_retry(lambda: bot.send_message(
             TELEGRAM_CLIENT_CHANNEL_ID,
-            text,
+            parts[0],
             parse_mode="HTML",
             disable_notification=silent,
         ))
@@ -129,6 +223,20 @@ async def post_report_to_channel(
         return {"ok": False, "message_id": None, "error": str(exc)[:300]}
 
     result = {"ok": True, "message_id": sent.message_id, "error": None}
+
+    # The copy block is an accessory: losing it must not fail a report that
+    # already reached the channel (same posture as the PDF below).
+    for extra in parts[1:]:
+        try:
+            await _call_with_flood_retry(lambda: bot.send_message(
+                TELEGRAM_CLIENT_CHANNEL_ID,
+                extra,
+                parse_mode="HTML",
+                disable_notification=True,
+            ))
+        except Exception as exc:
+            logger.error(f"post_report_to_channel copy block failed: {exc}")
+            result = {**result, "error": f"copy_block_failed: {str(exc)[:200]}"}
 
     if pdf is not None:
         try:

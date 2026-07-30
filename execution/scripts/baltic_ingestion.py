@@ -92,16 +92,18 @@ def format_whatsapp_message(data):
     supramax = data.get('supramax', {})
     handysize = data.get('handysize', {})
 
-    # Format date as DD/MM/YYYY
-    report_date = data.get('report_date', '')
+    # Pill date: the Baltic email's own report date, not the run date — the
+    # email often lands the morning after the session it reports.
+    from datetime import timezone, timedelta
     try:
-        dt = datetime.strptime(report_date, '%Y-%m-%d')
-        date_formatted = dt.strftime('%d/%m/%Y')
-    except:
-        date_formatted = report_date
+        pill_when = datetime.strptime(data.get('report_date', ''), '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        pill_when = datetime.now(timezone(timedelta(hours=-3))).date()
 
     def format_line(name, value, change, unit="", decimals=2, is_index=False):
-        """Format a single data line: 4c panel row with trailing bolinha marker."""
+        """Format a single data line via the shared row renderer."""
+        from execution.core.report_format import format_row, marker_for, MARKER_FLAT
+
         if is_index:
             val_str = f"{int(value)}" if value else "N/A"
             chg_str = format_change(change, 0)
@@ -109,32 +111,32 @@ def format_whatsapp_message(data):
             val_str = f"${value:.{decimals}f}" if value else "N/A"
             chg_str = format_change(change, decimals)
 
-        # Calculate percentage if possible
-        if value and change:
-            try:
-                pct = (float(change) / (float(value) - float(change))) * 100
-                pct_str = f"({pct:+.2f}%)"
-            except:
-                pct_str = ""
-        else:
-            pct_str = ""
-
+        # `not change` also catches change is None (missing key from the Claude
+        # PDF extraction on a partial email) — marker_for(None) raises TypeError,
+        # so this stays MARKER_FLAT directly rather than routing through
+        # marker_for() like the other two crons. Deliberate, not drift.
         if change == 0 or not change:
-            return f"> *{name}*  `{val_str}{unit}`  estável ▪️"
+            return format_row(name, f"{val_str}{unit}", "estável", MARKER_FLAT)
 
         try:
             change_val = float(change)
         except (TypeError, ValueError):
             change_val = 0
 
-        marker = "🟢" if change_val > 0 else "🔴"
-        return f"> *{name}*  `{val_str}{unit}`  {chg_str} {pct_str} {marker}"
+        try:
+            pct = (float(change) / (float(value) - float(change))) * 100
+            pct_str = f"({pct:+.2f}%)"
+        except (TypeError, ValueError, ZeroDivisionError):
+            pct_str = ""
+
+        stats = f"{chg_str} {pct_str}".strip()
+        return format_row(name, f"{val_str}{unit}", stats, marker_for(change_val))
 
     lines = []
 
     # Header
-    lines.append("📊 *MINERALS TRADING DAILY REPORT*")
-    lines.append(f"🚢 BALTIC EXCHANGE UPDATE - {date_formatted}")
+    from execution.core.report_format import build_header
+    lines.extend(build_header("Baltic Exchange — Frete", "FRETE", pill_when).split("\n"))
     lines.append("")
 
     # BDI Section

@@ -250,20 +250,95 @@ def test_build_channel_payload_nunca_trunca_conteudo():
         assert f"Produto {i}" in "".join(partes)
 
 
-def test_raw_text_limit_cabe_no_teto_com_overhead_de_tags():
-    from bot.channel_delivery import RAW_TEXT_LIMIT, TELEGRAM_TEXT_LIMIT
-    # overhead medido nas mensagens reais: ~21%
-    assert RAW_TEXT_LIMIT * 1.21 <= TELEGRAM_TEXT_LIMIT
+def test_build_channel_payload_respeita_teto_com_texto_tag_denso():
+    """Overhead de tag pode passar de 250% em texto denso (`a` repetido) —
+    um RAW_TEXT_LIMIT fixo não segura isso. fit_raw_to_limit precisa."""
+    from bot.channel_delivery import build_channel_payload, to_telegram_html, TELEGRAM_TEXT_LIMIT
+
+    dense = "`a` " * 825  # 3300 chars crus == o antigo RAW_TEXT_LIMIT
+    assert len(to_telegram_html(dense)) > TELEGRAM_TEXT_LIMIT  # prova a premissa do bug
+
+    partes = build_channel_payload(dense)
+    assert all(len(p) <= TELEGRAM_TEXT_LIMIT for p in partes)
+
+
+def test_build_channel_payload_respeita_teto_com_mensagem_realista_densa():
+    """Painel de cotação multi-linha (formato dos 3 crons) com overhead de
+    tag alto o bastante pra estourar sem o fit — cada parte ainda cabe."""
+    from bot.channel_delivery import build_channel_payload, to_telegram_html, TELEGRAM_TEXT_LIMIT
+
+    raw = "\n".join(
+        f"*Produto {i}*  `$10{i}.50/dmt`  +0.55 (+0.53%)" for i in range(150)
+    )
+    assert len(to_telegram_html(raw)) > TELEGRAM_TEXT_LIMIT  # prova a premissa do bug
+
+    partes = build_channel_payload(raw)
+    assert all(len(p) <= TELEGRAM_TEXT_LIMIT for p in partes)
+
+
+def test_fit_raw_to_limit_nao_mexe_em_conteudo_que_ja_cabe():
+    """Guarda contra o fit helper aparar quando não precisa — mensagem
+    curta e normal (estilo marker_for flat/normal) sai idêntica."""
+    from bot.channel_delivery import fit_raw_to_limit
+
+    raw = "\n".join(f"*Produto {i}*  `$10{i}.50`  +0.55 (+0.53%) ↑" for i in range(60))
+    assert fit_raw_to_limit(raw) == raw
+
+
+def test_truncate_to_line_boundary_nao_corta_no_meio_da_linha():
+    """O helper de truncamento cru (RAW_TEXT_LIMIT) nunca corta uma linha
+    ao meio — corta pra trás até a última quebra de linha completa."""
+    from bot.channel_delivery import _truncate_to_line_boundary
+
+    linhas = [f"Linha {i} — CFR Qingdao $/DMT  `$107.9`" for i in range(200)]
+    raw = "\n".join(linhas)
+    limite = 3300
+
+    # prova a premissa do bug: o corte ingênuo por índice pendura uma crase
+    assert raw[:limite].count("`") % 2 == 1
+
+    cortado = _truncate_to_line_boundary(raw, limite)
+    assert len(cortado) <= limite
+    # nenhuma linha cortada ao meio: o resultado é um prefixo exato de
+    # linhas completas do original, sem crase (marcador) pendurada
+    assert raw.startswith(cortado)
+    assert cortado == "" or raw[len(cortado):len(cortado) + 1] == "\n"
+    assert cortado.count("`") % 2 == 0
+
+
+@pytest.mark.asyncio
+async def test_post_report_to_channel_loga_truncamento(channel, mock_bot, caplog):
+    """Truncamento no /store-draft precisa ficar visível no log (Railway) —
+    antes era silencioso."""
+    import logging
+    from bot.channel_delivery import RAW_TEXT_LIMIT
+
+    linhas = [f"Linha {i} — CFR Qingdao $/DMT  `$107.9`" for i in range(300)]
+    raw = "\n".join(linhas)
+    assert len(raw) > RAW_TEXT_LIMIT
+
+    with caplog.at_level(logging.WARNING, logger="bot.channel_delivery"):
+        result = await channel.post_report_to_channel(raw)
+
+    assert result["ok"] is True
+    assert any("truncat" in rec.message.lower() for rec in caplog.records)
+    # cada mensagem enviada carrega só linhas inteiras — sem crase pendurada
+    # nem em <pre> (bloco copiável) nem no post convertido
+    for call in mock_bot.send_message.await_args_list:
+        sent_text = call.args[1]
+        assert sent_text.count("`") % 2 == 0
 
 
 def test_build_channel_payload_guarda_bloco_gigante():
     """When copy_block alone exceeds 4096 due to HTML escape inflation,
     fall back to readable post only — the guard branch."""
     from bot.channel_delivery import build_channel_payload, COPY_LABEL
-    # Raw: marker + enough & chars to make escaped copy block exceed limit.
-    # escape_html turns & → &amp; (1→5), so 850 &'s = 4250 escaped chars.
-    # copy_block overhead is ~30 chars → total ~4280 > 4096 → guard triggers.
-    raw = "*marker*" + "&" * 850
+    # Raw: marker line + a separate line of & chars to make escaped copy
+    # block exceed limit. escape_html turns & → &amp; (1→5), so 850 &'s =
+    # 4250 escaped chars. copy_block overhead is ~40 chars → total ~4290 >
+    # 4096 → guard triggers. Two lines (not one) so fit_raw_to_limit can
+    # drop the noisy &-line by whole lines and keep the marker line intact.
+    raw = "*marker*\n" + "&" * 850
     partes = build_channel_payload(raw)
 
     # Guard should return readable post only (not two messages with copy block)

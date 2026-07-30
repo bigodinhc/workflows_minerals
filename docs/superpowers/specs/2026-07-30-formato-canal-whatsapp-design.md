@@ -1,7 +1,7 @@
 # Design: formato do canal otimizado pra cópia manual no WhatsApp
 
 - **Data:** 2026-07-30
-- **Status:** Spec — aguardando revisão do usuário
+- **Status:** Implementado (plano: docs/superpowers/plans/2026-07-30-formato-canal-whatsapp.md); validado por smoke no canal + cola no WhatsApp confirmada pelo usuário em 2026-07-30
 - **Autor:** brainstorming colaborativo (usuário + Claude)
 - **Contexto:** continuação de `2026-07-09-crons-canal-estetica-v2-design.md` (PR #4, merged) e `2026-07-09-telegram-channel-delivery-design.md` (PR #3, merged)
 
@@ -179,9 +179,31 @@ o acessório não derruba o principal.
 conversão HTML cabe em 4096. Com os 20% de overhead medidos, 3500 crus viram ~4230 — acima
 do teto. Nenhuma mensagem atual chega perto, então nunca estourou, mas está armado.
 
-**Correção:** baixar para `3300` (3300 × 1.21 ≈ 3993, com folga). Risco residual: um texto
-com densidade de tags muito acima do normal ainda poderia estourar; aceitável dado o perfil
-real das mensagens.
+**Correção planejada:** baixar para `3300` (3300 × 1.21 ≈ 3993, com folga).
+
+**Correção efetivamente construída (revisada na review final, 2026-07-30):** a premissa dos
+21% estava errada. Medição sobre os sete exemplos few-shot de `execution/core/prompts/curator.py`
+— o formato que o pipeline de notícias é treinado a emitir — deu overhead de **3,2% a 32,0%**.
+A 32% o teto raw seguro seria 3103, não 3300: o "texto com densidade acima do normal" que este
+spec descartou como risco residual **é o caso normal das notícias**.
+
+Um teto raw fixo não pode ser seguro, porque o overhead depende de quão densa em marcadores a
+mensagem é. A implementação passou a ajustar pelo tamanho **convertido**:
+
+- `fit_raw_to_limit(raw)` corta linhas inteiras do fim até `to_telegram_html(raw)` caber em 4096.
+  `build_channel_payload` garante que todo elemento retornado respeita o teto.
+- `_truncate_to_line_boundary()` substitui o corte cego em `RAW_TEXT_LIMIT`: corta em fronteira
+  de linha e emite `logger.warning` com o tamanho original. Antes, o bloco copiável podia chegar
+  ao WhatsApp terminando no meio de um preço, com crase órfã renderizada literalmente — o que
+  anulava o propósito da feature.
+- O teste que guardava o teto era uma tautologia entre duas constantes (`RAW_TEXT_LIMIT * 1.21
+  <= TELEGRAM_TEXT_LIMIT`), que nunca chamava o conversor. Substituído por testes comportamentais.
+
+Caso-limite conhecido: uma mensagem de linha única, toda em marcadores, colapsa o post legível
+pra vazio. O `send_message` rejeita, cai no `except` existente e retorna `ok=False` — a postura
+never-raise se mantém, e o comportamento é não-regressivo (antes o mesmo input também era
+rejeitado, por tamanho em vez de vazio). Nenhum produtor real emite essa forma: os 3 crons e o
+Curator escrevem um dado por linha.
 
 ## 8. Escopo por superfície
 

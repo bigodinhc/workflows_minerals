@@ -111,6 +111,10 @@ def format_whatsapp_message(data):
             val_str = f"${value:.{decimals}f}" if value else "N/A"
             chg_str = format_change(change, decimals)
 
+        # `not change` also catches change is None (missing key from the Claude
+        # PDF extraction on a partial email) — marker_for(None) raises TypeError,
+        # so this stays MARKER_FLAT directly rather than routing through
+        # marker_for() like the other two crons. Deliberate, not drift.
         if change == 0 or not change:
             return format_row(name, f"{val_str}{unit}", "estável", MARKER_FLAT)
 

@@ -121,6 +121,17 @@ normal, marcador no fim. Idêntico no Telegram e no WhatsApp, porque a fonte é 
 Meses PT-BR em CAPS de 3 letras: `JAN FEV MAR ABR MAI JUN JUL AGO SET OUT NOV DEZ`.
 A divisória é a única da mensagem, como já manda o prompt do Curator.
 
+### 5.1 Origem da data da pílula
+
+Cada cron já tem sua data e elas **não são intercambiáveis** — usar a data de execução em
+todos produziria pílula errada quando o dado é de outro dia:
+
+| Workflow | Fonte da data |
+|---|---|
+| `daily_report` | `datetime.now(BRT)` — a cotação é da sessão corrente |
+| `morning_check` | o `date_str` já recebido por `build_message` |
+| `baltic_ingestion` | `data['report_date']` do e-mail do Baltic, com fallback pra hoje quando ausente ou malformado (o parser atual já degrada assim) |
+
 ### 5.1 Divergência assumida com o Curator
 
 O prompt do Curator proíbe emojis no corpo ("o único é 📊 do header"). Os crons **mantêm**
@@ -241,6 +252,9 @@ build_channel_payload(raw: str) -> list[str]
 
 ## 12. Não-objetivos
 
+- **Não remover `_quote_lines_to_blockquote`** (`channel_delivery.py:46`). Os crons deixam
+  de emitir `> `, mas o Curator continua usando pra citação real de CEO/analista. A função
+  segue viva e coberta por teste — não é código morto após esta mudança.
 - Não mexer no prompt do Curator (notícias já estão no formato-alvo).
 - Não encurtar as descrições dos símbolos Platts — foi cogitado pra caber em 1 mensagem,
   mas não economiza o suficiente e mudaria o conteúdo do relatório.

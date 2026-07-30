@@ -272,3 +272,44 @@ def test_build_channel_payload_guarda_bloco_gigante():
     assert "<b>marker</b>" in partes[0]
     # Copy block is NOT included (guard prevented it)
     assert COPY_LABEL not in partes[0]
+
+
+@pytest.mark.asyncio
+async def test_post_envia_duas_mensagens_quando_divide(channel, mock_bot):
+    raw = "\n".join(f"*Produto {i}*  `$10{i}.50`  +0.55 (+0.53%) ↑" for i in range(60))
+    result = await channel.post_report_to_channel(raw)
+    assert result["ok"] is True
+    assert mock_bot.send_message.await_count == 2
+    # message_id é o da primeira mensagem (o post legível)
+    assert result["message_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_post_envia_uma_mensagem_quando_cabe(channel, mock_bot):
+    result = await channel.post_report_to_channel("📊 *MINERALS TRADING*\nBDI  `1850`  +25 ↑")
+    assert result["ok"] is True
+    assert mock_bot.send_message.await_count == 1
+    assert channel.COPY_LABEL in mock_bot.send_message.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_post_falha_do_bloco_nao_derruba_o_post(channel, mock_bot):
+    from unittest.mock import MagicMock
+    mock_bot.send_message.side_effect = [
+        MagicMock(message_id=42),
+        RuntimeError("boom no bloco"),
+    ]
+    raw = "\n".join(f"*Produto {i}*  `$10{i}.50`  +0.55 (+0.53%) ↑" for i in range(60))
+    result = await channel.post_report_to_channel(raw)
+    assert result["ok"] is True            # o principal foi entregue
+    assert result["message_id"] == 42
+    assert "copy_block_failed" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_post_falha_da_primeira_mensagem_e_erro(channel, mock_bot):
+    mock_bot.send_message.side_effect = RuntimeError("telegram fora do ar")
+    result = await channel.post_report_to_channel("📊 *MINERALS TRADING*")
+    assert result["ok"] is False
+    assert result["message_id"] is None
+    assert "telegram fora do ar" in result["error"]

@@ -162,7 +162,7 @@ async def post_report_to_channel(
 
     try:
         bot = get_bot()
-        text = to_telegram_html(message[:RAW_TEXT_LIMIT])
+        parts = build_channel_payload(message[:RAW_TEXT_LIMIT])
     except Exception as exc:
         logger.error(f"post_report_to_channel setup failed: {exc}")
         return {"ok": False, "message_id": None, "error": str(exc)[:300]}
@@ -170,7 +170,7 @@ async def post_report_to_channel(
     try:
         sent = await _call_with_flood_retry(lambda: bot.send_message(
             TELEGRAM_CLIENT_CHANNEL_ID,
-            text,
+            parts[0],
             parse_mode="HTML",
             disable_notification=silent,
         ))
@@ -179,6 +179,20 @@ async def post_report_to_channel(
         return {"ok": False, "message_id": None, "error": str(exc)[:300]}
 
     result = {"ok": True, "message_id": sent.message_id, "error": None}
+
+    # The copy block is an accessory: losing it must not fail a report that
+    # already reached the channel (same posture as the PDF below).
+    for extra in parts[1:]:
+        try:
+            await _call_with_flood_retry(lambda: bot.send_message(
+                TELEGRAM_CLIENT_CHANNEL_ID,
+                extra,
+                parse_mode="HTML",
+                disable_notification=True,
+            ))
+        except Exception as exc:
+            logger.error(f"post_report_to_channel copy block failed: {exc}")
+            result = {**result, "error": f"copy_block_failed: {str(exc)[:200]}"}
 
     if pdf is not None:
         try:

@@ -254,3 +254,21 @@ def test_raw_text_limit_cabe_no_teto_com_overhead_de_tags():
     from bot.channel_delivery import RAW_TEXT_LIMIT, TELEGRAM_TEXT_LIMIT
     # overhead medido nas mensagens reais: ~21%
     assert RAW_TEXT_LIMIT * 1.21 <= TELEGRAM_TEXT_LIMIT
+
+
+def test_build_channel_payload_guarda_bloco_gigante():
+    """When copy_block alone exceeds 4096 due to HTML escape inflation,
+    fall back to readable post only — the guard branch."""
+    from bot.channel_delivery import build_channel_payload, COPY_LABEL
+    # Raw: marker + enough & chars to make escaped copy block exceed limit.
+    # escape_html turns & → &amp; (1→5), so 850 &'s = 4250 escaped chars.
+    # copy_block overhead is ~30 chars → total ~4280 > 4096 → guard triggers.
+    raw = "*marker*" + "&" * 850
+    partes = build_channel_payload(raw)
+
+    # Guard should return readable post only (not two messages with copy block)
+    assert len(partes) == 1
+    # Readable part has the converted marker
+    assert "<b>marker</b>" in partes[0]
+    # Copy block is NOT included (guard prevented it)
+    assert COPY_LABEL not in partes[0]

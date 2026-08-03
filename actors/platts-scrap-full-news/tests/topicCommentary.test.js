@@ -5,6 +5,7 @@ import {
     blendedItemToArticle,
     htmlToText,
     parseBlendedDate,
+    selectArticles,
 } from '../src/sources/topicCommentary.js';
 
 // Fixture baseada na resposta real do content-bff/v4/search/blendedsearch
@@ -103,7 +104,7 @@ describe('blendedItemToArticle', () => {
 });
 
 describe('attachBlendedCapture', () => {
-    it('acumula só Market Commentary/Rationale, com dedup por id', async () => {
+    it('acumula MC/Rationale/News (não Reports), com dedup por id', async () => {
         const page = fakePage();
         const capture = attachBlendedCapture(page, null);
 
@@ -113,6 +114,7 @@ describe('attachBlendedCapture', () => {
                 Items: [
                     FIXTURE_ITEM,
                     { ...FIXTURE_ITEM, Id: 'outro-id', ContentType: 'Market Commentary' },
+                    { ...FIXTURE_ITEM, Id: 'news-id', ContentType: 'News' },
                     { ...FIXTURE_ITEM, Id: 'reports-id', ContentType: 'Market Reports' },
                 ],
             },
@@ -128,9 +130,9 @@ describe('attachBlendedCapture', () => {
             { Items: [{ ...FIXTURE_ITEM, Id: 'nao-entra' }] },
         ));
 
-        expect(capture.size()).toBe(2);
+        expect(capture.size()).toBe(3);
         const types = capture.items().map((i) => i.ContentType).sort();
-        expect(types).toEqual(['Market Commentary', 'Rationale']);
+        expect(types).toEqual(['Market Commentary', 'News', 'Rationale']);
         capture.detach();
     });
 
@@ -143,5 +145,38 @@ describe('attachBlendedCapture', () => {
         });
         expect(capture.size()).toBe(0);
         capture.detach();
+    });
+});
+
+describe('selectArticles', () => {
+    const MIXED = [
+        FIXTURE_ITEM,
+        { ...FIXTURE_ITEM, Id: 'mc-1', ContentType: 'Market Commentary', Headline: 'Asian iron ore prices dip' },
+        { ...FIXTURE_ITEM, Id: 'news-1', ContentType: 'News', Headline: 'Steel news of the day' },
+        { ...FIXTURE_ITEM, Id: 'old-1', ContentType: 'Rationale', DisplayDate: '2026-07-31T10:00:00Z', Headline: 'Rationale antigo' },
+    ];
+
+    it('filtra por ContentType', () => {
+        const arts = selectArticles(MIXED, ['News'], { dateFilter: 'all' });
+        expect(arts.map((a) => a.title)).toEqual(['Steel news of the day']);
+    });
+
+    it('aplica sourceOverride', () => {
+        const arts = selectArticles(MIXED, ['News'], { dateFilter: 'all', sourceOverride: 'News & Insights' });
+        expect(arts[0].source).toBe('News & Insights');
+    });
+
+    it('aplica filtro de data por targetDate', () => {
+        const arts = selectArticles(MIXED, ['Market Commentary', 'Rationale'], {
+            dateFilter: 'specificDate', targetDate: '03/08/2026', maxArticles: 40,
+        });
+        expect(arts.map((a) => a.title)).toEqual(['Platts IODEX rationale Aug 3', 'Asian iron ore prices dip']);
+    });
+
+    it('respeita o teto maxArticles', () => {
+        const arts = selectArticles(MIXED, ['Market Commentary', 'Rationale', 'News'], {
+            dateFilter: 'all', maxArticles: 2,
+        });
+        expect(arts.length).toBe(2);
     });
 });

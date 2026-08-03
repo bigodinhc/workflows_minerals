@@ -19,7 +19,10 @@ import { COMPANIES } from '../extract/companies.js';
 import { isParsedDateWithinFilter, parsePlattsDate } from '../util/dates.js';
 
 const BLENDED_ENDPOINT = '/search/blendedsearch';
-const TARGET_TYPES = ['Market Commentary', 'Rationale'];
+const COMMENTARY_TYPES = ['Market Commentary', 'Rationale'];
+// O widget News & Insights da mesma página também é alimentado pelo blendedsearch
+const NEWS_TYPES = ['News', 'Top News', 'Feature', 'Headline Analysis'];
+const CAPTURE_TYPES = [...COMMENTARY_TYPES, ...NEWS_TYPES];
 
 function firstString(...candidates) {
     for (const c of candidates) {
@@ -57,11 +60,11 @@ export function attachBlendedCapture(page, pageLog) {
         responses++;
         for (const item of items) {
             const type = firstString(item?.ContentType, item?.ContentTypeValue);
-            if (!TARGET_TYPES.includes(type)) continue;
+            if (!CAPTURE_TYPES.includes(type)) continue;
             const key = blendedItemId(item);
             if (!itemsById.has(key)) itemsById.set(key, item);
         }
-        pageLog?.info(`   🪝 blendedsearch #${responses}: ${items.length} items na resposta, ${itemsById.size} MC/Rationale acumulados`);
+        pageLog?.info(`   🪝 blendedsearch #${responses}: ${items.length} items na resposta, ${itemsById.size} acumulados (MC/Rationale/News)`);
     };
 
     page.on('response', handler);
@@ -232,19 +235,24 @@ export async function collectTopicCommentary(page, pageLog, capture, options = {
         await dismissCookieBanner(page);
 
         // Rola até o widget de tabs montar — a montagem dispara a busca da tab
-        // ativa (Market Commentary) no blendedsearch
+        // ativa no blendedsearch
         const mounted = await scrollUntilTabsMounted(page, pageLog);
         if (mounted && capture.size() === 0) {
             await waitForCaptureGrowth(page, capture, 0, 10000);
         }
 
-        const clicked = await clickAntTab(page, '^rationale$');
-        if (clicked) {
+        // Clica nas DUAS tabs explicitamente: o Platts lembra a última tab ativa
+        // por usuário (preferência server-side), então não dá pra assumir qual
+        // carregou na abertura — e clicar numa tab já ativa não dispara busca nova.
+        for (const [tabRegex, tabName] of [['^market commentary$', 'Market Commentary'], ['^rationale$', 'Rationale']]) {
+            const clicked = await clickAntTab(page, tabRegex);
+            if (!clicked) {
+                pageLog.warning(`   ⚠️ Tab ${tabName} não encontrada na página do topic`);
+                continue;
+            }
             const before = capture.size();
             const grew = await waitForCaptureGrowth(page, capture, before);
-            pageLog.info(`   🗂️ Tab Rationale clicada — ${grew ? 'busca capturada' : 'sem busca nova em 8s (pode já estar no cache do capture)'}`);
-        } else {
-            pageLog.warning('   ⚠️ Tab Rationale não encontrada na página do topic');
+            pageLog.info(`   🗂️ Tab ${tabName} clicada — ${grew ? 'busca nova capturada' : 'sem busca nova (já estava ativa/cacheada)'}`);
         }
 
         const rawItems = capture.items();
@@ -254,19 +262,11 @@ export async function collectTopicCommentary(page, pageLog, capture, options = {
         }
 
         // Log defensivo: se o schema da API mudar, isto mostra os campos reais
-        const sample = rawItems[0];
-        pageLog.info(`   🔎 Campos do item: ${Object.keys(sample).join(', ')}`);
+        pageLog.info(`   🔎 Campos do item: ${Object.keys(rawItems[0]).join(', ')}`);
 
-        const articles = rawItems
-            .map((item) => blendedItemToArticle(item))
-            .filter((a) => {
-                if (dateFilter === 'all') return true;
-                const parsed = parseBlendedDate(a.publishDate);
-                if (!parsed) return true; // sem data legível: melhor manter do que dropar em silêncio
-                return isParsedDateWithinFilter(parsed, dateFilter, daysToCollect, targetDate);
-            })
-            .slice(0, maxArticles);
-
+        const articles = selectArticles(rawItems, COMMENTARY_TYPES, {
+            maxArticles, dateFilter, daysToCollect, targetDate,
+        });
         pageLog.info(`   🎯 ${articles.length}/${rawItems.length} dentro do filtro (max ${maxArticles})`);
         return articles;
     } catch (e) {
@@ -276,5 +276,62 @@ export async function collectTopicCommentary(page, pageLog, capture, options = {
         if (originalViewport) {
             await page.setViewportSize(originalViewport).catch(() => {});
         }
+    }
+}
+
+/**
+ * Seleciona artigos do capture por ContentType, aplica filtro de data e teto.
+ * Puro (sem page) — usado pelos dois coletores e testável em unidade.
+ */
+export function selectArticles(rawItems, types, options = {}) {
+    const {
+        maxArticles = 10, dateFilter = 'today', daysToCollect = 1,
+        targetDate = null, sourceOverride = null,
+    } = options;
+
+    return rawItems
+        .filter((it) => types.includes(firstString(it?.ContentType, it?.ContentTypeValue)))
+        .map((item) => blendedItemToArticle(item))
+        .map((a) => (sourceOverride ? { ...a, source: sourceOverride } : a))
+        .filter((a) => {
+            if (dateFilter === 'all') return true;
+            const parsed = parseBlendedDate(a.publishDate);
+            if (!parsed) return true; // sem data legível: melhor manter do que dropar em silêncio
+            return isParsedDateWithinFilter(parsed, dateFilter, daysToCollect, targetDate);
+        })
+        .slice(0, maxArticles);
+}
+
+/**
+ * Coleta o widget News & Insights da mesma página do topic (o DOM antigo
+ * `#news-insights-title-N` morreu no redesign — os items agora vêm do
+ * blendedsearch). Clica nas tabs do widget pra garantir as buscas das duas.
+ * `source` sai como 'News & Insights' pra manter a convenção downstream.
+ */
+export async function collectTopicNews(page, pageLog, capture, options = {}) {
+    const { maxArticles = 10, dateFilter = 'today', daysToCollect = 1, targetDate = null } = options;
+
+    try {
+        await dismissCookieBanner(page);
+        await scrollUntilTabsMounted(page, pageLog, 6);
+
+        for (const [tabRegex, tabName] of [['^news & insights$', 'News & Insights'], ['^top news$', 'Top News']]) {
+            const clicked = await clickAntTab(page, tabRegex);
+            if (!clicked) continue;
+            const before = capture.size();
+            const grew = await waitForCaptureGrowth(page, capture, before, 6000);
+            pageLog.info(`   🗂️ Tab ${tabName} clicada — ${grew ? 'busca nova capturada' : 'sem busca nova (já estava ativa/cacheada)'}`);
+        }
+
+        const rawItems = capture.items();
+        const articles = selectArticles(rawItems, NEWS_TYPES, {
+            maxArticles, dateFilter, daysToCollect, targetDate,
+            sourceOverride: 'News & Insights',
+        });
+        pageLog.info(`   🎯 ${articles.length} news dentro do filtro (max ${maxArticles})`);
+        return articles;
+    } catch (e) {
+        pageLog.error(`   ❌ Erro coletando topic news: ${e.message}`);
+        return [];
     }
 }

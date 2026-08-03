@@ -25,9 +25,9 @@ import {
     collectTopNewsList,
     navigateToFerrousMetals,
 } from './sources/allInsights.js';
-import { collectNewsList,navigateToIronOre } from './sources/ironOreTopic.js';
+import { navigateToIronOre } from './sources/ironOreTopic.js';
 import { collectRMW } from './sources/rmw.js';
-import { attachBlendedCapture, collectTopicCommentary } from './sources/topicCommentary.js';
+import { attachBlendedCapture, collectTopicCommentary, collectTopicNews } from './sources/topicCommentary.js';
 import { isDateWithinFilter } from './util/dates.js';
 import { saveDebugArtifacts } from './util/debug.js';
 import { createLimiter } from './util/semaphore.js';
@@ -49,6 +49,7 @@ const {
     scrollForMoreLatest = false,
     rmwTabFilter = '',
     maxArticlesPerRmwTab = 10,
+    maxTopicCommentaryArticles = 40,
     concurrency = 2,
     collectTopNews = true,
     includeLatest = true,
@@ -170,8 +171,10 @@ const crawler = new PlaywrightCrawler({
         let flashItems = [];
 
         // Intercepta as respostas do blendedsearch ANTES de navegar pro topic —
-        // a carga inicial da página já dispara a busca da tab Market Commentary
-        const blendedCapture = sources.includes('topicCommentary')
+        // a carga inicial da página já dispara as buscas dos widgets. Alimenta
+        // tanto o topicCommentary quanto o News & Insights do ironOreTopic
+        // (o DOM antigo #news-insights-title-N morreu no redesign de ago/2026).
+        const blendedCapture = (sources.includes('topicCommentary') || sources.includes('ironOreTopic'))
             ? attachBlendedCapture(page, pageLog)
             : null;
 
@@ -196,33 +199,31 @@ const crawler = new PlaywrightCrawler({
             }
         }
 
-        if (sources.includes('ironOreTopic')) {
-            pageLog.info('\n========== IRON ORE TOPIC ==========');
-            if (await navigateToIronOre(page, pageLog)) {
-                const news = await collectNewsList(
-                    page, pageLog, maxArticles, dateFilter, daysToCollect, targetDate,
-                );
-                articleItems.push(...news);
-            } else {
-                pageLog.warning('⚠️ Iron Ore topic indisponível');
-            }
-        }
-
-        // ========== TOPIC MARKET COMMENTARY / RATIONALE (via API interceptada) ==========
+        // ========== IRON ORE TOPIC (via API interceptada) ==========
+        // MC/Rationale e News & Insights saem do MESMO capture do blendedsearch
         let topicCommentaryArticles = [];
+        let topicNewsArticles = [];
         if (blendedCapture) {
-            pageLog.info('\n========== TOPIC MARKET COMMENTARY / RATIONALE ==========');
-            // Se o ironOreTopic não rodou, precisamos navegar pro topic nós mesmos
+            pageLog.info('\n========== IRON ORE TOPIC (blendedsearch) ==========');
             const ready = page.url().includes('platts/topic') || await navigateToIronOre(page, pageLog);
             if (ready) {
-                topicCommentaryArticles = await collectTopicCommentary(page, pageLog, blendedCapture, {
-                    maxArticles: maxArticlesPerRmwTab * 2, // MC + Rationale
-                    dateFilter,
-                    daysToCollect,
-                    targetDate,
-                });
+                if (sources.includes('topicCommentary')) {
+                    topicCommentaryArticles = await collectTopicCommentary(page, pageLog, blendedCapture, {
+                        // Teto próprio (não o do RMW): com filtro de data ativo queremos
+                        // TODOS os MC/Rationale do dia, não só os primeiros do grid
+                        maxArticles: maxTopicCommentaryArticles,
+                        dateFilter,
+                        daysToCollect,
+                        targetDate,
+                    });
+                }
+                if (sources.includes('ironOreTopic')) {
+                    topicNewsArticles = await collectTopicNews(page, pageLog, blendedCapture, {
+                        maxArticles, dateFilter, daysToCollect, targetDate,
+                    });
+                }
             } else {
-                pageLog.warning('⚠️ Página do topic indisponível para Market Commentary/Rationale');
+                pageLog.warning('⚠️ Página do topic indisponível');
             }
             blendedCapture.detach();
         }
@@ -245,6 +246,7 @@ const crawler = new PlaywrightCrawler({
         pageLog.info(`\n📦 Padrão A: ${articleItems.length} itens, ${uniqueItems.length} após dedup`);
         pageLog.info(`📦 Padrão B (RMW): ${rmwResults.reduce((s, t) => s + t.articles.length, 0)} artigos em ${rmwResults.length} tabs`);
         pageLog.info(`📦 Topic MC/Rationale: ${topicCommentaryArticles.length} artigos`);
+        pageLog.info(`📦 Topic News & Insights: ${topicNewsArticles.length} artigos`);
         pageLog.info(`📦 FLASH: ${flashItems.length} item(ns)`);
 
         // ========== EXTRAÇÃO PARALELA DE ARTIGOS (padrão A) ==========
@@ -308,7 +310,7 @@ const crawler = new PlaywrightCrawler({
 
         // ========== RESULTADO ==========
         const rmwArticles = rmwResults.flatMap((t) => t.articles);
-        const allArticlesFlat = [...articles, ...rmwArticles, ...topicCommentaryArticles];
+        const allArticlesFlat = [...articles, ...rmwArticles, ...topicCommentaryArticles, ...topicNewsArticles];
 
         if (allArticlesFlat.length === 0 && flashItems.length === 0) {
             pageLog.warning(`Nenhum item encontrado para ${targetDate || 'hoje'}`);
@@ -324,7 +326,10 @@ const crawler = new PlaywrightCrawler({
 
         const topNews = articles.filter((a) => a.source?.includes('Top News'));
         const latest = articles.filter((a) => a.source === 'Latest');
-        const newsInsights = articles.filter((a) => a.source === 'News & Insights');
+        const newsInsights = [
+            ...articles.filter((a) => a.source === 'News & Insights'),
+            ...topicNewsArticles,
+        ];
 
         const totalImages = allArticlesFlat.reduce((sum, a) => sum + (a.images?.total || 0), 0);
         const totalCharts = allArticlesFlat.reduce((sum, a) => sum + (a.images?.charts?.length || 0), 0);

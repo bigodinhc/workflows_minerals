@@ -49,6 +49,7 @@ const {
     scrollForMoreLatest = false,
     rmwTabFilter = '',
     maxArticlesPerRmwTab = 10,
+    maxTopicCommentaryArticles = 40,
     concurrency = 2,
     collectTopNews = true,
     includeLatest = true,
@@ -216,7 +217,9 @@ const crawler = new PlaywrightCrawler({
             const ready = page.url().includes('platts/topic') || await navigateToIronOre(page, pageLog);
             if (ready) {
                 topicCommentaryArticles = await collectTopicCommentary(page, pageLog, blendedCapture, {
-                    maxArticles: maxArticlesPerRmwTab * 2, // MC + Rationale
+                    // Teto próprio (não o do RMW): com filtro de data ativo queremos
+                    // TODOS os MC/Rationale do dia, não só os primeiros do grid
+                    maxArticles: maxTopicCommentaryArticles,
                     dateFilter,
                     daysToCollect,
                     targetDate,

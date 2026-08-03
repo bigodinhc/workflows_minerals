@@ -232,19 +232,24 @@ export async function collectTopicCommentary(page, pageLog, capture, options = {
         await dismissCookieBanner(page);
 
         // Rola até o widget de tabs montar — a montagem dispara a busca da tab
-        // ativa (Market Commentary) no blendedsearch
+        // ativa no blendedsearch
         const mounted = await scrollUntilTabsMounted(page, pageLog);
         if (mounted && capture.size() === 0) {
             await waitForCaptureGrowth(page, capture, 0, 10000);
         }
 
-        const clicked = await clickAntTab(page, '^rationale$');
-        if (clicked) {
+        // Clica nas DUAS tabs explicitamente: o Platts lembra a última tab ativa
+        // por usuário (preferência server-side), então não dá pra assumir qual
+        // carregou na abertura — e clicar numa tab já ativa não dispara busca nova.
+        for (const [tabRegex, tabName] of [['^market commentary$', 'Market Commentary'], ['^rationale$', 'Rationale']]) {
+            const clicked = await clickAntTab(page, tabRegex);
+            if (!clicked) {
+                pageLog.warning(`   ⚠️ Tab ${tabName} não encontrada na página do topic`);
+                continue;
+            }
             const before = capture.size();
             const grew = await waitForCaptureGrowth(page, capture, before);
-            pageLog.info(`   🗂️ Tab Rationale clicada — ${grew ? 'busca capturada' : 'sem busca nova em 8s (pode já estar no cache do capture)'}`);
-        } else {
-            pageLog.warning('   ⚠️ Tab Rationale não encontrada na página do topic');
+            pageLog.info(`   🗂️ Tab ${tabName} clicada — ${grew ? 'busca nova capturada' : 'sem busca nova (já estava ativa/cacheada)'}`);
         }
 
         const rawItems = capture.items();

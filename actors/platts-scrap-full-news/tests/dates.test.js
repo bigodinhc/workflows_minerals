@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { formatDateBR,isDateWithinFilter, parsePlattsDate } from '../src/util/dates.js';
+import { detectDateFormat,formatDateBR, isDateWithinFilter, parsePlattsDate } from '../src/util/dates.js';
 
 // Pin "now" so lastXDays tests don't drift with calendar time. Picked a
 // non-ambiguous day (>12) to sidestep the known DD/MM vs MM/DD parser quirk.
@@ -50,6 +50,15 @@ describe('isDateWithinFilter', () => {
             const articleDate = '14/04/2026 10:00:00 UTC';
             const targetDate = '16/04/2026';
             expect(isDateWithinFilter(articleDate, 'today', 1, targetDate)).toBe(false);
+        });
+
+        it('matches a same-day ambiguous MM/DD grid date (IODEX regression)', () => {
+            // The bug: Platts headless renders MM/DD, so the IODEX grid showed today's
+            // rows as "06/11/2026" (11 Jun). The old DD/MM fallback read that as 6 Nov
+            // and dropped all 12 rows ("0 dentro do filtro"). targetDate input is DD/MM.
+            const articleDate = '06/11/2026 15:10:14 UTC'; // 11 Jun, MM/DD
+            const targetDate = '11/06/2026';               // 11 Jun, DD/MM input
+            expect(isDateWithinFilter(articleDate, 'today', 1, targetDate)).toBe(true);
         });
     });
 
@@ -112,19 +121,29 @@ describe('parsePlattsDate', () => {
         expect(d.getUTCDate()).toBe(16);
     });
 
-    it('treats ambiguous "05/03/2026" as DD/MM (March 5), not MM/DD (May 3)', () => {
-        // Regression guard for the parser fix. Platts always renders DD/MM/YYYY;
-        // earlier the fallback assumed MM/DD which silently shifted dates by months.
+    it('treats ambiguous "05/03/2026" as MM/DD (May 3) by default', () => {
+        // The headless Platts Connect session renders MM/DD/YYYY (verified in prod:
+        // FLASH banner "02/20/2026" and same-day article timestamps "06/11/2026" on
+        // 11 Jun). So the ambiguous fallback reads month-first. Earlier code assumed
+        // DD/MM here and silently dropped today's IODEX rows from the "today" filter.
         const d = parsePlattsDate('05/03/2026 10:00:00 UTC');
         expect(d).not.toBeNull();
-        expect(d.getUTCMonth()).toBe(2); // March = 2 (zero-indexed)
+        expect(d.getUTCMonth()).toBe(4); // May = 4 (zero-indexed)
+        expect(d.getUTCDate()).toBe(3);
+    });
+
+    it('honors an explicit DMY hint for ambiguous dates', () => {
+        // detectDateFormat() can pin a grid to DD/MM when an unambiguous sibling row
+        // (day >12) proves the format. The hint must override the MM/DD default.
+        const d = parsePlattsDate('05/03/2026 10:00:00 UTC', 'DMY');
+        expect(d).not.toBeNull();
+        expect(d.getUTCMonth()).toBe(2); // March = 2
         expect(d.getUTCDate()).toBe(5);
     });
 
-    it('still uses MM/DD when the second component is clearly the day (>12)', () => {
-        // Defensive: if some upstream source ever delivers MM/DD/YYYY (e.g.
-        // a US-formatted feed), the heuristic still picks the right reading.
-        const d = parsePlattsDate('05/16/2026 10:00:00 UTC');
+    it('ignores the hint when a component >12 disambiguates', () => {
+        // "05/16/2026" can only be MM/DD (16>12) regardless of any hint.
+        const d = parsePlattsDate('05/16/2026 10:00:00 UTC', 'DMY');
         expect(d).not.toBeNull();
         expect(d.getUTCMonth()).toBe(4); // May = 4
         expect(d.getUTCDate()).toBe(16);
@@ -134,6 +153,27 @@ describe('parsePlattsDate', () => {
         expect(parsePlattsDate('')).toBeNull();
         expect(parsePlattsDate('not a date')).toBeNull();
         expect(parsePlattsDate(null)).toBeNull();
+    });
+});
+
+describe('detectDateFormat', () => {
+    it('returns DMY when a first component >12 appears', () => {
+        expect(detectDateFormat(['06/11/2026 10:00:00 UTC', '14/06/2026 10:00:00 UTC'])).toBe('DMY');
+    });
+
+    it('returns MDY when a second component >12 appears', () => {
+        expect(detectDateFormat(['06/11/2026 10:00:00 UTC', '06/20/2026 10:00:00 UTC'])).toBe('MDY');
+    });
+
+    it('returns null when every sample is ambiguous (day and month ≤12)', () => {
+        // The exact case that broke IODEX: all rows in a grid dated 01–12.
+        expect(detectDateFormat(['06/11/2026 15:10:14 UTC', '10/06/2026 14:22:46 UTC'])).toBeNull();
+    });
+
+    it('returns null for empty or missing input', () => {
+        expect(detectDateFormat([])).toBeNull();
+        expect(detectDateFormat(null)).toBeNull();
+        expect(detectDateFormat([null, '', 'garbage'])).toBeNull();
     });
 });
 

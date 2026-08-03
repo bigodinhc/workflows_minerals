@@ -11,7 +11,7 @@
 
 import { closePopups } from '../auth/login.js';
 import { extractReadingPaneContent } from '../extract/readingPane.js';
-import { isDateWithinFilter } from '../util/dates.js';
+import { detectDateFormat, isDateWithinFilter } from '../util/dates.js';
 import { saveDebugArtifacts } from '../util/debug.js';
 
 const RMW_URL = 'https://core.spglobal.com/#platts/workspace?workspace=Raw%20Materials%20Workspace&type=public';
@@ -315,10 +315,19 @@ export async function collectRMW(page, pageLog, options = {}) {
 
         const items = await collectGridArticles(page, pageLog, tab.name);
 
+        // Fixa o formato de data do grid por uma row inequívoca (dia >12). Se todas
+        // forem ambíguas (ex: grid IODEX em dias 01–12), cai no 'auto' do parser
+        // (MM/DD — formato da sessão headless do Platts). Sem isto, datas de hoje como
+        // 06/11 eram lidas como 6/nov e o grid inteiro caía pra "0 dentro do filtro".
+        const gridFormat = detectDateFormat(items.map((it) => it.date)) || 'auto';
+        if (items.length > 0) {
+            pageLog.info(`   🗓️ Formato de data do grid: ${gridFormat === 'auto' ? 'auto→MM/DD' : gridFormat}`);
+        }
+
         // Filtra por data se possível
         const filtered = items.filter((it) => {
             if (!it.date) return dateFilter === 'all';
-            return isDateWithinFilter(it.date, dateFilter, daysToCollect, targetDate);
+            return isDateWithinFilter(it.date, dateFilter, daysToCollect, targetDate, gridFormat);
         }).slice(0, maxArticlesPerTab);
 
         pageLog.info(`   🎯 ${filtered.length} dentro do filtro`);

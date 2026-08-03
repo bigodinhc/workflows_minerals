@@ -33,8 +33,9 @@ WORKFLOW_NAME = "platts_ingestion"
 def _flatten_dataset(items: list) -> list:
     """Flatten merged-actor dataset shape into a flat list of article dicts.
 
-    The actor returns a single wrapper with keys flash/topNews/latest/newsInsights/rmw.
-    RMW is nested one level deeper as [{tabName, articles: [...]}].
+    The actor returns a single wrapper with keys flash/topNews/latest/newsInsights/
+    marketCommentary/rationale/rmw. RMW is nested one level deeper as
+    [{tabName, articles: [...]}].
     Defensive against malformed payloads — non-dict entries are skipped.
     """
     flat = []
@@ -42,7 +43,7 @@ def _flatten_dataset(items: list) -> list:
         if not isinstance(item, dict):
             continue
         if any(k in item for k in ("topNews", "latest", "newsInsights", "rmw", "flash")):
-            for key in ("flash", "topNews", "latest", "newsInsights"):
+            for key in ("flash", "topNews", "latest", "newsInsights", "marketCommentary", "rationale"):
                 val = item.get(key)
                 if isinstance(val, list):
                     flat.extend(a for a in val if isinstance(a, dict))
@@ -245,7 +246,7 @@ def main():
         run_input = {
             "username": os.getenv("PLATTS_USERNAME", ""),
             "password": os.getenv("PLATTS_PASSWORD", ""),
-            "sources": ["allInsights", "ironOreTopic", "rmw"],
+            "sources": ["allInsights", "ironOreTopic", "topicCommentary", "rmw"],
             "includeFlash": True,
             "includeLatest": True,
             "maxArticles": 50,

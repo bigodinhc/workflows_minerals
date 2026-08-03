@@ -27,6 +27,7 @@ import {
 } from './sources/allInsights.js';
 import { collectNewsList,navigateToIronOre } from './sources/ironOreTopic.js';
 import { collectRMW } from './sources/rmw.js';
+import { attachBlendedCapture, collectTopicCommentary } from './sources/topicCommentary.js';
 import { isDateWithinFilter } from './util/dates.js';
 import { saveDebugArtifacts } from './util/debug.js';
 import { createLimiter } from './util/semaphore.js';
@@ -41,7 +42,7 @@ log.info(JSON.stringify({ ...input, password: input.password ? '***' : null }, n
 const {
     username,
     password,
-    sources = ['allInsights', 'ironOreTopic', 'rmw'],
+    sources = ['allInsights', 'ironOreTopic', 'topicCommentary', 'rmw'],
     maxArticles = 10,
     maxTopNewsToCheck = 5,
     latestMaxItems = 30,
@@ -168,6 +169,12 @@ const crawler = new PlaywrightCrawler({
         const articleItems = []; // itens para extração paralela (padrão A)
         let flashItems = [];
 
+        // Intercepta as respostas do blendedsearch ANTES de navegar pro topic —
+        // a carga inicial da página já dispara a busca da tab Market Commentary
+        const blendedCapture = sources.includes('topicCommentary')
+            ? attachBlendedCapture(page, pageLog)
+            : null;
+
         if (sources.includes('allInsights')) {
             pageLog.info('\n========== ALL INSIGHTS (Ferrous Metals) ==========');
             if (await navigateToFerrousMetals(page, pageLog)) {
@@ -201,6 +208,25 @@ const crawler = new PlaywrightCrawler({
             }
         }
 
+        // ========== TOPIC MARKET COMMENTARY / RATIONALE (via API interceptada) ==========
+        let topicCommentaryArticles = [];
+        if (blendedCapture) {
+            pageLog.info('\n========== TOPIC MARKET COMMENTARY / RATIONALE ==========');
+            // Se o ironOreTopic não rodou, precisamos navegar pro topic nós mesmos
+            const ready = page.url().includes('platts/topic') || await navigateToIronOre(page, pageLog);
+            if (ready) {
+                topicCommentaryArticles = await collectTopicCommentary(page, pageLog, blendedCapture, {
+                    maxArticles: maxArticlesPerRmwTab * 2, // MC + Rationale
+                    dateFilter,
+                    daysToCollect,
+                    targetDate,
+                });
+            } else {
+                pageLog.warning('⚠️ Página do topic indisponível para Market Commentary/Rationale');
+            }
+            blendedCapture.detach();
+        }
+
         // ========== RMW (sequencial, padrão B) ==========
         let rmwResults = [];
         if (sources.includes('rmw')) {
@@ -218,6 +244,7 @@ const crawler = new PlaywrightCrawler({
         const uniqueItems = dedupArticles ? dedup(articleItems) : articleItems;
         pageLog.info(`\n📦 Padrão A: ${articleItems.length} itens, ${uniqueItems.length} após dedup`);
         pageLog.info(`📦 Padrão B (RMW): ${rmwResults.reduce((s, t) => s + t.articles.length, 0)} artigos em ${rmwResults.length} tabs`);
+        pageLog.info(`📦 Topic MC/Rationale: ${topicCommentaryArticles.length} artigos`);
         pageLog.info(`📦 FLASH: ${flashItems.length} item(ns)`);
 
         // ========== EXTRAÇÃO PARALELA DE ARTIGOS (padrão A) ==========
@@ -281,7 +308,7 @@ const crawler = new PlaywrightCrawler({
 
         // ========== RESULTADO ==========
         const rmwArticles = rmwResults.flatMap((t) => t.articles);
-        const allArticlesFlat = [...articles, ...rmwArticles];
+        const allArticlesFlat = [...articles, ...rmwArticles, ...topicCommentaryArticles];
 
         if (allArticlesFlat.length === 0 && flashItems.length === 0) {
             pageLog.warning(`Nenhum item encontrado para ${targetDate || 'hoje'}`);
@@ -314,6 +341,7 @@ const crawler = new PlaywrightCrawler({
                 flash: flashItems.length,
                 rmwArticles: rmwArticles.length,
                 rmwTabs: rmwResults.map((t) => ({ tabName: t.tabName, articleCount: t.articles.length })),
+                topicCommentary: topicCommentaryArticles.length,
                 failedArticles,
                 totalAttempted: uniqueItems.length,
                 totalWords: allArticlesFlat.reduce((s, a) => s + (a.metadata?.wordCount || 0), 0),
@@ -326,7 +354,8 @@ const crawler = new PlaywrightCrawler({
             topNews,
             latest,
             newsInsights,
-            marketCommentary: [],  // deprecated: iron-ore Market Commentary agora vem da RMW
+            marketCommentary: topicCommentaryArticles.filter((a) => a.contentType === 'Market Commentary'),
+            rationale: topicCommentaryArticles.filter((a) => a.contentType === 'Rationale'),
             rmw: rmwResults,
             allArticles: allArticlesFlat,
             extractedAt: new Date().toISOString(),
@@ -341,6 +370,7 @@ const crawler = new PlaywrightCrawler({
         log.info(`   📰 Latest: ${latest.length}`);
         log.info(`   📃 News & Insights: ${newsInsights.length}`);
         log.info(`   💬 RMW: ${rmwArticles.length} em ${rmwResults.length} tabs`);
+        log.info(`   🗂️ Topic MC/Rationale: ${topicCommentaryArticles.length}`);
         log.info(`   ❌ Falhas: ${failedArticles}`);
         if (collectImages) {
             log.info(`   🖼️ Imagens: ${totalImages} (${totalCharts} gráficos)`);

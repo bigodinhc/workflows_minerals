@@ -161,3 +161,47 @@ def test_route_items_skips_empty_title(_redis):
     )
     assert counters["staged"] == 1
     assert len(staged) == 1
+
+
+def test_rationale_restages_on_next_day(_redis):
+    """Rationale tem título FIXO diário (ex: 'Platts Asia Iron Ore IODEX Daily
+    Rationale & Exclusions') — o dedup global de 30d não pode engolir a edição
+    do dia seguinte. O id é salgado com today_date."""
+    from execution.curation.router import route_items
+    item = {"source": "topic.Rationale", "title": "Platts Asia Iron Ore IODEX Daily Rationale & Exclusions"}
+    c1, _ = route_items(items=[dict(item)], today_date="2026-08-03", today_br="03/08/2026", logger=None)
+    assert c1["staged"] == 1
+    c2, _ = route_items(items=[dict(item)], today_date="2026-08-04", today_br="04/08/2026", logger=None)
+    assert c2["staged"] == 1, "rationale do dia seguinte não pode ser skipped_seen"
+
+
+def test_rationale_same_day_rerun_is_deduped(_redis):
+    """Re-scrape no MESMO dia (ingestion roda 3x/dia) continua dedupando."""
+    from execution.curation.router import route_items
+    item = {"source": "topic.Rationale", "title": "Platts China Iron Ore Lump Premium Daily Rationale & Exclusions"}
+    c1, _ = route_items(items=[dict(item)], today_date="2026-08-03", today_br="03/08/2026", logger=None)
+    c2, _ = route_items(items=[dict(item)], today_date="2026-08-03", today_br="03/08/2026", logger=None)
+    assert c1["staged"] == 1
+    assert c2["staged"] == 0
+
+
+def test_market_commentary_restages_on_next_day(_redis):
+    """Market Commentary reusa manchetes entre dias ('Asian iron ore prices
+    dip start of week') — também é salgado com a data."""
+    from execution.curation.router import route_items
+    item = {"source": "topic.MarketCommentary", "title": "Asian iron ore prices dip start of week"}
+    c1, _ = route_items(items=[dict(item)], today_date="2026-08-03", today_br="03/08/2026", logger=None)
+    c2, _ = route_items(items=[dict(item)], today_date="2026-08-10", today_br="10/08/2026", logger=None)
+    assert c1["staged"] == 1
+    assert c2["staged"] == 1
+
+
+def test_news_keeps_cross_day_dedup(_redis):
+    """News comum NÃO é salgada: a mesma matéria reaparecendo dias depois
+    (Latest vs Top News, re-publicações) continua dedupada."""
+    from execution.curation.router import route_items
+    item = {"source": "Latest", "title": "China unveils plan to boost battery recycling"}
+    c1, _ = route_items(items=[dict(item)], today_date="2026-08-03", today_br="03/08/2026", logger=None)
+    c2, _ = route_items(items=[dict(item)], today_date="2026-08-04", today_br="04/08/2026", logger=None)
+    assert c1["staged"] == 1
+    assert c2["staged"] == 0

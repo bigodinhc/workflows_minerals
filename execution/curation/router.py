@@ -34,6 +34,22 @@ def _type_tag(item: dict) -> str:
     return "rationale" if classify(item) == "rationale" else "news"
 
 
+def _dedup_title(item: dict, today_date: str) -> str:
+    """Título usado no hash de dedup.
+
+    Rationale e Market Commentary têm títulos que se REPETEM entre dias
+    (ex: 'Platts Asia Iron Ore IODEX Daily Rationale & Exclusions' é publicado
+    diariamente) — sem salgar com a data, o seen global de 30d engole todas as
+    edições depois da primeira. News comum fica sem sal: a mesma matéria em
+    páginas/dias diferentes deve continuar colapsando num id canônico.
+    """
+    title = item.get("title", "")
+    source = item.get("source") or ""
+    if classify(item) == "rationale" or source == "topic.MarketCommentary":
+        return f"{title}|{today_date}"
+    return title
+
+
 def _stage_only(item: dict, item_id: str, item_type: str, today_date: str) -> dict:
     """Stage one item in Redis (load-bearing) and upsert to Supabase (best-effort).
 
@@ -81,7 +97,7 @@ def route_items(
     for item in items:
         item_type = _type_tag(item)
         try:
-            item_id = generate_id(item.get("title", ""))
+            item_id = generate_id(_dedup_title(item, today_date))
         except ValueError:
             counters["skipped_invalid"] += 1
             log.warning(f"Skipped item with empty/invalid title: {item.get('source', '?')}")

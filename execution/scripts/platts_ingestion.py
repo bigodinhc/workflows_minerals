@@ -246,7 +246,11 @@ def main():
         run_input = {
             "username": os.getenv("PLATTS_USERNAME", ""),
             "password": os.getenv("PLATTS_PASSWORD", ""),
-            "sources": ["allInsights", "ironOreTopic", "topicCommentary", "rmw"],
+            # rmw removido ago/2026: o workspace quebrou no redesign do Platts
+            # (modal "New Workspace update available" bloqueia o grid) e o conteúdo
+            # dele (Commentary/Rationale) já vem via topicCommentary. Rollback:
+            # basta readicionar "rmw" aqui.
+            "sources": ["allInsights", "ironOreTopic", "topicCommentary"],
             "includeFlash": True,
             "includeLatest": True,
             "maxArticles": 50,

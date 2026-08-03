@@ -2,8 +2,12 @@ name: "Platts Ingestion (Unified)"
 
 on:
   schedule:
-    # Unified ingestion: 9h, 12h, 15h BRT (12, 15, 18 UTC)
+    # Unified ingestion: 9h, 11h30, 12h, 15h BRT (12, 14:30, 15, 18 UTC)
+    # 11h30 BRT: garante o rationale do dia no banco antes do Minerals Daily
+    # das 12h30 BRT (o delay do GitHub Actions empurra ~30-45min; ver repo
+    # minerals-report, scheduler 12:30)
     - cron: '0 12 * * 1-5'   # 9h BRT
+    - cron: '30 14 * * 1-5'  # 11h30 BRT
     - cron: '0 15 * * 1-5'   # 12h BRT
     - cron: '0 18 * * 1-5'   # 15h BRT
   workflow_dispatch:

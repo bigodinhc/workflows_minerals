@@ -42,7 +42,31 @@ export function parseRelativeTime(timeString) {
     return null;
 }
 
-export function parsePlattsDate(dateString) {
+/**
+ * Detecta o formato de uma lista de datas Platts (DD/MM vs MM/DD) procurando
+ * uma amostra inequívoca — só o dia pode ser > 12. Retorna 'DMY', 'MDY' ou null
+ * (todas ambíguas, dia e mês ≤12). Use pra fixar o formato de um grid inteiro a
+ * partir de uma única row inequívoca, em vez de adivinhar row a row.
+ */
+export function detectDateFormat(samples) {
+    for (const s of samples || []) {
+        const m = String(s ?? '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (!m) continue;
+        const a = parseInt(m[1]);
+        const b = parseInt(m[2]);
+        if (a > 12) return 'DMY';
+        if (b > 12) return 'MDY';
+    }
+    return null;
+}
+
+/**
+ * Parseia "DD/MM/YYYY HH:MM:SS UTC" ou "MM/DD/YYYY HH:MM:SS UTC".
+ * @param {string} dateString
+ * @param {'auto'|'DMY'|'MDY'} format Dica de formato. 'auto' (default) auto-desambigua
+ *   por componente >12 e, quando ambíguo, assume MM/DD (ver nota abaixo).
+ */
+export function parsePlattsDate(dateString, format = 'auto') {
     if (!dateString) return null;
 
     const relativeDate = parseRelativeTime(dateString);
@@ -62,22 +86,26 @@ export function parsePlattsDate(dateString) {
 
         let day, month;
         if (first > 12) {
-            // first must be the day (only days can be >12)
+            // first > 12 → só pode ser o dia (DD/MM), independente da dica
             day = first;
             month = second - 1;
         } else if (second > 12) {
-            // second must be the day → reading is MM/DD/YYYY (e.g. an article scraped from a US-formatted source)
+            // second > 12 → só pode ser o dia (MM/DD), independente da dica
             month = first - 1;
             day = second;
-        } else {
-            // Ambíguo (both ≤12): assume DD/MM/YYYY.
-            // Platts UI consistently renders DD/MM/YYYY HH:MM:SS UTC for both
-            // listing grids and article timestamps (verified from production logs
-            // 14/04/2026, 15/04/2026, etc. with day > 12). Earlier the fallback was
-            // MM/DD which silently flipped dates like 03/05/2026 → May 3 instead of
-            // March 5 and dropped them from "today"/"specificDate" filters.
+        } else if (format === 'DMY') {
             day = first;
             month = second - 1;
+        } else {
+            // Ambíguo (dia e mês ≤12) sem dica DMY: assume MM/DD/YYYY.
+            // A sessão headless do Platts Connect renderiza MM/DD/YYYY — verificado em
+            // produção pelo banner FLASH "02/20/2026" (20>12 ⇒ MM/DD) e por timestamps
+            // de artigos do mesmo dia "06/11/2026" em 11/jun. O browser interativo do
+            // usuário mostra DD/MM por preferência de perfil, que a sessão automatizada
+            // não herda. Datas inequívocas (componente >12) acima já têm prioridade, e
+            // detectDateFormat() permite fixar 'DMY' por grid quando o Platts mudar.
+            month = first - 1;
+            day = second;
         }
 
         return new Date(Date.UTC(year, month, day, hour, minute, secs));
@@ -86,13 +114,26 @@ export function parsePlattsDate(dateString) {
     }
 }
 
-export function isDateWithinFilter(dateString, filterType, daysBack = 1, targetDate = null) {
-    const articleDate = parsePlattsDate(dateString);
+export function isDateWithinFilter(dateString, filterType, daysBack = 1, targetDate = null, format = 'auto') {
+    const articleDate = parsePlattsDate(dateString, format);
 
     if (!articleDate) {
         if (dateString && (dateString.includes('há') || dateString.includes('ago'))) {
             return true;
         }
+        return filterType === 'all';
+    }
+
+    return isParsedDateWithinFilter(articleDate, filterType, daysBack, targetDate);
+}
+
+/**
+ * Comparador do filtro de data para um Date já parseado. Permite fontes cujas
+ * datas não vêm no formato Platts DD/MM|MM/DD (ex: ISO 8601 da API blendedsearch)
+ * usarem a MESMA semântica de filtro (today/specificDate/lastXDays/all).
+ */
+export function isParsedDateWithinFilter(articleDate, filterType, daysBack = 1, targetDate = null) {
+    if (!articleDate || Number.isNaN(articleDate.getTime())) {
         return filterType === 'all';
     }
 

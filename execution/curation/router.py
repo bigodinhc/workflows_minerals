@@ -18,10 +18,13 @@ _RATIONALE_TAB_RE = re.compile(r"\b(Rationale|Lump)\b", re.IGNORECASE)
 
 
 def classify(item: dict) -> str:
-    """Return 'rationale' for RMW Rationale/Lump items, 'curation' otherwise."""
+    """Return 'rationale' for Rationale items (RMW ou topic), 'curation' otherwise."""
     source = item.get("source") or ""
     tab_name = item.get("tabName") or ""
     if source.startswith("rmw") and _RATIONALE_TAB_RE.search(tab_name):
+        return "rationale"
+    # Grid da página do topic (pós-redesign ago/2026): tab Rationale separada
+    if source == "topic.Rationale":
         return "rationale"
     return "curation"
 

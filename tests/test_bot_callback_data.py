@@ -214,3 +214,20 @@ def test_queue_bulk_cancel_roundtrip():
     from bot.callback_data import QueueBulkCancel
     packed = QueueBulkCancel().pack()
     assert packed == "q_bulkno"
+
+
+def test_hist_nav_pack_unpack():
+    from bot.callback_data import HistNav
+    cb = HistNav(date="2026-04-14", flt="rationale")
+    packed = cb.pack()
+    assert packed == "hist_nav:2026-04-14:rationale"
+    parsed = HistNav.unpack(packed)
+    assert parsed.date == "2026-04-14"
+    assert parsed.flt == "rationale"
+
+
+def test_hist_open_pack_unpack():
+    from bot.callback_data import HistOpen
+    packed = HistOpen(item_id="abc123").pack()
+    assert packed == "hist_open:abc123"
+    assert HistOpen.unpack(packed).item_id == "abc123"

@@ -230,3 +230,48 @@ def test_build_keyboard_has_2x2_layout_plus_url_row():
     assert "🖋️ Writer" in row1_texts
     assert "📲 WhatsApp" in row1_texts
     assert "❌ Recusar" in row2_texts
+
+
+# ─── post_from_history (card do banco, sem botões de fila) ───────────────────
+
+def _capture_send(monkeypatch):
+    from execution.curation import telegram_poster
+    sent = {}
+
+    def fake_send(chat_id, text, reply_markup, parse_mode="Markdown"):
+        sent.update(chat_id=chat_id, text=text, markup=reply_markup)
+
+    monkeypatch.setattr(telegram_poster, "_send_message", fake_send)
+    return sent
+
+
+def test_post_from_history_appends_status_line(monkeypatch):
+    from execution.curation import telegram_poster
+    sent = _capture_send(monkeypatch)
+    item = {"id": "abc", "title": "T", "fullText": "body",
+            "status": "archived", "type": "news"}
+    telegram_poster.post_from_history(10, item, "https://bot.example.com")
+    assert sent["chat_id"] == 10
+    assert "📌 📦 enviada/arquivada" in sent["text"]
+
+
+def test_post_from_history_keyboard_has_preview_writer_whatsapp(monkeypatch):
+    from execution.curation import telegram_poster
+    sent = _capture_send(monkeypatch)
+    item = {"id": "abc", "title": "T", "fullText": "body", "status": "staged"}
+    telegram_poster.post_from_history(10, item, "https://bot.example.com")
+    flat = [b for row in sent["markup"]["inline_keyboard"] for b in row]
+    assert any(b.get("url") == "https://bot.example.com/preview/abc" for b in flat)
+    assert any(b.get("callback_data") == "curate:pipeline:abc" for b in flat)
+    assert any(b.get("callback_data") == "curate:send_raw:abc" for b in flat)
+    # card de consulta: sem arquivar/recusar
+    assert not any("curate:archive" in (b.get("callback_data") or "") for b in flat)
+    assert not any("curate:reject" in (b.get("callback_data") or "") for b in flat)
+
+
+def test_post_from_history_requires_id(monkeypatch):
+    from execution.curation import telegram_poster
+    monkeypatch.setattr(telegram_poster, "_send_message", lambda *a, **k: None)
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        telegram_poster.post_from_history(10, {"title": "T"}, "https://x.y")

@@ -248,6 +248,12 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
             await query.answer("⚠️ Redis indisponível")
             return
         if item is None:
+            # Fora do staging (enviada/expirada): refazer a partir do banco.
+            try:
+                item = await asyncio.to_thread(news_repo.get_by_id, item_id)
+            except Exception as exc:
+                logger.warning(f"curate_pipeline supabase fallback failed: {exc}")
+        if item is None:
             await query.answer("⚠️ Item expirou")
             await _finalize_card(query, "⚠️ Item expirou ou já processado")
             return
@@ -277,6 +283,12 @@ async def on_curate_action(query: CallbackQuery, callback_data: CurateAction, st
             logger.error(f"curate_send_raw redis error: {exc}")
             await query.answer("⚠️ Redis indisponível")
             return
+        if item is None:
+            # Fora do staging (enviada/expirada): reenviar a partir do banco.
+            try:
+                item = await asyncio.to_thread(news_repo.get_by_id, item_id)
+            except Exception as exc:
+                logger.warning(f"curate_send_raw supabase fallback failed: {exc}")
         if item is None:
             await query.answer("⚠️ Item expirou")
             await _finalize_card(query, "⚠️ Item expirou ou já processado")

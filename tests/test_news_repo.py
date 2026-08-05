@@ -164,3 +164,41 @@ def test_item_to_row_does_not_mutate_or_alias_input():
     assert item == snapshot            # input untouched
     assert row["raw"] is not item      # raw is a decoupled copy
     assert row["raw"] == item          # but equal in content
+
+
+# ─── list_by_day ─────────────────────────────────────────────────────────────
+
+def _day_chain(client, rows, with_type=False):
+    """Wire the fluent select chain for list_by_day and return the lt mock."""
+    lt = client.table.return_value.select.return_value.gte.return_value.lt
+    tail = lt.return_value.eq.return_value if with_type else lt.return_value
+    tail.order.return_value.limit.return_value.execute.return_value = MagicMock(data=rows)
+    return lt
+
+
+def test_list_by_day_filters_brt_window(fake_sb):
+    """The day window is BRT (UTC-3): 05/ago BRT = 05/ago 03:00 → 06/ago 03:00 UTC."""
+    from execution.curation.news_repo import list_by_day
+    _day_chain(fake_sb, [{"id": "a", "status": "archived", "type": "news",
+                          "raw": {"title": "T"}}])
+    items = list_by_day("2026-08-05")
+    gte = fake_sb.table.return_value.select.return_value.gte
+    assert gte.call_args[0] == ("scraped_at", "2026-08-05T03:00:00+00:00")
+    lt = gte.return_value.lt
+    assert lt.call_args[0] == ("scraped_at", "2026-08-06T03:00:00+00:00")
+    assert items[0]["id"] == "a"
+    assert items[0]["status"] == "archived"
+
+
+def test_list_by_day_applies_type_filter(fake_sb):
+    from execution.curation.news_repo import list_by_day
+    lt = _day_chain(fake_sb, [], with_type=True)
+    list_by_day("2026-08-05", type_filter="rationale")
+    assert lt.return_value.eq.call_args[0] == ("type", "rationale")
+
+
+def test_list_by_day_no_type_filter_skips_eq(fake_sb):
+    from execution.curation.news_repo import list_by_day
+    lt = _day_chain(fake_sb, [])
+    list_by_day("2026-08-05")
+    lt.return_value.eq.assert_not_called()

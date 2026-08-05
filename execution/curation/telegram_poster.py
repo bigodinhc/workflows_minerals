@@ -126,6 +126,41 @@ def build_keyboard(item_id: str, preview_url: str) -> dict:
     }
 
 
+_HIST_STATUS_LABELS = {
+    "staged": "🗂️ na fila",
+    "archived": "📦 enviada/arquivada",
+    "rejected": "🗑️ recusada",
+}
+
+
+def build_history_keyboard(item_id: str, preview_url: str) -> dict:
+    """Keyboard for a news-bank card: read + redo actions, no queue actions."""
+    return {
+        "inline_keyboard": [
+            [{"text": "📖 Ler completo", "url": preview_url}],
+            [
+                {"text": "🖋️ Writer", "callback_data": f"curate:pipeline:{item_id}"},
+                {"text": "📲 WhatsApp", "callback_data": f"curate:send_raw:{item_id}"},
+            ],
+        ]
+    }
+
+
+def post_from_history(chat_id: int, item: dict, preview_base_url: str) -> None:
+    """Send a read/redo card for an item from the news bank (Supabase)."""
+    if not preview_base_url or not preview_base_url.startswith(("http://", "https://")):
+        raise ValueError("preview_base_url must be an absolute http(s) URL")
+    item_id = item.get("id")
+    if not item_id:
+        raise ValueError("post_from_history requires item['id']")
+    text = format_message(item)
+    status_label = _HIST_STATUS_LABELS.get(item.get("status") or "")
+    if status_label:
+        text += f"\n📌 {status_label}"
+    preview_url = f"{preview_base_url.rstrip('/')}/preview/{item_id}"
+    _send_message(chat_id, text, build_history_keyboard(item_id, preview_url))
+
+
 def _send_message(chat_id: int, text: str, reply_markup: dict, parse_mode: str = "Markdown") -> None:
     """Send via TelegramClient. Separated for easy mocking in tests."""
     client = TelegramClient()

@@ -19,7 +19,7 @@ import redis_queries
 _HELP_TEXT = """*COMANDOS*
 
 /queue — items aguardando
-/history — arquivo (últimos 10)
+/history \\[DD/MM] — banco de notícias por data
 /rejections — recusas (últimas 10)
 /stats — contadores de hoje
 /status — saúde do sistema
@@ -60,21 +60,73 @@ def _truncate(text: str, limit: int = 60) -> str:
     return text[:limit] + "…"
 
 
-def format_history(limit: int = 10) -> str:
-    """Return /history text — last N archived items cross-date, with icons."""
-    items = redis_queries.list_archive_recent(limit=limit)
-    if not items:
-        return "*📚 ARQUIVADOS*\n\nNenhum item arquivado."
-    lines = [
-        f"*📚 ARQUIVADOS · {len(items)} mais recentes*",
-        "────────────────────",
-    ]
-    for i, item in enumerate(items, start=1):
-        icon = _type_icon(item)
-        title = _escape_md(_truncate(item.get("title") or ""))
-        date = _format_short_date(item.get("archived_date") or item.get("archived_at") or "")
-        lines.append(f"{i}. {icon} {title} — {date}")
-    return "\n".join(lines)
+_HIST_BTN_TITLE_MAX = 40
+_HIST_STATUS_ICONS = {"staged": "🗂️", "archived": "📦", "rejected": "🗑️"}
+_HIST_FILTERS = [("all", "Todos"), ("news", "🗞️ News"), ("rationale", "📊 Rationale")]
+
+
+def today_brt_iso() -> str:
+    """Return today's date in BRT as YYYY-MM-DD."""
+    return datetime.now(_BRT).strftime("%Y-%m-%d")
+
+
+def _shift_day(date_iso: str, days: int) -> str:
+    """'2026-04-14' ± days -> ISO date string."""
+    day = datetime.strptime(date_iso, "%Y-%m-%d") + timedelta(days=days)
+    return day.strftime("%Y-%m-%d")
+
+
+def format_history_page(date_iso: str, flt: str = "all") -> tuple:
+    """Return (text, reply_markup) for the news bank at the given BRT day.
+
+    Every item scraped that day appears as a button (status icon + type icon
+    + title) opening the full card via hist_open. The header rows carry the
+    type-filter chips and the footer navigates between days, both preserving
+    the active filter.
+    """
+    type_filter = None if flt == "all" else flt
+    items = redis_queries.list_news_by_day(date_iso, type_filter)
+    short = _format_short_date(date_iso) or date_iso
+
+    if items:
+        noun = "item" if len(items) == 1 else "items"
+        text = (
+            f"*📚 BANCO · {short} · {len(items)} {noun}*\n"
+            f"🗂️ fila · 📦 enviada · 🗑️ recusada"
+        )
+    else:
+        text = f"*📚 BANCO · {short}*\n\nNenhuma notícia neste dia."
+
+    keyboard: list = []
+    chips = []
+    for value, label in _HIST_FILTERS:
+        chip_label = f"✓ {label}" if value == flt else label
+        chips.append({"text": chip_label, "callback_data": f"hist_nav:{date_iso}:{value}"})
+    keyboard.append(chips)
+
+    for item in items:
+        item_id = item.get("id") or ""
+        status_icon = _HIST_STATUS_ICONS.get(item.get("status") or "", "❔")
+        title = _truncate(item.get("title") or "", _HIST_BTN_TITLE_MAX)
+        keyboard.append([{
+            "text": f"{status_icon}{_type_icon(item)} {title}",
+            "callback_data": f"hist_open:{item_id}",
+        }])
+
+    prev_iso = _shift_day(date_iso, -1)
+    nav = [{
+        "text": f"⬅ {_format_short_date(prev_iso)}",
+        "callback_data": f"hist_nav:{prev_iso}:{flt}",
+    }]
+    if date_iso < today_brt_iso():
+        next_iso = _shift_day(date_iso, 1)
+        nav.append({
+            "text": f"{_format_short_date(next_iso)} ➡",
+            "callback_data": f"hist_nav:{next_iso}:{flt}",
+        })
+    keyboard.append(nav)
+
+    return text, {"inline_keyboard": keyboard}
 
 
 def format_stats(date_iso: str) -> str:

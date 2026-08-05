@@ -12,8 +12,10 @@ reprocess, /history) funcionam sem alteração.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+_BRT = timezone(timedelta(hours=-3))
 
 from execution.integrations.news_supabase_client import get_news_client
 
@@ -142,6 +144,27 @@ def list_by_status(status: str, limit: int = 10) -> list[dict]:
         get_news_client().table(TABLE).select("*").eq("status", status)
         .order(order_col, desc=True).limit(limit).execute()
     )
+    rows = getattr(resp, "data", None) or []
+    return [_row_to_item(r) for r in rows]
+
+
+def list_by_day(date_iso: str, type_filter: Optional[str] = None,
+                limit: int = 50) -> list[dict]:
+    """List items scraped on the given BRT day (any status), newest first.
+
+    The window is the BRT calendar day converted to UTC — scraped_at is stored
+    in UTC, so 05/ago BRT spans 05/ago 03:00 → 06/ago 03:00 UTC.
+    """
+    day_start = datetime.strptime(date_iso, "%Y-%m-%d").replace(tzinfo=_BRT)
+    start_utc = day_start.astimezone(timezone.utc).isoformat()
+    end_utc = (day_start + timedelta(days=1)).astimezone(timezone.utc).isoformat()
+    q = (
+        get_news_client().table(TABLE).select("*")
+        .gte("scraped_at", start_utc).lt("scraped_at", end_utc)
+    )
+    if type_filter:
+        q = q.eq("type", type_filter)
+    resp = q.order("scraped_at", desc=True).limit(limit).execute()
     rows = getattr(resp, "data", None) or []
     return [_row_to_item(r) for r in rows]
 

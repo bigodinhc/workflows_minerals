@@ -42,70 +42,96 @@ def test_help_text_lists_all_commands():
     assert text.startswith("*COMANDOS*")
 
 
-def test_history_empty(fake_redis):
-    from webhook.query_handlers import format_history
-    text = format_history()
-    assert text == "*📚 ARQUIVADOS*\n\nNenhum item arquivado."
-
-
 def _patch_archive(monkeypatch, rows):
-    """Drive list_archive_recent (now Supabase-backed) by patching news_repo.
-
-    Rows are platts_news-shaped (status='archived', archived_at ISO timestamp).
-    """
+    """Drive list_archive_recent (Supabase-backed) by patching news_repo."""
     from execution.curation import news_repo
-    monkeypatch.setattr(news_repo, "list_by_status",
-                        lambda *a, **k: rows)
+    monkeypatch.setattr(news_repo, "list_by_status", lambda *a, **k: rows)
 
 
-def test_history_formats_items_with_type_icon(fake_redis, monkeypatch):
-    from webhook.query_handlers import format_history
-    _patch_archive(monkeypatch, [
-        {"id": "a", "title": "Bonds Municipais", "type": "news",
-         "archived_at": "2026-04-14T10:00:00+00:00"},
-        {"id": "b", "title": "Daily Rationale", "type": "rationale",
-         "archived_at": "2026-04-13T08:00:00+00:00"},
+def _patch_day(monkeypatch, rows):
+    """Drive list_news_by_day (Supabase-backed) by patching news_repo."""
+    from execution.curation import news_repo
+    monkeypatch.setattr(news_repo, "list_by_day", lambda *a, **k: rows)
+
+
+def _flat_buttons(markup):
+    return [b for row in markup["inline_keyboard"] for b in row]
+
+
+def test_history_page_empty_day_still_navigable(fake_redis, monkeypatch):
+    from webhook.query_handlers import format_history_page
+    _patch_day(monkeypatch, [])
+    text, markup = format_history_page("2026-04-14")
+    assert "*📚 BANCO · 14/abr*" in text
+    assert "Nenhuma notícia neste dia." in text
+    datas = [b.get("callback_data", "") for b in _flat_buttons(markup)]
+    assert "hist_nav:2026-04-13:all" in datas  # dia anterior
+    assert "hist_nav:2026-04-15:all" in datas  # dia seguinte (data passada)
+
+
+def test_history_page_items_open_cards_with_status_and_type_icons(fake_redis, monkeypatch):
+    from webhook.query_handlers import format_history_page
+    _patch_day(monkeypatch, [
+        {"id": "a", "title": "Bonds Municipais", "type": "news", "status": "archived"},
+        {"id": "b", "title": "Daily Rationale", "type": "rationale", "status": "staged"},
+        {"id": "c", "title": "Recusada", "type": "news", "status": "rejected"},
     ])
-    text = format_history()
-    assert "*📚 ARQUIVADOS · 2 mais recentes*" in text
-    assert "────" in text
-    assert "1. 🗞️ Bonds Municipais — 14/abr" in text
-    assert "2. 📊 Daily Rationale — 13/abr" in text
+    text, markup = format_history_page("2026-04-14")
+    assert "*📚 BANCO · 14/abr · 3 items*" in text
+    buttons = {b.get("callback_data"): b["text"] for b in _flat_buttons(markup)}
+    assert buttons["hist_open:a"].startswith("📦🗞️ Bonds Municipais")
+    assert buttons["hist_open:b"].startswith("🗂️📊 Daily Rationale")
+    assert buttons["hist_open:c"].startswith("🗑️🗞️ Recusada")
 
 
-def test_history_falls_back_to_news_icon_when_type_missing(fake_redis, monkeypatch):
-    """Legacy archived items (pre-v1.1) don't carry `type`; default to news icon."""
-    from webhook.query_handlers import format_history
-    _patch_archive(monkeypatch, [
-        {"id": "legacy", "title": "Legacy",
-         "archived_at": "2026-04-14T10:00:00+00:00"},
+def test_history_page_filter_chips_carry_date_and_filter(fake_redis, monkeypatch):
+    from webhook.query_handlers import format_history_page
+    _patch_day(monkeypatch, [])
+    _, markup = format_history_page("2026-04-14", flt="rationale")
+    datas = [b.get("callback_data", "") for b in _flat_buttons(markup)]
+    assert "hist_nav:2026-04-14:all" in datas
+    assert "hist_nav:2026-04-14:news" in datas
+    # chip ativo marcado com ✓
+    active = [b for b in _flat_buttons(markup)
+              if b.get("callback_data") == "hist_nav:2026-04-14:rationale"]
+    assert active and active[0]["text"].startswith("✓")
+
+
+def test_history_page_filter_propagates_to_nav_and_repo(fake_redis, monkeypatch):
+    from webhook.query_handlers import format_history_page
+    from execution.curation import news_repo
+    calls = {}
+
+    def fake_list(date_iso, type_filter=None, limit=50):
+        calls["args"] = (date_iso, type_filter)
+        return []
+
+    monkeypatch.setattr(news_repo, "list_by_day", fake_list)
+    _, markup = format_history_page("2026-04-14", flt="news")
+    assert calls["args"] == ("2026-04-14", "news")
+    datas = [b.get("callback_data", "") for b in _flat_buttons(markup)]
+    assert "hist_nav:2026-04-13:news" in datas  # nav mantém o filtro
+
+
+def test_history_page_today_has_no_next_day_button(fake_redis, monkeypatch):
+    import webhook.query_handlers as qh
+    _patch_day(monkeypatch, [])
+    monkeypatch.setattr(qh, "today_brt_iso", lambda: "2026-04-14")
+    _, markup = qh.format_history_page("2026-04-14")
+    datas = [b.get("callback_data", "") for b in _flat_buttons(markup)]
+    assert "hist_nav:2026-04-13:all" in datas
+    assert not any(d == "hist_nav:2026-04-15:all" for d in datas)
+
+
+def test_history_page_truncates_long_button_title(fake_redis, monkeypatch):
+    from webhook.query_handlers import format_history_page
+    _patch_day(monkeypatch, [
+        {"id": "x", "title": "A" * 80, "type": "news", "status": "archived"},
     ])
-    text = format_history()
-    assert "1. 🗞️ Legacy — 14/abr" in text
-
-
-def test_history_truncates_long_title(fake_redis, monkeypatch):
-    from webhook.query_handlers import format_history
-    long_title = "A" * 80
-    _patch_archive(monkeypatch, [
-        {"id": "x", "title": long_title, "type": "news",
-         "archived_at": "2026-04-15T10:00:00+00:00"},
-    ])
-    text = format_history()
-    assert "A" * 60 + "…" in text
-    assert "A" * 61 not in text
-
-
-def test_history_escapes_markdown_in_title(fake_redis, monkeypatch):
-    from webhook.query_handlers import format_history, _escape_md
-    _patch_archive(monkeypatch, [
-        {"id": "x", "title": "Vale_Q2 *bonds*", "type": "news",
-         "archived_at": "2026-04-15T10:00:00+00:00"},
-    ])
-    text = format_history()
-    assert "*bonds*" not in text
-    assert "Vale_Q2" not in text
-    assert _escape_md("Vale_Q2 *bonds*") in text
+    _, markup = format_history_page("2026-04-14")
+    btn = [b for b in _flat_buttons(markup) if b.get("callback_data") == "hist_open:x"][0]
+    assert "A" * 40 + "…" in btn["text"]
+    assert "A" * 41 not in btn["text"]
 
 
 def test_escape_md_helper():

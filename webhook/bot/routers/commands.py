@@ -247,13 +247,30 @@ async def cmd_help(message: Message):
 
 @admin_router.message(Command("history"))
 async def cmd_history(message: Message):
+    """/history [DD/MM ou DD/MM/YYYY] — banco de notícias do dia (default hoje BRT)."""
+    date_iso = query_handlers.today_brt_iso()
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1:
+        arg = parts[1].strip()
+        parsed = None
+        for fmt in ("%d/%m/%Y", "%d/%m"):
+            try:
+                parsed = datetime.strptime(arg, fmt)
+                break
+            except ValueError:
+                continue
+        if parsed is None:
+            await message.answer("⚠️ Data inválida. Use `/history DD/MM` ou `/history DD/MM/YYYY`.")
+            return
+        year = parsed.year if parsed.year != 1900 else int(date_iso[:4])
+        date_iso = f"{year:04d}-{parsed.month:02d}-{parsed.day:02d}"
     try:
-        body = query_handlers.format_history()
+        body, markup = query_handlers.format_history_page(date_iso)
     except Exception as exc:
         logger.error(f"/history error: {exc}")
-        await message.answer("❌ Erro ao consultar arquivo.")
+        await message.answer("❌ Erro ao consultar o banco.")
         return
-    await message.answer(body)
+    await message.answer(body, reply_markup=markup)
 
 
 @admin_router.message(Command("stats"))

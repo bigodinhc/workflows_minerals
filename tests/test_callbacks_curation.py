@@ -346,3 +346,64 @@ async def test_curate_archive_aborts_when_supabase_fails(mock_callback_query):
         await cc.on_curate_action(query, cb, state)
 
     m_discard.assert_not_called()
+
+
+# ─── on_curate_action — fallback Supabase (item fora do staging) ─────────────
+
+@pytest.mark.asyncio
+async def test_curate_action_pipeline_falls_back_to_supabase(
+    mock_callback_query, fsm_context_in_state, mocker,
+):
+    """Item já enviado/expirado (fora do Redis) ainda pode ir pro Writer via banco."""
+    query = mock_callback_query(data="curate:pipeline:old1")
+    state = fsm_context_in_state()
+    item = {"title": "T", "fullText": "body", "publishDate": "2026-04-18", "source": "Platts"}
+    # ordem: get_staging → None, news_repo.get_by_id → item
+    mocker.patch("asyncio.to_thread", new=AsyncMock(side_effect=[None, item]))
+    mocker.patch("bot.routers.callbacks_curation.redis_queries.mark_pipeline_processed")
+    bot = AsyncMock()
+    bot.send_message = AsyncMock(return_value=mocker.MagicMock(message_id=99))
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=bot)
+    create_task = mocker.patch("asyncio.create_task")
+
+    await on_curate_action(query, CurateAction(action="pipeline", item_id="old1"), state)
+
+    query.answer.assert_awaited_with("🖋️ Enviando para o Writer...")
+    create_task.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_curate_action_pipeline_missing_everywhere_short_circuits(
+    mock_callback_query, fsm_context_in_state, mocker,
+):
+    query = mock_callback_query(data="curate:pipeline:gone")
+    state = fsm_context_in_state()
+    # get_staging → None, get_by_id → None
+    mocker.patch("asyncio.to_thread", new=AsyncMock(side_effect=[None, None]))
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
+    create_task = mocker.patch("asyncio.create_task")
+
+    await on_curate_action(query, CurateAction(action="pipeline", item_id="gone"), state)
+
+    query.answer.assert_awaited_with("⚠️ Item expirou")
+    create_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_curate_action_send_raw_falls_back_to_supabase(
+    mock_callback_query, fsm_context_in_state, mocker,
+):
+    query = mock_callback_query(data="curate:send_raw:old2")
+    state = fsm_context_in_state()
+    item = {"title": "Hdr", "fullText": "Body text"}
+    # ordem: get_staging → None, get_by_id → item, set_status, discard
+    to_thread = mocker.patch("asyncio.to_thread", new=AsyncMock(side_effect=[None, item, True, 1]))
+    mocker.patch("bot.routers.callbacks_curation.get_bot", return_value=AsyncMock())
+    mocker.patch("bot.routers.callbacks_curation.process_approval_async", new=AsyncMock())
+    create_task = mocker.patch("asyncio.create_task")
+
+    await on_curate_action(query, CurateAction(action="send_raw", item_id="old2"), state)
+
+    assert to_thread.await_count == 4
+    query.answer.assert_awaited_with("📲 Enviando para WhatsApp...")
+    create_task.assert_called_once()

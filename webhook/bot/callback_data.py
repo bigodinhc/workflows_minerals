@@ -176,3 +176,14 @@ class OneDriveDiscard(CallbackData, prefix="od_dc"):
 class ChannelJoinApproval(CallbackData, prefix="chjoin"):
     action: str  # approve, decline
     user_id: int
+
+
+class HistNav(CallbackData, prefix="hist_nav"):
+    """Navigate the news bank: change day or type filter."""
+    date: str  # ISO YYYY-MM-DD
+    flt: str = "all"  # 'all' | 'news' | 'rationale'
+
+
+class HistOpen(CallbackData, prefix="hist_open"):
+    """Open one news-bank item as a full card (read from Supabase)."""
+    item_id: str

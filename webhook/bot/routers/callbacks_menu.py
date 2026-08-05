@@ -41,7 +41,8 @@ async def on_menu_action(query: CallbackQuery, callback_data: MenuAction, state:
             pass
     elif target == "history":
         try:
-            await query.message.answer(query_handlers.format_history())
+            body, markup = query_handlers.format_history_page(query_handlers.today_brt_iso())
+            await query.message.answer(body, reply_markup=markup)
         except Exception:
             pass
     elif target == "rejections":

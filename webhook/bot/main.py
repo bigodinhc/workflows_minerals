@@ -33,6 +33,7 @@ from bot.routers.commands import public_router, admin_router, shared_router
 from bot.routers.callbacks_curation import callbacks_curation_router
 from bot.routers.callbacks_reports import callbacks_reports_router
 from bot.routers.callbacks_queue import callbacks_queue_router
+from bot.routers.callbacks_history import callbacks_history_router
 from bot.routers.callbacks_menu import callbacks_menu_router
 from bot.routers.callbacks_contacts import callbacks_contacts_router
 from bot.routers.callbacks_workflows import callbacks_workflows_router
@@ -99,6 +100,7 @@ def create_app() -> web.Application:
     dp.include_router(callbacks_curation_router)  # draft/curate/broadcast (specific filters first)
     dp.include_router(callbacks_reports_router)   # report navigation callbacks
     dp.include_router(callbacks_queue_router)      # queue navigation callbacks
+    dp.include_router(callbacks_history_router)    # news bank (/history) callbacks
     dp.include_router(callbacks_menu_router)       # main menu switchboard
     dp.include_router(callbacks_contacts_router)   # contact admin callbacks
     dp.include_router(callbacks_workflows_router)  # workflow trigger + nop callbacks

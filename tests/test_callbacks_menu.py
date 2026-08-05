@@ -126,7 +126,6 @@ async def test_menu_action_add_sets_fsm_add_contact_state(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("target,handler_fn", [
-    ("history", "format_history"),
     ("rejections", "format_rejections"),
     ("help", "format_help"),
 ])
@@ -144,3 +143,21 @@ async def test_menu_action_query_handlers_targets_swallow_errors(
     await on_menu_action(query, MenuAction(target=target), state)
 
     query.message.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_menu_action_history_sends_paged_bank_view(
+    mock_callback_query, fsm_context_in_state, mocker,
+):
+    query = mock_callback_query(chat_id=100)
+    state = fsm_context_in_state()
+    mocker.patch(
+        "bot.routers.callbacks_menu.query_handlers.format_history_page",
+        return_value=("body", {"inline_keyboard": []}),
+    )
+
+    await on_menu_action(query, MenuAction(target="history"), state)
+
+    query.message.answer.assert_awaited_once_with(
+        "body", reply_markup={"inline_keyboard": []},
+    )

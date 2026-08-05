@@ -205,3 +205,12 @@ def test_mark_pipeline_processed_applies_ttl(fake_redis):
     mark_pipeline_processed("x", "2026-04-15")
     ttl = fake_redis.ttl("platts:pipeline:processed:2026-04-15")
     assert 2 * 24 * 3600 - 10 <= ttl <= 2 * 24 * 3600
+
+
+def test_list_news_by_day_delegates_to_news_repo():
+    import redis_queries
+    with patch("redis_queries.news_repo.list_by_day",
+               return_value=[{"id": "a", "title": "T", "status": "archived"}]) as m:
+        out = redis_queries.list_news_by_day("2026-08-05", "rationale")
+    m.assert_called_once_with("2026-08-05", type_filter="rationale", limit=50)
+    assert out[0]["id"] == "a"

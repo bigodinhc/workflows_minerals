@@ -77,6 +77,11 @@ def list_archive_recent(limit: int = 10) -> list[dict]:
     return news_repo.list_by_status("archived", limit=limit)
 
 
+def list_news_by_day(date_iso: str, type_filter=None, limit: int = 50) -> list[dict]:
+    """Return the news bank for one BRT day (any status) from Supabase."""
+    return news_repo.list_by_day(date_iso, type_filter=type_filter, limit=limit)
+
+
 def _feedback_key(feedback_id: str) -> str:
     return f"webhook:feedback:{feedback_id}"
 

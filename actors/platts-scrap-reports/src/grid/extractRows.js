@@ -1,34 +1,29 @@
 import { log } from 'crawlee';
 
+import { REPORT_COLUMNS } from './columns.js';
+import { scrapeRowsFromDom } from './scrapeRows.js';
+
 /**
  * Extract metadata for every data row in the AG-Grid.
  * Returns objects with { reportName, reportTitle, frequency, coverDate, publishedDate, rowIndex }.
  * `rowIndex` is AG-Grid's `row-index` attr (starts at 0) — used later by capturePdf to re-locate the row.
+ *
+ * Throws if rows render but none carry a report name: that means Platts renamed
+ * the columns again, and a silent [] would look identical to "nothing published
+ * today". Failing here surfaces as cron_crashed + a red run.
  */
 export async function extractRows(page) {
-    // Query uniquely by row-index so we de-dupe across pinned containers (AG-Grid
-    // may mirror the same row in left/center/right containers — same row-index).
-    const rows = await page.evaluate(() => {
-        const cellText = (rowIndex, colId) => {
-            const cell = document.querySelector(`.ag-row[row-index="${rowIndex}"] .ag-cell[col-id="${colId}"]`);
-            return cell ? cell.innerText.trim() : '';
-        };
-        // Collect unique row-index values present on data rows
-        const indices = new Set();
-        document.querySelectorAll('.ag-row').forEach((r) => {
-            const idx = r.getAttribute('row-index');
-            if (idx !== null) indices.add(idx);
-        });
-        const sorted = Array.from(indices).map(Number).sort((a, b) => a - b);
-        return sorted.map((i) => ({
-            rowIndex: i,
-            reportName: cellText(i, 'reportName'),
-            reportTitle: cellText(i, 'reportTitle'),
-            frequency: cellText(i, 'frequency'),
-            coverDate: cellText(i, 'formattedCoverDate'),
-            publishedDate: cellText(i, 'publisheddate'),
-        }));
-    });
-    log.info(`Extracted ${rows.length} rows`);
-    return rows.filter((r) => r.reportName); // drop rows with no name (shouldn't happen, defensive)
+    const { rows, colIdsSeen } = await page.evaluate(scrapeRowsFromDom, { columns: REPORT_COLUMNS });
+    const named = rows.filter((r) => r.reportName);
+
+    log.info(`Extracted ${rows.length} rows (${named.length} named)`);
+
+    if (rows.length > 0 && named.length === 0) {
+        throw new Error(
+            `Grid layout changed: ${rows.length} row(s) rendered but none matched `
+                + `col-id "${REPORT_COLUMNS.reportName}". Col-ids present: ${colIdsSeen.join(', ') || '(none)'}`,
+        );
+    }
+
+    return named;
 }

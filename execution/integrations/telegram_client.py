@@ -1,8 +1,37 @@
 
 import os
+import re
 import requests
 import json
 from ..core.logger import WorkflowLogger
+
+_BOT_TOKEN_IN_URL = re.compile(r"/bot\d+:[A-Za-z0-9_-]+")
+
+
+def _redact_token(text):
+    """Mask the bot token in API URLs. requests puts the full URL in HTTPError
+    messages, which would otherwise print the token into CI logs."""
+    return _BOT_TOKEN_IN_URL.sub("/bot***", str(text))
+
+
+def _describe_response(exc):
+    """Pull Telegram's own explanation out of a failed response.
+
+    raise_for_status() fires before anyone reads the body, but the body is
+    where the actual reason lives — "can't parse entities: ..." rather than a
+    bare "400 Client Error". Without this, a broken alert looks identical to
+    a broken chat id.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return ""
+    try:
+        detail = response.json().get("description")
+    except (ValueError, AttributeError):
+        detail = None
+    if not detail:
+        detail = (getattr(response, "text", "") or "")[:200]
+    return f" — {detail}" if detail else ""
 
 class TelegramClient:
     """
@@ -61,9 +90,11 @@ class TelegramClient:
                 return None
                 
         except Exception as e:
-            self.logger.error(f"Failed to send message: {e}")
+            self.logger.error(
+                f"Failed to send message: {_redact_token(e)}{_describe_response(e)}"
+            )
             raise
-    
+
     def send_approval_request(self, draft_id, preview_text, chat_id=None):
         """
         Send a message with Approve/Reject inline buttons.

@@ -392,6 +392,9 @@ def test_with_event_bus_record_crash_exception_does_not_propagate(monkeypatch):
         broken_main()
 
 
+_UNSET = object()  # distinguishes "parse_mode not passed" from "passed as None"
+
+
 class _FakeTelegramClient:
     """Captures send_message / edit_message_text calls with auto-incrementing message_ids."""
 
@@ -401,7 +404,7 @@ class _FakeTelegramClient:
         self._next_id = 100
 
     def send_message(self, text, chat_id=None, **kwargs):
-        self.sends.append({"text": text, "chat_id": chat_id})
+        self.sends.append({"text": text, "chat_id": chat_id, "parse_mode": kwargs.get("parse_mode", _UNSET)})
         mid = self._next_id
         self._next_id += 1
         return mid
@@ -778,3 +781,97 @@ def test_emit_with_explicit_label_keeps_it(monkeypatch):
     bus.emit("cron_heartbeat", label="")
     assert captured[1]["event"] == "cron_heartbeat"
     assert captured[1]["label"] == "cron_heartbeat"
+
+
+# --- _MainChatSink must not ask Telegram to parse Markdown -------------------
+# Crash alerts embed raw error text: underscores, brackets, braces, backticks.
+# Sent with parse_mode="Markdown" (the telegram_client default), Telegram
+# rejects the message with HTTP 400 and the alert is silently lost — precisely
+# when it matters most. Observed on baltic_ingestion runs 32973646283 and
+# 33088959541 (2026-08-26/27): "event_bus sink _MainChatSink failed: 400".
+# The sibling _EventsChannelSink already passes parse_mode=None.
+
+def _wire_main_chat(monkeypatch, fake_client):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.delenv("TELEGRAM_EVENTS_CHANNEL_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "4242")
+    from execution.core import event_bus as eb
+    monkeypatch.setattr(eb, "_build_telegram_client", lambda: fake_client)
+    return eb
+
+
+def test_main_chat_sink_disables_markdown_parsing(monkeypatch):
+    fake = _FakeTelegramClient()
+    eb = _wire_main_chat(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="platts_reports")
+    bus.emit("cron_crashed", label="Error: bad_thing", level="error")
+
+    assert len(fake.sends) == 1
+    assert fake.sends[0]["parse_mode"] is None, (
+        "must pass parse_mode=None explicitly; inheriting the Markdown default "
+        "makes Telegram reject alerts containing error text"
+    )
+
+
+def test_main_chat_sink_delivers_alert_text_with_markdown_metacharacters(monkeypatch):
+    """The real message that broke: an actor error naming a col-id with a
+    double underscore, which Markdown reads as an italic delimiter."""
+    fake = _FakeTelegramClient()
+    eb = _wire_main_chat(monkeypatch, fake)
+
+    hostile = 'Error: Grid layout changed: col-ids present: __coverDateOriginal, [Action] *x* `y` _z'
+    bus = eb.EventBus(workflow="platts_reports")
+    bus.emit("cron_crashed", label=hostile, level="error")
+
+    assert len(fake.sends) == 1
+    sent = fake.sends[0]
+    assert sent["parse_mode"] is None
+    # Text goes out verbatim — no escaping, no stripping.
+    assert "__coverDateOriginal" in sent["text"]
+    assert "[Action] *x* `y` _z" in sent["text"]
+
+
+def test_main_chat_sink_still_routes_to_the_operator_chat(monkeypatch):
+    """Guard against the parse_mode fix accidentally changing the target."""
+    fake = _FakeTelegramClient()
+    eb = _wire_main_chat(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="watchdog")
+    bus.emit("cron_missed", label="daily_report", level="warn")
+
+    assert fake.sends[0]["chat_id"] == "4242"
+
+
+def test_main_chat_sink_text_always_carries_an_unpaired_underscore(monkeypatch):
+    """The actual trigger, and why the bug is content-independent.
+
+    _format always appends "run_id: <id>". That lone underscore is an
+    unterminated italic entity in Telegram's legacy Markdown, so the API
+    rejects the message before it even resolves the chat. Verified against
+    the live API with the exact production text:
+
+        parse_mode=Markdown -> "can't parse entities: Can't find end of the
+                                entity starting at byte offset 49"
+        no parse_mode       -> "chat not found" (i.e. parsing was fine)
+
+    Byte 49 is the underscore in "run_id". So every main-chat alert failed,
+    whatever the error said — including the watchdog's cron_missed, which
+    means liveness alerting was dead too.
+
+    _format already does workflow.upper().replace("_", " "), so the same bug
+    was spotted once in the title and fixed only halfway.
+    """
+    fake = _FakeTelegramClient()
+    eb = _wire_main_chat(monkeypatch, fake)
+
+    bus = eb.EventBus(workflow="platts_reports")
+    bus.emit("cron_missed", label="texto limpo, sem metacaractere nenhum", level="warn")
+
+    sent = fake.sends[0]
+    assert "run_id:" in sent["text"]
+    assert sent["text"].count("_") % 2 == 1, "unpaired underscore is what breaks Markdown"
+    assert sent["parse_mode"] is None

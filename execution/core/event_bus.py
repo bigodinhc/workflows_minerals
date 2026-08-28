@@ -208,7 +208,11 @@ class _MainChatSink:
         if client is None:
             return
         text = self._format(event_dict)
-        client.send_message(text=text, chat_id=self._chat_id)
+        # parse_mode=None on purpose: this text embeds raw error strings, and
+        # Markdown parsing makes Telegram reject the whole message with a 400 —
+        # dropping the alert exactly when something has gone wrong. Mirrors
+        # _EventsChannelSink below.
+        client.send_message(text=text, chat_id=self._chat_id, parse_mode=None)
 
     @staticmethod
     def _format(event_dict: dict) -> str:

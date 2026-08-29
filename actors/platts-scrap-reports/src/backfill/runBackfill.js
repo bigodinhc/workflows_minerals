@@ -99,6 +99,20 @@ async function backfillPublication(publication, deps, acc) {
         });
         const response = await deps.api.searchArchive(payload);
         const pagination = paginationOf(response);
+        // paginationOf normaliza campo ausente para 0, o que apaga a diferenca entre
+        // "a API disse zero" e "a API mudou de formato". Na primeira pagina exigimos
+        // reconhecer o envelope: sem isso, um rename completo (Items + TotalPages +
+        // TotalRecordCount) deixa os dois guards mudos e o run fecha verde com zero.
+        if (page === 1) {
+            const announced = Number(response?.TotalRecordCount);
+            const recognized = Array.isArray(response?.Items) && Number.isFinite(announced);
+            if (!recognized) {
+                throw new ZeroYieldError(
+                    `Unrecognized blendedsearch envelope for "${publication}": expected an Items array and a numeric `
+                    + 'TotalRecordCount. The response shape changed.',
+                );
+            }
+        }
         totalPages = pagination.totalPages;
         // Math.max, nao atribuicao: se uma pagina vier com o envelope malformado,
         // totalRecords zeraria e o guard abaixo ficaria cego justamente no caso
@@ -168,11 +182,17 @@ export async function runBackfill(deps) {
     const touched = summary.downloaded.length + summary.skipped.length;
     const anyFailure = summary.errors.length > 0;
     if (deps.publications.length > 0 && touched === 0 && anyFailure) {
-        throw new ZeroYieldError(
+        // Anexa o summary ao erro: um run que falhou por inteiro ainda coletou
+        // entradas de stage 'download' e 'dedup' pelo caminho, e descarta-las
+        // so porque o run inteiro nao rendeu nada jogaria fora o diagnostico
+        // exato de que o chamador vai precisar.
+        const error = new ZeroYieldError(
             `Zero yield for the whole run: ${deps.publications.length} publication(s) processed, but nothing was `
-            + 'downloaded and nothing was skipped as already-stored. Either every listing failed, or the response '
-            + 'shape changed in a way the per-publication guard cannot see.',
+            + 'downloaded and nothing was skipped as already-stored. Every publication either failed to list or '
+            + 'produced nothing usable.',
         );
+        error.summary = summary;
+        throw error;
     }
 
     summary.durationMs = deps.now() - startedAt;

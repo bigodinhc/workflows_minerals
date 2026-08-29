@@ -212,6 +212,25 @@ describe('runBackfill', () => {
         expect(summary.type).toBe('partial');
     });
 
+
+    it('lanca quando o envelope da primeira pagina nao e reconhecido', async () => {
+        const d = deps({ api: {
+            searchArchive: vi.fn(async () => ({ data: [], meta: { total: 249 } })),
+            fetchPdf: vi.fn(),
+        } });
+
+        await expect(runBackfill(d)).rejects.toThrow(/unrecognized/i);
+    });
+
+    it('lanca quando TotalRecordCount vem nao-numerico', async () => {
+        const d = deps({ api: {
+            searchArchive: vi.fn(async () => ({ Items: [], TotalPages: 1, TotalRecordCount: '249 records', Page: 1 })),
+            fetchPdf: vi.fn(),
+        } });
+
+        await expect(runBackfill(d)).rejects.toThrow(/unrecognized/i);
+    });
+
     it('não engole o ZeroYieldError no catch por publicação', async () => {
         const d = deps({
             publications: ['A', 'B'],

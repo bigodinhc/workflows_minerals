@@ -8,7 +8,7 @@ const TG_API = 'https://api.telegram.org/bot';
  *
  * Sem botão por relatório: novecentos botões inline estouram o limite do
  * Telegram e não serviriam para nada. Sem marcação Markdown, porque o texto
- * carrega nomes de publicação e mensagens de erro cruas — o mesmo 400 que
+ * carrega nomes de publicação e labels de etapa — o mesmo 400 que
  * derrubou os alertas do _MainChatSink por um mês.
  */
 export function buildBackfillSummaryText(summary) {

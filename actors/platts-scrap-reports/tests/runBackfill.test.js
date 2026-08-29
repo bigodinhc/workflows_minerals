@@ -132,6 +132,18 @@ describe('runBackfill', () => {
         expect(summary.downloaded).toHaveLength(0);
     });
 
+    it('dispara o guard de todas-zero numa UNICA publicacao quando a lista veio do input', async () => {
+        const d = deps({
+            publicationsFromInput: true,
+            api: {
+                searchArchive: vi.fn(async () => ({ Items: [], TotalPages: 0, TotalRecordCount: 0, Page: 1 })),
+                fetchPdf: vi.fn(),
+            },
+        });
+
+        await expect(runBackfill(d)).rejects.toThrow(ZeroYieldError);
+    });
+
     it('segue para a próxima publicação quando uma falha ao listar', async () => {
         const searchArchive = vi.fn()
             .mockRejectedValueOnce(new Error('rede caiu'))
@@ -191,7 +203,10 @@ describe('runBackfill', () => {
             },
         });
 
-        await expect(runBackfill(d)).rejects.toThrow(/whole run/i);
+        const error = await runBackfill(d).catch((e) => e);
+        expect(error).toMatchObject({ name: 'ZeroYieldError' });
+        expect(error.message).toMatch(/whole run/i);
+        expect(error.summary.type).toBe('error');
     });
 
     it('nao lanca quando tudo foi pulado por dedup — re-run legitimo', async () => {
@@ -312,6 +327,7 @@ describe('runBackfill', () => {
         expect(error).toBeInstanceOf(ZeroYieldError);
         expect(error.summary).toBeDefined();
         expect(error.summary.publications).toHaveLength(2);
+        expect(error.summary.type).toBe('error');
     });
 
     it('uma UNICA publicacao vazia entre varias nao dispara o guard de todas-zero', async () => {

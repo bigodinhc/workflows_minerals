@@ -167,19 +167,21 @@ async function run() {
             uploadPdf,
             dryRun,
             now: () => Date.now(),
+            publicationsFromInput: backfillPublications.length > 0,
         });
 
         Object.assign(summary, backfillSummary);
         summary.reportTypes = [reportType]; // o dataset dizia "Research Reports" tambem; backfill so faz Market Reports
-        await Actor.pushData(summary);
         if (!dryRun) {
             try {
                 await sendBackfillSummary(TG_TOKEN, TG_CHAT, backfillSummary);
             } catch (e) {
                 log.warning(`Telegram summary failed: ${e.message}`);
                 summary.errors.push({ stage: 'telegram-summary', message: e.message });
+                summary.type = 'partial';
             }
         }
+        await Actor.pushData(summary);
         return;
     }
 

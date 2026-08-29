@@ -1,5 +1,8 @@
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Tamanho de página padrão do blendedsearch — usado tanto no payload quanto no guard de paginação do backfill. */
+export const PAGE_SIZE = 50;
+
 /**
  * Converte duas datas YYYY-MM-DD numa janela ISO fechada nos dois extremos.
  * CoverDate é meia-noite UTC, então este intervalo captura exatamente as
@@ -25,7 +28,7 @@ export function buildSearchPayload({
     fromDate,
     toDate,
     page = 1,
-    pageSize = 50,
+    pageSize = PAGE_SIZE,
 }) {
     return {
         sector: [], geography: [], brand: [], commodity: [],

@@ -1,7 +1,7 @@
 import { log } from 'crawlee';
 
 import { paginationOf, parseItems } from '../api/parseItems.js';
-import { buildSearchPayload } from '../api/searchPayload.js';
+import { buildSearchPayload, PAGE_SIZE } from '../api/searchPayload.js';
 import { describeFileFormat } from '../download/capturePdf.js';
 import { applyExcludeFilter } from '../filters/applyFilters.js';
 import { mapLimit } from '../util/concurrency.js';
@@ -153,9 +153,9 @@ async function backfillPublication(publication, deps, acc) {
     // Um warning sozinho nao barra nada: se TotalPages vier ausente ou errado
     // (ex.: 249 registros anunciados, TotalPages 1), o laco sai apos a
     // pagina 1, `processed` fica em 50, e como processed > 0 nenhum guard
-    // dispara — um run "success" que coletou 20% dos dados. pageSize e fixo
-    // em 50 (ver buildSearchPayload); expectedPages deriva disso.
-    const expectedPages = Math.ceil(totalRecords / 50);
+    // dispara — um run "success" que coletou 20% dos dados. PAGE_SIZE vem de
+    // buildSearchPayload (ver searchPayload.js); expectedPages deriva disso.
+    const expectedPages = Math.ceil(totalRecords / PAGE_SIZE);
     if (totalRecords > 0 && totalPages < expectedPages) {
         acc.errors.push({
             stage: 'pagination',
@@ -207,11 +207,18 @@ export async function runBackfill(deps) {
     // contentType/isArchived seleciona produzem listagens limpas — zero
     // registros, zero erros — e um run verde que baixou zero PDFs. UMA
     // publicacao legitimamente vazia e normal (ex.: relatorio novo, sem
-    // historico no periodo); TODAS as publicacoes anunciando zero ao longo
-    // de uma janela de doze meses nao e — por isso o guard exige mais de uma
-    // publicacao antes de desconfiar.
+    // historico no periodo) quando a lista vem do grid; TODAS as publicacoes
+    // anunciando zero nao e. Por isso o guard exige mais de uma publicacao
+    // antes de desconfiar de uma lista derivada do grid — a menos que a
+    // lista tenha vindo digitada pelo operador, caso em que ate uma unica
+    // publicacao zerada ja e sinal de erro (ver `publicationsFromInput`).
     const listed = summary.publications;
-    if (listed.length > 1 && listed.every((p) => p.totalRecords === 0)) {
+    const allZero = listed.length > 0 && listed.every((p) => p.totalRecords === 0);
+    // Lista vinda do grid pode conter publicacao sem historico na janela — isso e legitimo.
+    // Lista digitada pelo operador nao: ele nomeou a publicacao E a janela, entao zero e erro dele.
+    if (allZero && (listed.length > 1 || deps.publicationsFromInput)) {
+        summary.type = 'error';
+        summary.durationMs = deps.now() - startedAt;
         const error = new ZeroYieldError(
             'Every publication announced zero records — check the date window and the publication names.',
         );
@@ -234,6 +241,8 @@ export async function runBackfill(deps) {
     const touched = summary.downloaded.length + summary.skipped.length + summary.would_download.length;
     const anyFailure = summary.errors.length > 0;
     if (deps.publications.length > 0 && touched === 0 && anyFailure) {
+        summary.type = 'error';
+        summary.durationMs = deps.now() - startedAt;
         // Anexa o summary ao erro: um run que falhou por inteiro ainda coletou
         // entradas de stage 'download' e 'dedup' pelo caminho, e descarta-las
         // so porque o run inteiro nao rendeu nada jogaria fora o diagnostico

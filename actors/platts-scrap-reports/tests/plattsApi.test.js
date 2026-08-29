@@ -101,9 +101,18 @@ describe('playwrightRequest', () => {
     });
 
     it('descarta o response do Playwright (body + dispose) para nao acumular memoria', async () => {
-        const dispose = vi.fn(async () => {});
+        // `disposed` pina a ordem: uma vez chamado dispose(), body() deve
+        // rejeitar — igual ao APIRequestContext real do Playwright. Sem isso,
+        // trocar a ordem em `wrap` (dispose antes de body) deixaria este
+        // teste verde mesmo quebrando toda request em runtime.
+        let disposed = false;
+        const dispose = vi.fn(async () => { disposed = true; });
+        const body = vi.fn(async () => {
+            if (disposed) throw new Error('Response has been disposed');
+            return Buffer.from('x');
+        });
         const ctx = { request: {
-            post: async () => ({ status: () => 200, body: async () => Buffer.from('x'), dispose }),
+            post: async () => ({ status: () => 200, body, dispose }),
             get: vi.fn(),
         } };
         const request = playwrightRequest(ctx);
@@ -111,6 +120,7 @@ describe('playwrightRequest', () => {
         await request.post('u', { headers: {}, data: {} });
 
         expect(dispose).toHaveBeenCalledTimes(1);
+        expect(body).toHaveBeenCalledTimes(1);
     });
 });
 

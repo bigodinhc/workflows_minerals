@@ -33,8 +33,14 @@ describe('parseItems', () => {
 
     it('descarta item sem PDF no PublicationGrouping', () => {
         const rows = parseItems(fixture);
-        expect(rows).toHaveLength(2);
-        expect(rows.map((r) => r.dateKey)).toEqual(['2026-08-27', '2026-08-26']);
+        expect(rows).toHaveLength(3);
+        expect(rows.map((r) => r.dateKey)).toEqual(['2026-08-27', '2026-08-26', '2026-08-24']);
+    });
+
+    it('escolhe o PDF mesmo quando o XML vem primeiro no grouping', () => {
+        const row = parseItems(fixture).find((r) => r.dateKey === '2026-08-24');
+        expect(row.id).toBe('9888c6f0-2f05-43b5-ba09-37ef4c94f33a');
+        expect(row.fileName).toBe('SPR_20260824.pdf');
     });
 
     it('normaliza os campos que o upload precisa', () => {

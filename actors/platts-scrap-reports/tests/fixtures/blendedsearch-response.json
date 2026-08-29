@@ -44,6 +44,21 @@
       "PackageShortCode": "SPR",
       "CoverDate": "2026-08-25T00:00:00.000Z",
       "UpdatedDate": "2026-08-25T21:40:29Z"
+    },
+    {
+      "Name": "SPR_20260824.pdf",
+      "ReportName": "Steel Price Report",
+      "ReportType": "MARKET REPORT",
+      "MimeType": "application/pdf",
+      "PublicationGrouping": [
+        { "Id": "b9d15f38-bab3-41eb-8214-5855fc088dfa", "MimeType": "application/xml", "Name": "SPR_20260824_TopicMerge.xml" },
+        { "Id": "9888c6f0-2f05-43b5-ba09-37ef4c94f33a", "MimeType": "application/pdf", "Name": "SPR_20260824.pdf" }
+      ],
+      "Frequency": "Daily",
+      "Language": "English",
+      "PackageShortCode": "SPR",
+      "CoverDate": "2026-08-24T00:00:00.000Z",
+      "UpdatedDate": "2026-08-24T21:39:00Z"
     }
   ],
   "TotalPages": 5,

@@ -62,6 +62,20 @@ describe('attachAuthCapture', () => {
 
         expect(state.headers.appkey).toBe('realtime');
     });
+
+    it('ignora URL de outro host que apenas contem api.platts.com como substring', () => {
+        const page = fakePage();
+        const state = attachAuthCapture(page);
+        page.fire(req('https://evil.example.com/?next=api.platts.com', { authorization: 'Bearer intruso' }));
+        expect(state.headers).toBeNull();
+    });
+
+    it('ignora URL malformada sem lancar', () => {
+        const page = fakePage();
+        const state = attachAuthCapture(page);
+        expect(() => page.fire(req('not-a-url', { authorization: 'Bearer x' }))).not.toThrow();
+        expect(state.headers).toBeNull();
+    });
 });
 
 describe('waitForAuth', () => {

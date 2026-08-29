@@ -1,6 +1,18 @@
 const API_HOST = 'api.platts.com';
 
 /**
+ * Checks if a URL belongs to the Platts API by comparing the hostname exactly.
+ * Returns false without throwing for malformed URLs.
+ */
+function isPlattsApi(url) {
+    try {
+        return new URL(url).hostname === API_HOST;
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Escuta o tráfego da página e guarda os headers de autenticação da primeira
  * chamada à API do Platts.
  *
@@ -14,7 +26,7 @@ export function attachAuthCapture(page) {
     const state = { headers: null };
 
     page.on('request', (request) => {
-        if (!request.url().includes(API_HOST)) return;
+        if (!isPlattsApi(request.url())) return;
         const headers = request.headers();
         if (!headers.authorization) return;
 

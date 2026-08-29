@@ -56,11 +56,20 @@ describe('mapLimit', () => {
 
     it('para de puxar trabalho novo depois de uma rejeicao', async () => {
         const started = [];
-        await expect(mapLimit([1, 2, 3, 4, 5, 6], 1, async (n) => {
+        const fn = async (n) => {
             started.push(n);
             if (n === 2) throw new Error('estourou no 2');
+            await new Promise((resolve) => { setTimeout(resolve, 5); });
             return n;
-        })).rejects.toThrow('estourou no 2');
+        };
+
+        await expect(mapLimit([1, 2, 3, 4, 5, 6], 2, fn)).rejects.toThrow('estourou no 2');
+
+        // Deixa o event loop drenar. Sem a flag, o worker sobrevivente continuaria
+        // puxando itens DEPOIS que o Promise.all ja rejeitou — e e exatamente isso
+        // que este teste precisa conseguir enxergar.
+        await new Promise((resolve) => { setTimeout(resolve, 50); });
+
         expect(started).toEqual([1, 2]);
     });
 });

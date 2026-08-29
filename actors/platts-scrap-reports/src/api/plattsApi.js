@@ -10,11 +10,21 @@ const defaultSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms);
  * um objeto simples, que é o que os testes conseguem fingir.
  */
 export function playwrightRequest(ctx) {
-    const wrap = async (response) => ({
-        status: response.status(),
-        json: () => response.json(),
-        body: () => response.body(),
-    });
+    // O APIRequestContext do Playwright é de longa duração (vive até o
+    // contexto do browser fechar, no fim do run inteiro) e buffera cada
+    // corpo de resposta até dispose() ser chamado. Sem isso, ~900 downloads
+    // de PDF ficam todos residentes em memória ao mesmo tempo e o run morre
+    // de OOM. Bufferiza aqui, imediatamente, e descarta — inclusive nas
+    // respostas de erro (401/429/5xx) que send() nunca chega a ler.
+    const wrap = async (response) => {
+        const buffer = await response.body();
+        await response.dispose();
+        return {
+            status: response.status(),
+            body: () => buffer,
+            json: () => JSON.parse(buffer.toString('utf8')),
+        };
+    };
     return {
         post: async (url, { headers, data }) => wrap(await ctx.request.post(url, { headers, data })),
         get: async (url, { headers }) => wrap(await ctx.request.get(url, { headers })),

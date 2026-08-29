@@ -80,9 +80,15 @@ describe('renovação de token', () => {
 
 describe('playwrightRequest', () => {
     it('achata os métodos status() e body() do Playwright em campos simples', async () => {
+        const postDispose = vi.fn(async () => {});
+        const getDispose = vi.fn(async () => {});
         const ctx = { request: {
-            post: async () => ({ status: () => 200, json: async () => ({ ok: 1 }), body: async () => Buffer.from('x') }),
-            get: async () => ({ status: () => 404, json: async () => ({}), body: async () => Buffer.from('') }),
+            post: async () => ({
+                status: () => 200, body: async () => Buffer.from(JSON.stringify({ ok: 1 })), dispose: postDispose,
+            }),
+            get: async () => ({
+                status: () => 404, body: async () => Buffer.from('{}'), dispose: getDispose,
+            }),
         } };
         const request = playwrightRequest(ctx);
 
@@ -92,6 +98,19 @@ describe('playwrightRequest', () => {
 
         const got = await request.get('u', { headers: {} });
         expect(got.status).toBe(404);
+    });
+
+    it('descarta o response do Playwright (body + dispose) para nao acumular memoria', async () => {
+        const dispose = vi.fn(async () => {});
+        const ctx = { request: {
+            post: async () => ({ status: () => 200, body: async () => Buffer.from('x'), dispose }),
+            get: vi.fn(),
+        } };
+        const request = playwrightRequest(ctx);
+
+        await request.post('u', { headers: {}, data: {} });
+
+        expect(dispose).toHaveBeenCalledTimes(1);
     });
 });
 

@@ -51,7 +51,12 @@ describe('parseItems', () => {
             dateKey: '2026-08-27',
             frequency: 'Daily',
             coverDate: '2026-08-27T00:00:00.000Z',
+            updatedDate: '2026-08-27T21:54:13Z',
         });
+    });
+
+    it('traz o UpdatedDate da API para published_date nao ficar null', () => {
+        expect(parseItems(fixture)[0].updatedDate).toBe('2026-08-27T21:54:13Z');
     });
 
     it('devolve lista vazia quando não há Items', () => {
@@ -67,5 +72,12 @@ describe('paginationOf', () => {
 
     it('assume zero páginas quando a resposta não traz os campos', () => {
         expect(paginationOf({})).toEqual({ page: 1, totalPages: 0, totalRecords: 0 });
+    });
+
+    it('coage TotalRecordCount nao-numerico numa pagina POSTERIOR em vez de propagar NaN', () => {
+        // Pagina 1 legitima; pagina 2 chega com o envelope malformado — o
+        // mesmo defeito que so era pego quando acontecia na pagina 1.
+        expect(paginationOf({ Page: 2, TotalPages: 5, TotalRecordCount: '249 records' }))
+            .toEqual({ page: 2, totalPages: 5, totalRecords: 0 });
     });
 });

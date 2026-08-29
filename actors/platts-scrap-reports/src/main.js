@@ -123,16 +123,37 @@ async function run() {
         log.info(`Backfill ${backfillFrom}..${backfillTo} over ${publications.length} publication(s)`);
 
         const { fromDate, toDate } = isoWindow(backfillFrom, backfillTo);
+        // Refresh não é serializado por padrão: em concorrência 3, um token
+        // expirando faz os três workers baterem 401 quase juntos, e dois ou
+        // três page.goto() concorrentes na mesma page fazem o Playwright
+        // abortar os perdedores. Single-flight: quem chega primeiro dispara
+        // o refresh de verdade, os demais esperam a mesma promise. Em falha,
+        // restaura os headers antigos — do contrário um worker lendo
+        // auth.headers() enquanto ela é null manda `{...null, 'content-type':
+        // ...}`, ou seja, sem header de autorização nenhum.
+        let refreshing = null;
+        const auth = {
+            headers: () => authState.headers,
+            refresh: async () => {
+                if (!refreshing) {
+                    refreshing = (async () => {
+                        const stale = authState.headers;
+                        authState.headers = null;
+                        try {
+                            await navigateGrid(page, reportType);
+                            await waitForAuth(authState);
+                        } catch (e) {
+                            authState.headers = stale;
+                            throw e;
+                        }
+                    })().finally(() => { refreshing = null; });
+                }
+                await refreshing;
+            },
+        };
         const api = createPlattsApi({
             request: playwrightRequest(ctx),
-            auth: {
-                headers: () => authState.headers,
-                refresh: async () => {
-                    authState.headers = null;
-                    await navigateGrid(page, reportType);
-                    await waitForAuth(authState);
-                },
-            },
+            auth,
         });
 
         const backfillSummary = await runBackfill({
@@ -149,8 +170,16 @@ async function run() {
         });
 
         Object.assign(summary, backfillSummary);
-        if (!dryRun) await sendBackfillSummary(TG_TOKEN, TG_CHAT, backfillSummary);
+        summary.reportTypes = [reportType]; // o dataset dizia "Research Reports" tambem; backfill so faz Market Reports
         await Actor.pushData(summary);
+        if (!dryRun) {
+            try {
+                await sendBackfillSummary(TG_TOKEN, TG_CHAT, backfillSummary);
+            } catch (e) {
+                log.warning(`Telegram summary failed: ${e.message}`);
+                summary.errors.push({ stage: 'telegram-summary', message: e.message });
+            }
+        }
         return;
     }
 
@@ -265,6 +294,9 @@ try {
 } catch (err) {
     const errName = err?.name ?? 'UnknownError';
     const errMsg = err?.message ?? String(err ?? '');
+    if (err?.summary) {
+        try { await Actor.pushData(err.summary); } catch { /* best effort */ }
+    }
     await bus.emit('cron_crashed', {
         label: `${errName}: ${errMsg.slice(0, 100)}`,
         detail: {

@@ -12,6 +12,7 @@ function pageOf(publication, dates, { totalPages = 1, totalRecords = dates.lengt
             Name: `${d}.pdf`,
             ReportName: publication,
             CoverDate: `${d}T00:00:00.000Z`,
+            UpdatedDate: `${d}T21:54:13Z`,
             Frequency: 'Daily',
             PublicationGrouping: [{ Id: `id-${d}`, MimeType: 'application/pdf', Name: `${d}.pdf` }],
         })),
@@ -61,6 +62,7 @@ describe('runBackfill', () => {
             dateKey: '2025-01-02',
             reportName: 'Steel Price Report',
             reportType: 'Market Reports',
+            publishedDate: '2025-01-02T21:54:13Z',
         });
     });
 
@@ -267,6 +269,63 @@ describe('runBackfill', () => {
         expect(d.isAlreadyStored).toHaveBeenCalledTimes(2);
         expect(summary.skipped).toHaveLength(2);
         expect(d.api.fetchPdf).not.toHaveBeenCalled();
+    });
+
+    it('registra erro de paginacao quando TotalPages fica aquem do esperado por TotalRecordCount', async () => {
+        // 249 registros anunciados pedem 5 paginas (pageSize 50); TotalPages
+        // diz 1. O laco sai apos a pagina 1 com processed=2 (>0), entao nenhum
+        // guard de zero-yield disparava antes desta correcao — um run
+        // "success" que coletou uma fracao dos dados.
+        const d = deps({ api: {
+            searchArchive: vi.fn(async () => pageOf('Steel Price Report', ['2025-01-02', '2025-01-03'], {
+                totalPages: 1, totalRecords: 249,
+            })),
+            fetchPdf: vi.fn(async () => PDF),
+        } });
+
+        const summary = await runBackfill(d);
+
+        expect(summary.errors).toContainEqual(expect.objectContaining({
+            stage: 'pagination',
+            publication: 'Steel Price Report',
+        }));
+        expect(summary.type).toBe('partial');
+    });
+
+    it('nao registra erro de paginacao quando TotalPages cobre o esperado', async () => {
+        const d = deps();
+        const summary = await runBackfill(d);
+
+        expect(summary.errors.filter((e) => e.stage === 'pagination')).toHaveLength(0);
+    });
+
+    it('lanca quando TODAS as publicacoes anunciam zero — janela ou nome provavelmente errados', async () => {
+        const d = deps({
+            publications: ['Steel Price Report', 'Cement Weekly'],
+            api: {
+                searchArchive: vi.fn(async () => ({ Items: [], TotalPages: 0, TotalRecordCount: 0, Page: 1 })),
+                fetchPdf: vi.fn(),
+            },
+        });
+
+        const error = await runBackfill(d).catch((e) => e);
+        expect(error).toBeInstanceOf(ZeroYieldError);
+        expect(error.summary).toBeDefined();
+        expect(error.summary.publications).toHaveLength(2);
+    });
+
+    it('uma UNICA publicacao vazia entre varias nao dispara o guard de todas-zero', async () => {
+        const searchArchive = vi.fn()
+            .mockResolvedValueOnce({ Items: [], TotalPages: 0, TotalRecordCount: 0, Page: 1 })
+            .mockResolvedValueOnce(pageOf('Cement Weekly', ['2025-01-03']));
+        const d = deps({
+            publications: ['Steel Price Report', 'Cement Weekly'],
+            api: { searchArchive, fetchPdf: vi.fn(async () => PDF) },
+        });
+
+        const summary = await runBackfill(d);
+        expect(summary.type).toBe('success');
+        expect(summary.downloaded).toHaveLength(1);
     });
 
     it('em dryRun um nao-PDF ainda e detectado', async () => {

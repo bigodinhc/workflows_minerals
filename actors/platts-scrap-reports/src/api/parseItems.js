@@ -30,15 +30,26 @@ export function parseItems(response) {
                 dateKey,
                 frequency: item.Frequency || null,
                 coverDate: item.CoverDate,
+                updatedDate: item.UpdatedDate ?? null,
             };
         })
         .filter(Boolean);
 }
 
+/**
+ * `??` deixa passar um valor presente mas não-numérico (ex.: "249 records"),
+ * e isso propaga como string até o `Math.max` do loop de paginação virar
+ * NaN — cego a partir dali. O guard de rendimento zero só pega isso na
+ * página 1 pelo checar do envelope; numa página posterior o NaN passaria
+ * sem barulho. Coage aqui: valor não-numérico vira 0, mesmo tratamento de
+ * "campo ausente".
+ */
+const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+
 export function paginationOf(response) {
     return {
-        page: response?.Page ?? 1,
-        totalPages: response?.TotalPages ?? 0,
-        totalRecords: response?.TotalRecordCount ?? 0,
+        page: num(response?.Page) || 1,
+        totalPages: num(response?.TotalPages),
+        totalRecords: num(response?.TotalRecordCount),
     };
 }

@@ -76,13 +76,15 @@
             "title": "Backfill from (YYYY-MM-DD)",
             "type": "string",
             "description": "Primeira data de capa a incluir. So usado quando mode=backfill.",
-            "editor": "textfield"
+            "editor": "textfield",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
         "backfillTo": {
             "title": "Backfill to (YYYY-MM-DD)",
             "type": "string",
             "description": "Ultima data de capa a incluir. So usado quando mode=backfill.",
-            "editor": "textfield"
+            "editor": "textfield",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
         },
         "backfillPublications": {
             "title": "Backfill publications",

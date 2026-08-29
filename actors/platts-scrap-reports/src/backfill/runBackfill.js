@@ -87,7 +87,7 @@ async function handleItem(row, deps, acc) {
                 reportType: deps.reportType,
                 frequency: row.frequency,
                 coverDate: row.coverDate,
-                publishedDate: null,
+                publishedDate: row.updatedDate,
             },
         });
     } catch (e) {
@@ -150,6 +150,21 @@ async function backfillPublication(publication, deps, acc) {
         );
     }
 
+    // Um warning sozinho nao barra nada: se TotalPages vier ausente ou errado
+    // (ex.: 249 registros anunciados, TotalPages 1), o laco sai apos a
+    // pagina 1, `processed` fica em 50, e como processed > 0 nenhum guard
+    // dispara — um run "success" que coletou 20% dos dados. pageSize e fixo
+    // em 50 (ver buildSearchPayload); expectedPages deriva disso.
+    const expectedPages = Math.ceil(totalRecords / 50);
+    if (totalRecords > 0 && totalPages < expectedPages) {
+        acc.errors.push({
+            stage: 'pagination',
+            publication,
+            message: `Grid announced ${totalRecords} records (${expectedPages} pages) but only ${totalPages} page(s) were offered`,
+        });
+        acc.type = 'partial';
+    }
+
     if (totalRecords > 0 && processed === 0) {
         throw new ZeroYieldError(
             `Zero yield for "${publication}": the API reported ${totalRecords} records `
@@ -184,6 +199,24 @@ export async function runBackfill(deps) {
             summary.errors.push({ stage: 'publication', publication, message: e.message });
             summary.type = 'partial';
         }
+    }
+
+    // Guard de rendimento zero no nivel do run: o guard `touched` abaixo so
+    // dispara quando `errors.length > 0`. Uma janela de data com typo, um
+    // nome de publicacao que a API nao reconhece, ou uma mudanca no que
+    // contentType/isArchived seleciona produzem listagens limpas — zero
+    // registros, zero erros — e um run verde que baixou zero PDFs. UMA
+    // publicacao legitimamente vazia e normal (ex.: relatorio novo, sem
+    // historico no periodo); TODAS as publicacoes anunciando zero ao longo
+    // de uma janela de doze meses nao e — por isso o guard exige mais de uma
+    // publicacao antes de desconfiar.
+    const listed = summary.publications;
+    if (listed.length > 1 && listed.every((p) => p.totalRecords === 0)) {
+        const error = new ZeroYieldError(
+            'Every publication announced zero records — check the date window and the publication names.',
+        );
+        error.summary = summary;
+        throw error;
     }
 
     // Guard de run inteiro: mesmo que cada publicação individualmente não

@@ -443,7 +443,7 @@ Criar `tests/plattsApi.test.js`:
 ```js
 import { describe, expect, it, vi } from 'vitest';
 
-import { createPlattsApi } from '../src/api/plattsApi.js';
+import { createPlattsApi, playwrightRequest } from '../src/api/plattsApi.js';
 
 const okJson = (body) => ({ status: 200, json: async () => body, body: async () => Buffer.from('') });
 const okPdf = (buf) => ({ status: 200, json: async () => ({}), body: async () => buf });
@@ -518,6 +518,23 @@ describe('renovação de token', () => {
 
         await api.searchArchive({ page: 1 });
         expect(auth.state.refreshCount).toBe(1);
+    });
+});
+
+describe('playwrightRequest', () => {
+    it('achata os métodos status() e body() do Playwright em campos simples', async () => {
+        const ctx = { request: {
+            post: async () => ({ status: () => 200, json: async () => ({ ok: 1 }), body: async () => Buffer.from('x') }),
+            get: async () => ({ status: () => 404, json: async () => ({}), body: async () => Buffer.from('') }),
+        } };
+        const request = playwrightRequest(ctx);
+
+        const posted = await request.post('u', { headers: {}, data: {} });
+        expect(posted.status).toBe(200);
+        expect(await posted.json()).toEqual({ ok: 1 });
+
+        const got = await request.get('u', { headers: {} });
+        expect(got.status).toBe(404);
     });
 });
 
@@ -660,7 +677,7 @@ export function createPlattsApi({ request, auth, sleep = defaultSleep, maxRetrie
 npx vitest run tests/plattsApi.test.js
 ```
 
-Esperado: PASS, 8 testes.
+Esperado: PASS, 9 testes.
 
 - [ ] **Step 5: Lint e commit**
 
@@ -800,8 +817,6 @@ Esperado: FAIL — módulo não existe.
 Criar `src/api/captureAuth.js`:
 
 ```js
-import { log } from 'crawlee';
-
 const API_HOST = 'api.platts.com';
 
 /**
@@ -853,8 +868,6 @@ export async function waitForAuth(state, {
     );
 }
 ```
-
-Nota: o `log` do crawlee é importado para uso futuro no wiring; se o lint reclamar de import não usado, remover a linha.
 
 - [ ] **Step 4: Rodar e confirmar que passa**
 
@@ -1502,7 +1515,7 @@ Esperado: PASS, 10 testes.
 npm test
 ```
 
-Esperado: PASS. Contagem anterior era 43; com as tasks 1 a 7 deve chegar a 94.
+Esperado: PASS. Contagem anterior era 43; com as tasks 1 a 7 deve chegar a 95.
 
 - [ ] **Step 6: Lint e commit**
 
@@ -1736,7 +1749,7 @@ import { applyExcludeFilter, DEFAULT_EXCLUDES } from './filters/applyFilters.js'
 npm test
 ```
 
-Esperado: PASS, 97 testes. O caminho diário não pode ter nenhuma falha nova.
+Esperado: PASS, 98 testes. O caminho diário não pode ter nenhuma falha nova.
 
 - [ ] **Step 8: Lint e commit**
 

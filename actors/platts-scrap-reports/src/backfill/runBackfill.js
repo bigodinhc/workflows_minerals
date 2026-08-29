@@ -72,6 +72,11 @@ async function handleItem(row, deps, acc) {
 
     const storagePath = `${slugify(deps.reportType)}/${parts.year}/${parts.month}/${row.dateKey}_${slug}.pdf`;
 
+    if (deps.dryRun) {
+        acc.would_download.push({ slug, dateKey: row.dateKey, storagePath, sizeBytes: buffer.length });
+        return;
+    }
+
     try {
         await deps.uploadPdf(buffer, {
             storagePath,
@@ -163,6 +168,7 @@ export async function runBackfill(deps) {
         skipped: [],
         errors: [],
         publications: [],
+        would_download: [],
         durationMs: 0,
     };
 
@@ -189,8 +195,10 @@ export async function runBackfill(deps) {
     // existe pela mesma razão: uma publicação genuinamente vazia (a API
     // anuncia TotalRecordCount 0 e não erra em nada) também toca zero itens,
     // e isso é sucesso, não uma falha — sem o gate o guard confundiria as
-    // duas situações.
-    const touched = summary.downloaded.length + summary.skipped.length;
+    // duas situações. `would_download` também conta: em dryRun os itens
+    // bem-sucedidos pousam ali em vez de em `downloaded`, e sem essa conta um
+    // dry run saudável sobre datas novas pareceria zero rendimento.
+    const touched = summary.downloaded.length + summary.skipped.length + summary.would_download.length;
     const anyFailure = summary.errors.length > 0;
     if (deps.publications.length > 0 && touched === 0 && anyFailure) {
         // Anexa o summary ao erro: um run que falhou por inteiro ainda coletou

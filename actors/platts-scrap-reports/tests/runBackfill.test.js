@@ -242,4 +242,42 @@ describe('runBackfill', () => {
 
         await expect(runBackfill(d)).rejects.toThrow(ZeroYieldError);
     });
+
+    it('em dryRun baixa e valida, mas nao sobe — registra em would_download', async () => {
+        const d = deps({ dryRun: true });
+
+        const summary = await runBackfill(d);
+
+        expect(d.api.fetchPdf).toHaveBeenCalledTimes(2);   // baixou de verdade
+        expect(d.uploadPdf).not.toHaveBeenCalled();        // nao subiu
+        expect(summary.would_download).toHaveLength(2);
+        expect(summary.downloaded).toHaveLength(0);
+        expect(summary.would_download[0]).toMatchObject({
+            slug: 'steel-price-report',
+            dateKey: '2025-01-02',
+            storagePath: 'market-reports/2025/01/2025-01-02_steel-price-report.pdf',
+        });
+    });
+
+    it('em dryRun continua consultando o dedup', async () => {
+        const d = deps({ dryRun: true, isAlreadyStored: vi.fn(async () => true) });
+
+        const summary = await runBackfill(d);
+
+        expect(d.isAlreadyStored).toHaveBeenCalledTimes(2);
+        expect(summary.skipped).toHaveLength(2);
+        expect(d.api.fetchPdf).not.toHaveBeenCalled();
+    });
+
+    it('em dryRun um nao-PDF ainda e detectado', async () => {
+        const d = deps({ dryRun: true, api: {
+            searchArchive: vi.fn(async () => pageOf('Steel Price Report', ['2025-01-02', '2025-01-03'])),
+            fetchPdf: vi.fn(async (id) => (id === 'id-2025-01-02' ? XLSX : PDF)),
+        } });
+
+        const summary = await runBackfill(d);
+
+        expect(summary.errors).toHaveLength(1);
+        expect(summary.would_download).toHaveLength(1);
+    });
 });

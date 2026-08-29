@@ -107,6 +107,9 @@ async function run() {
         if (!backfillFrom || !backfillTo) {
             throw new Error('backfillFrom and backfillTo are required when mode=backfill');
         }
+        if (!SB_URL) {
+            throw new Error('SUPABASE_URL is required in backfill mode — the dedup lookup runs even under dryRun');
+        }
 
         const authState = attachAuthCapture(page);
         const reportType = 'Market Reports';
@@ -141,6 +144,7 @@ async function run() {
             concurrency: backfillConcurrency,
             isAlreadyStored,
             uploadPdf,
+            dryRun,
             now: () => Date.now(),
         });
 

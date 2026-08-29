@@ -38,6 +38,41 @@ def _get_supabase():
     return _supabase_client
 
 
+# ── Paged reads ──
+
+# PostgREST clips every response at the server's max-rows (1000 by default)
+# and says nothing about it: a truncated page looks exactly like a complete
+# one. Any read that has to see every matching row pages through explicitly.
+_PAGE_SIZE = 1000
+_MAX_PAGES = 100
+
+
+def _select_all(build_page):
+    """Run a select in windows until the rows run out, and return them all.
+
+    `build_page` returns a fresh builder on every call; the window is applied
+    on top of it. It must order by a unique column — without a total order the
+    server may hand back the same row on two pages and skip another entirely.
+
+    The loop advances by the number of rows actually received, not by the
+    window it asked for, so a server whose cap sits below _PAGE_SIZE still
+    walks the whole table instead of stopping after one short page.
+    """
+    rows = []
+    offset = 0
+    for _ in range(_MAX_PAGES):
+        page = build_page().range(offset, offset + _PAGE_SIZE - 1).execute().data or []
+        if not page:
+            return rows
+        rows.extend(page)
+        offset += len(page)
+    logger.error(
+        "_select_all stopped at the %d-page ceiling with %d rows - result is truncated",
+        _MAX_PAGES, len(rows),
+    )
+    return rows
+
+
 PT_MONTHS = {
     1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
     5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
@@ -68,7 +103,7 @@ def _query_latest_sync(report_type):
         .eq("report_type", report_type) \
         .order("date_key", desc=True) \
         .limit(10) \
-        .execute()
+        .execute().data or []
 
 
 async def reports_show_latest(chat_id, message_id, report_type):
@@ -85,7 +120,7 @@ async def reports_show_latest(chat_id, message_id, report_type):
         await bot.edit_message_text("⚠️ Supabase não configurado", chat_id=chat_id, message_id=message_id)
         return
 
-    rows = result.data or []
+    rows = result
     if not rows:
         keyboard = {"inline_keyboard": [[{"text": "⬅ Voltar", "callback_data": ReportBack(target="types").pack()}]]}
         await bot.edit_message_text("Nenhum relatório encontrado.", chat_id=chat_id, message_id=message_id, reply_markup=keyboard)
@@ -108,7 +143,12 @@ def _query_years_sync(report_type):
     sb = _get_supabase()
     if not sb:
         return None
-    return sb.table("platts_reports").select("date_key").eq("report_type", report_type).execute()
+    return _select_all(
+        lambda: sb.table("platts_reports")
+        .select("date_key")
+        .eq("report_type", report_type)
+        .order("id")
+    )
 
 
 async def reports_show_years(chat_id, message_id, report_type):
@@ -125,7 +165,7 @@ async def reports_show_years(chat_id, message_id, report_type):
         await bot.edit_message_text("⚠️ Supabase não configurado", chat_id=chat_id, message_id=message_id)
         return
 
-    years = sorted({int(r["date_key"][:4]) for r in (result.data or [])}, reverse=True)
+    years = sorted({int(r["date_key"][:4]) for r in result}, reverse=True)
     text = f"📊 *{_esc(report_type)}*\n\nEscolha o ano:"
     keyboard = [[{"text": str(y), "callback_data": ReportYear(report_type=report_type, year=y).pack()}] for y in years]
     keyboard.append([{"text": "⬅ Voltar", "callback_data": ReportTypeCB(report_type=report_type).pack()}])
@@ -136,12 +176,14 @@ def _query_months_sync(report_type, year):
     sb = _get_supabase()
     if not sb:
         return None
-    return sb.table("platts_reports") \
-        .select("date_key") \
-        .eq("report_type", report_type) \
-        .gte("date_key", f"{year}-01-01") \
-        .lte("date_key", f"{year}-12-31") \
-        .execute()
+    return _select_all(
+        lambda: sb.table("platts_reports")
+        .select("date_key")
+        .eq("report_type", report_type)
+        .gte("date_key", f"{year}-01-01")
+        .lte("date_key", f"{year}-12-31")
+        .order("id")
+    )
 
 
 async def reports_show_months(chat_id, message_id, report_type, year):
@@ -159,7 +201,7 @@ async def reports_show_months(chat_id, message_id, report_type, year):
         return
 
     month_counts = {}
-    for r in (result.data or []):
+    for r in result:
         m = int(r["date_key"][5:7])
         month_counts[m] = month_counts.get(m, 0) + 1
     months_sorted = sorted(month_counts.items(), reverse=True)
@@ -186,7 +228,7 @@ def _query_month_list_sync(report_type, year, month):
         .lt("date_key", end) \
         .order("date_key", desc=True) \
         .order("report_name") \
-        .execute()
+        .execute().data or []
 
 
 async def reports_show_month_list(chat_id, message_id, report_type, year, month):
@@ -203,7 +245,7 @@ async def reports_show_month_list(chat_id, message_id, report_type, year, month)
         await bot.edit_message_text("⚠️ Supabase não configurado", chat_id=chat_id, message_id=message_id)
         return
 
-    rows = result.data or []
+    rows = result
     month_name = PT_MONTHS.get(month, str(month))
     text = f"📊 *{_esc(report_type)} — {month_name} {year}*"
     if not rows:

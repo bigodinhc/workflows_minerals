@@ -146,6 +146,72 @@ describe('runBackfill', () => {
         expect(summary.type).toBe('partial');
     });
 
+
+    it('respeita o limite de concorrencia ao baixar', async () => {
+        let inFlight = 0;
+        let peak = 0;
+        const dates = ['2025-01-02', '2025-01-03', '2025-01-06', '2025-01-07', '2025-01-08'];
+        const d = deps({
+            concurrency: 2,
+            api: {
+                searchArchive: vi.fn(async () => pageOf('Steel Price Report', dates)),
+                fetchPdf: vi.fn(async () => {
+                    inFlight += 1;
+                    peak = Math.max(peak, inFlight);
+                    await new Promise((resolve) => { setTimeout(resolve, 5); });
+                    inFlight -= 1;
+                    return PDF;
+                }),
+            },
+        });
+
+        await runBackfill(d);
+        expect(peak).toBe(2);
+    });
+
+    it('dispara o guard mesmo quando a ultima pagina perde a contagem', async () => {
+        // A pagina 1 anuncia 249 registros; a pagina 2 vem com o envelope
+        // malformado. Sem o Math.max, totalRecords zeraria e o guard ficaria cego.
+        const searchArchive = vi.fn()
+            .mockResolvedValueOnce({ Items: [], TotalPages: 2, TotalRecordCount: 249, Page: 1 })
+            .mockResolvedValueOnce({ Items: [], Page: 2 });
+        const d = deps({ api: { searchArchive, fetchPdf: vi.fn() } });
+
+        await expect(runBackfill(d)).rejects.toThrow(ZeroYieldError);
+    });
+
+    it('lanca quando o run inteiro nao toca em nada', async () => {
+        const d = deps({
+            publications: ['A', 'B'],
+            api: {
+                searchArchive: vi.fn(async () => { throw new Error('token expirado'); }),
+                fetchPdf: vi.fn(),
+            },
+        });
+
+        await expect(runBackfill(d)).rejects.toThrow(/whole run/i);
+    });
+
+    it('nao lanca quando tudo foi pulado por dedup — re-run legitimo', async () => {
+        const d = deps({ isAlreadyStored: vi.fn(async () => true) });
+
+        const summary = await runBackfill(d);
+        expect(summary.skipped).toHaveLength(2);
+        expect(summary.downloaded).toHaveLength(0);
+    });
+
+    it('registra falha de dedup como stage dedup, sem abandonar o resto', async () => {
+        const isAlreadyStored = vi.fn()
+            .mockRejectedValueOnce(new Error('supabase fora do ar'))
+            .mockResolvedValueOnce(false);
+        const d = deps({ concurrency: 1, isAlreadyStored });
+
+        const summary = await runBackfill(d);
+        expect(summary.errors[0].stage).toBe('dedup');
+        expect(summary.downloaded).toHaveLength(1);
+        expect(summary.type).toBe('partial');
+    });
+
     it('não engole o ZeroYieldError no catch por publicação', async () => {
         const d = deps({
             publications: ['A', 'B'],

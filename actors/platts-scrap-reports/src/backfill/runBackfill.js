@@ -15,11 +15,8 @@ import { slugify } from '../util/slug.js';
  * run inteiro, não de publicação, então o laço não captura este tipo.
  */
 export class ZeroYieldError extends Error {
-    constructor(publication, totalRecords) {
-        super(
-            `Zero yield for "${publication}": the API reported ${totalRecords} records `
-            + 'but no item could be parsed. The blendedsearch response shape probably changed.',
-        );
+    constructor(message) {
+        super(message);
         this.name = 'ZeroYieldError';
     }
 }
@@ -33,7 +30,15 @@ async function handleItem(row, deps, acc) {
         return;
     }
 
-    if (await deps.isAlreadyStored(slug, row.dateKey)) {
+    let alreadyStored;
+    try {
+        alreadyStored = await deps.isAlreadyStored(slug, row.dateKey);
+    } catch (e) {
+        acc.errors.push({ stage: 'dedup', reportName: row.reportName, message: e.message });
+        acc.type = 'partial';
+        return;
+    }
+    if (alreadyStored) {
         acc.skipped.push({ slug, dateKey: row.dateKey, reason: 'already-exists' });
         return;
     }
@@ -95,7 +100,10 @@ async function backfillPublication(publication, deps, acc) {
         const response = await deps.api.searchArchive(payload);
         const pagination = paginationOf(response);
         totalPages = pagination.totalPages;
-        totalRecords = pagination.totalRecords;
+        // Math.max, nao atribuicao: se uma pagina vier com o envelope malformado,
+        // totalRecords zeraria e o guard abaixo ficaria cego justamente no caso
+        // que ele existe para pegar.
+        totalRecords = Math.max(totalRecords, pagination.totalRecords);
 
         const rows = parseItems(response);
         processed += rows.length;
@@ -105,8 +113,18 @@ async function backfillPublication(publication, deps, acc) {
         page += 1;
     }
 
+    if (processed < totalRecords) {
+        log.warning(
+            `${publication}: parsed ${processed} of ${totalRecords} announced records — `
+            + 'pages may have been truncated, or items lacked a PDF in PublicationGrouping',
+        );
+    }
+
     if (totalRecords > 0 && processed === 0) {
-        throw new ZeroYieldError(publication, totalRecords);
+        throw new ZeroYieldError(
+            `Zero yield for "${publication}": the API reported ${totalRecords} records `
+            + 'but no item could be parsed. The blendedsearch response shape probably changed.',
+        );
     }
 
     return { publication, totalRecords, processed };
@@ -128,10 +146,33 @@ export async function runBackfill(deps) {
             summary.publications.push(await backfillPublication(publication, deps, summary));
         } catch (e) {
             // O guard de rendimento zero derruba o run inteiro de propósito.
-            if (e instanceof ZeroYieldError) throw e;
+            // O check por `name` cobre o caso da classe ser carregada em dois
+            // realms de módulo (mock de teste, resolução dupla de pacote),
+            // onde `instanceof` falharia em silêncio.
+            if (e instanceof ZeroYieldError || e?.name === 'ZeroYieldError') throw e;
             summary.errors.push({ stage: 'publication', publication, message: e.message });
             summary.type = 'partial';
         }
+    }
+
+    // Guard de run inteiro: mesmo que cada publicação individualmente não
+    // dispare o ZeroYieldError (por exemplo, todas falharam ao listar), um
+    // run que não baixou nem pulou nada e ainda registrou falhas é
+    // indistinguível de "nada funcionou". `skipped` conta como "tocado" de
+    // propósito: um re-run sobre um período já completo legitimamente baixa
+    // zero, e isso não pode disparar o guard. O gate em `errors.length > 0`
+    // existe pela mesma razão: uma publicação genuinamente vazia (a API
+    // anuncia TotalRecordCount 0 e não erra em nada) também toca zero itens,
+    // e isso é sucesso, não uma falha — sem o gate o guard confundiria as
+    // duas situações.
+    const touched = summary.downloaded.length + summary.skipped.length;
+    const anyFailure = summary.errors.length > 0;
+    if (deps.publications.length > 0 && touched === 0 && anyFailure) {
+        throw new ZeroYieldError(
+            `Zero yield for the whole run: ${deps.publications.length} publication(s) processed, but nothing was `
+            + 'downloaded and nothing was skipped as already-stored. Either every listing failed, or the response '
+            + 'shape changed in a way the per-publication guard cannot see.',
+        );
     }
 
     summary.durationMs = deps.now() - startedAt;

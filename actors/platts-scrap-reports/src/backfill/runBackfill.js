@@ -3,6 +3,7 @@ import { log } from 'crawlee';
 import { paginationOf, parseItems } from '../api/parseItems.js';
 import { buildSearchPayload } from '../api/searchPayload.js';
 import { describeFileFormat } from '../download/capturePdf.js';
+import { applyExcludeFilter } from '../filters/applyFilters.js';
 import { mapLimit } from '../util/concurrency.js';
 import { datePartsFromIso } from '../util/dates.js';
 import { slugify } from '../util/slug.js';
@@ -19,6 +20,16 @@ export class ZeroYieldError extends Error {
         super(message);
         this.name = 'ZeroYieldError';
     }
+}
+
+/**
+ * O grid diz o que existe; a API diz o histórico de cada um. Derivar a lista
+ * daqui em vez de fixar nomes no código mantém o backfill em dia se o Platts
+ * adicionar um relatório.
+ */
+export function resolveBackfillPublications(gridRows, excludes) {
+    const kept = applyExcludeFilter(gridRows, excludes).map((r) => r.reportName);
+    return [...new Set(kept)];
 }
 
 async function handleItem(row, deps, acc) {

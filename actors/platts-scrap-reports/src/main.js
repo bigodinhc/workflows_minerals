@@ -2,16 +2,21 @@ import { Actor } from 'apify';
 import { log } from 'crawlee';
 import { chromium } from 'playwright';
 
+import { attachAuthCapture, waitForAuth } from './api/captureAuth.js';
+import { createPlattsApi, playwrightRequest } from './api/plattsApi.js';
+import { isoWindow } from './api/searchPayload.js';
 import { loginPlatts } from './auth/login.js';
+import { resolveBackfillPublications, runBackfill } from './backfill/runBackfill.js';
 import { capturePdf } from './download/capturePdf.js';
-import { applyExcludeFilter } from './filters/applyFilters.js';
+import { applyExcludeFilter, DEFAULT_EXCLUDES } from './filters/applyFilters.js';
 import { extractRows } from './grid/extractRows.js';
 import { navigateGrid } from './grid/navigateGrid.js';
+import { EventBus } from './lib/eventBus.js';
+import { sendBackfillSummary } from './notify/backfillSummary.js';
 import { sendReportsSummary } from './notify/telegramSummary.js';
 import { isAlreadyStored, setTelegramMessageId, uploadPdf } from './persist/supabaseUpload.js';
 import { datePartsFromIso, parsePublishedDate } from './util/dates.js';
 import { slugify } from './util/slug.js';
-import { EventBus } from './lib/eventBus.js';
 
 await Actor.init();
 
@@ -25,6 +30,11 @@ const {
     dryRun = false,
     forceRedownload = false,
     telegramChatId,
+    mode = 'daily',
+    backfillFrom,
+    backfillTo,
+    backfillPublications = [],
+    backfillConcurrency = 3,
 } = input;
 
 const bus = new EventBus({
@@ -89,6 +99,53 @@ async function run() {
         } catch (_) { /* ignore */ }
         summary.type = 'error';
         summary.errors.push({ stage: 'login', message: loginResult.reason || 'unknown', detail: loginResult.error });
+        await Actor.pushData(summary);
+        return;
+    }
+
+    if (mode === 'backfill') {
+        if (!backfillFrom || !backfillTo) {
+            throw new Error('backfillFrom and backfillTo are required when mode=backfill');
+        }
+
+        const authState = attachAuthCapture(page);
+        const reportType = 'Market Reports';
+        await navigateGrid(page, reportType);
+        await waitForAuth(authState);
+
+        const publications = backfillPublications.length > 0
+            ? backfillPublications
+            : resolveBackfillPublications(await extractRows(page), excludeReportNames ?? DEFAULT_EXCLUDES);
+
+        log.info(`Backfill ${backfillFrom}..${backfillTo} over ${publications.length} publication(s)`);
+
+        const { fromDate, toDate } = isoWindow(backfillFrom, backfillTo);
+        const api = createPlattsApi({
+            request: playwrightRequest(ctx),
+            auth: {
+                headers: () => authState.headers,
+                refresh: async () => {
+                    authState.headers = null;
+                    await navigateGrid(page, reportType);
+                    await waitForAuth(authState);
+                },
+            },
+        });
+
+        const backfillSummary = await runBackfill({
+            api,
+            publications,
+            fromDate,
+            toDate,
+            reportType,
+            concurrency: backfillConcurrency,
+            isAlreadyStored,
+            uploadPdf,
+            now: () => Date.now(),
+        });
+
+        Object.assign(summary, backfillSummary);
+        if (!dryRun) await sendBackfillSummary(TG_TOKEN, TG_CHAT, backfillSummary);
         await Actor.pushData(summary);
         return;
     }

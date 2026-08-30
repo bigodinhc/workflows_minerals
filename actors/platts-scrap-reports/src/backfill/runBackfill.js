@@ -32,12 +32,25 @@ export function resolveBackfillPublications(gridRows, excludes) {
     return [...new Set(kept)];
 }
 
+/**
+ * Registra uma falha no sumário e no log do run.
+ *
+ * O run de 2024 guardou sua única falha de upload no sumário e em nenhum outro
+ * lugar: o log do Apify tinha zero ocorrências de "failed". Uma falha que só
+ * existe num registro de dataset é uma falha que ninguém vai olhar.
+ */
+function recordError(acc, entry) {
+    acc.errors.push(entry);
+    acc.type = 'partial';
+    const subject = entry.reportName || entry.publication || '(unknown)';
+    log.warning(`[${entry.stage}] ${subject}: ${entry.message}`);
+}
+
 async function handleItem(row, deps, acc) {
     const slug = slugify(row.reportName);
     const parts = datePartsFromIso(row.dateKey);
     if (!slug || !parts) {
-        acc.errors.push({ stage: 'parse-row', reportName: row.reportName, message: 'missing slug or dateKey' });
-        acc.type = 'partial';
+        recordError(acc, { stage: 'parse-row', reportName: row.reportName, message: 'missing slug or dateKey' });
         return;
     }
 
@@ -45,8 +58,7 @@ async function handleItem(row, deps, acc) {
     try {
         alreadyStored = await deps.isAlreadyStored(slug, row.dateKey);
     } catch (e) {
-        acc.errors.push({ stage: 'dedup', reportName: row.reportName, message: e.message });
-        acc.type = 'partial';
+        recordError(acc, { stage: 'dedup', reportName: row.reportName, message: e.message });
         return;
     }
     if (alreadyStored) {
@@ -58,15 +70,13 @@ async function handleItem(row, deps, acc) {
     try {
         buffer = await deps.api.fetchPdf(row.id);
     } catch (e) {
-        acc.errors.push({ stage: 'download', reportName: row.reportName, message: e.message });
-        acc.type = 'partial';
+        recordError(acc, { stage: 'download', reportName: row.reportName, message: e.message });
         return;
     }
 
     const format = describeFileFormat(buffer);
     if (format !== 'PDF') {
-        acc.errors.push({ stage: 'download', reportName: row.reportName, message: `Downloaded file is ${format}` });
-        acc.type = 'partial';
+        recordError(acc, { stage: 'download', reportName: row.reportName, message: `Downloaded file is ${format}` });
         return;
     }
 
@@ -91,8 +101,7 @@ async function handleItem(row, deps, acc) {
             },
         });
     } catch (e) {
-        acc.errors.push({ stage: 'supabase-upload', reportName: row.reportName, message: e.message });
-        acc.type = 'partial';
+        recordError(acc, { stage: 'supabase-upload', reportName: row.reportName, message: e.message });
         return;
     }
 
@@ -157,12 +166,11 @@ async function backfillPublication(publication, deps, acc) {
     // buildSearchPayload (ver searchPayload.js); expectedPages deriva disso.
     const expectedPages = Math.ceil(totalRecords / PAGE_SIZE);
     if (totalRecords > 0 && totalPages < expectedPages) {
-        acc.errors.push({
+        recordError(acc, {
             stage: 'pagination',
             publication,
             message: `Grid announced ${totalRecords} records (${expectedPages} pages) but only ${totalPages} page(s) were offered`,
         });
-        acc.type = 'partial';
     }
 
     if (totalRecords > 0 && processed === 0) {
@@ -196,8 +204,7 @@ export async function runBackfill(deps) {
             // realms de módulo (mock de teste, resolução dupla de pacote),
             // onde `instanceof` falharia em silêncio.
             if (e instanceof ZeroYieldError || e?.name === 'ZeroYieldError') throw e;
-            summary.errors.push({ stage: 'publication', publication, message: e.message });
-            summary.type = 'partial';
+            recordError(summary, { stage: 'publication', publication, message: e.message });
         }
     }
 

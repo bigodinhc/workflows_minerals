@@ -1,5 +1,6 @@
 import { log } from 'crawlee';
 
+import { describeSupabaseError } from './describeSupabaseError.js';
 import { getSupabase } from './supabaseClient.js';
 
 const BUCKET = 'platts-reports';
@@ -16,7 +17,7 @@ export async function isAlreadyStored(slug, dateKey) {
         .eq('slug', slug)
         .eq('date_key', dateKey)
         .limit(1);
-    if (error) throw new Error(`Dedup check failed: ${error.message}`);
+    if (error) throw new Error(`Dedup check failed: ${describeSupabaseError(error)}`);
     return data.length > 0;
 }
 
@@ -36,7 +37,7 @@ export async function uploadPdf(pdfBuffer, { storagePath, metadata }) {
             upsert: true,
         });
     if (storageError) {
-        throw new Error(`Storage upload failed: ${storageError.message}`);
+        throw new Error(`Storage upload failed: ${describeSupabaseError(storageError)}`);
     }
     log.info(`Stored ${storagePath} in bucket ${BUCKET}`);
 
@@ -58,7 +59,7 @@ export async function uploadPdf(pdfBuffer, { storagePath, metadata }) {
         .select('id')
         .single();
     if (dbError) {
-        throw new Error(`DB insert failed: ${dbError.message}`);
+        throw new Error(`DB insert failed: ${describeSupabaseError(dbError)}`);
     }
     log.info(`Inserted platts_reports row: ${data.id}`);
     return { id: data.id, storagePath };
@@ -74,6 +75,6 @@ export async function setTelegramMessageId(reportId, messageId) {
         .update({ telegram_message_id: messageId })
         .eq('id', reportId);
     if (error) {
-        log.warning(`Failed to update telegram_message_id for ${reportId}: ${error.message}`);
+        log.warning(`Failed to update telegram_message_id for ${reportId}: ${describeSupabaseError(error)}`);
     }
 }

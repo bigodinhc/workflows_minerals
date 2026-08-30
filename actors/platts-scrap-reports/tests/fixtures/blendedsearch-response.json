@@ -1,0 +1,68 @@
+{
+  "HasTrialRestrictions": false,
+  "Items": [
+    {
+      "Name": "SPR_20260827.pdf",
+      "ReportName": "Steel Price Report",
+      "ReportType": "MARKET REPORT",
+      "MimeType": "application/pdf",
+      "PublicationGrouping": [
+        { "Id": "8174a051-a9a5-43c7-9817-e8257efec05a", "MimeType": "application/pdf", "Name": "SPR_20260827.pdf" },
+        { "Id": "0312a345-8055-4589-a5dd-a729bcf16754", "MimeType": "application/xml", "Name": "SPR_20260827_TopicMerge.xml" }
+      ],
+      "Frequency": "Daily",
+      "Language": "English",
+      "PackageShortCode": "SPR",
+      "CoverDate": "2026-08-27T00:00:00.000Z",
+      "UpdatedDate": "2026-08-27T21:54:13Z"
+    },
+    {
+      "Name": "SPR_20260826.pdf",
+      "ReportName": "Steel Price Report",
+      "ReportType": "MARKET REPORT",
+      "MimeType": "application/pdf",
+      "PublicationGrouping": [
+        { "Id": "47b02a21-3673-4a5f-aa59-3519fd78a9be", "MimeType": "application/pdf", "Name": "SPR_20260826.pdf" },
+        { "Id": "d901850f-bf32-44b9-9de8-a738ca72306a", "MimeType": "application/xml", "Name": "SPR_20260826_TopicMerge.xml" }
+      ],
+      "Frequency": "Daily",
+      "Language": "English",
+      "PackageShortCode": "SPR",
+      "CoverDate": "2026-08-26T00:00:00.000Z",
+      "UpdatedDate": "2026-08-26T22:04:26Z"
+    },
+    {
+      "Name": "SPR_20260825_TopicMerge.xml",
+      "ReportName": "Steel Price Report",
+      "ReportType": "MARKET REPORT",
+      "MimeType": "application/xml",
+      "PublicationGrouping": [
+        { "Id": "9c5f492b-ba03-4df0-8dac-a6bb2cbdc15b", "MimeType": "application/xml", "Name": "SPR_20260825_TopicMerge.xml" }
+      ],
+      "Frequency": "Daily",
+      "Language": "English",
+      "PackageShortCode": "SPR",
+      "CoverDate": "2026-08-25T00:00:00.000Z",
+      "UpdatedDate": "2026-08-25T21:40:29Z"
+    },
+    {
+      "Name": "SPR_20260824.pdf",
+      "ReportName": "Steel Price Report",
+      "ReportType": "MARKET REPORT",
+      "MimeType": "application/pdf",
+      "PublicationGrouping": [
+        { "Id": "b9d15f38-bab3-41eb-8214-5855fc088dfa", "MimeType": "application/xml", "Name": "SPR_20260824_TopicMerge.xml" },
+        { "Id": "9888c6f0-2f05-43b5-ba09-37ef4c94f33a", "MimeType": "application/pdf", "Name": "SPR_20260824.pdf" }
+      ],
+      "Frequency": "Daily",
+      "Language": "English",
+      "PackageShortCode": "SPR",
+      "CoverDate": "2026-08-24T00:00:00.000Z",
+      "UpdatedDate": "2026-08-24T21:39:00Z"
+    }
+  ],
+  "TotalPages": 5,
+  "TotalRecordCount": 249,
+  "Page": 1,
+  "PageSize": 50
+}

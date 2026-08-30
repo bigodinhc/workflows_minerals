@@ -63,6 +63,43 @@
             "type": "string",
             "editor": "textfield",
             "description": "Optional. If empty, uses TELEGRAM_CHAT_ID env."
+        },
+        "mode": {
+            "title": "Mode",
+            "type": "string",
+            "description": "daily (padrao) le o grid do dia. backfill baixa um intervalo historico via API.",
+            "editor": "select",
+            "enum": ["daily", "backfill"],
+            "default": "daily"
+        },
+        "backfillFrom": {
+            "title": "Backfill from (YYYY-MM-DD)",
+            "type": "string",
+            "description": "Primeira data de capa a incluir. So usado quando mode=backfill.",
+            "editor": "textfield",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "backfillTo": {
+            "title": "Backfill to (YYYY-MM-DD)",
+            "type": "string",
+            "description": "Ultima data de capa a incluir. So usado quando mode=backfill.",
+            "editor": "textfield",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "backfillPublications": {
+            "title": "Backfill publications",
+            "type": "array",
+            "description": "Vazio = todas as do grid menos os excludes.",
+            "editor": "stringList",
+            "default": []
+        },
+        "backfillConcurrency": {
+            "title": "Backfill concurrency",
+            "type": "integer",
+            "description": "Downloads simultaneos.",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 8
         }
     },
     "required": ["username", "password"]

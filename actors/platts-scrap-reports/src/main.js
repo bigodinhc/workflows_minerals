@@ -2,16 +2,21 @@ import { Actor } from 'apify';
 import { log } from 'crawlee';
 import { chromium } from 'playwright';
 
+import { attachAuthCapture, waitForAuth } from './api/captureAuth.js';
+import { createPlattsApi, playwrightRequest } from './api/plattsApi.js';
+import { isoWindow } from './api/searchPayload.js';
 import { loginPlatts } from './auth/login.js';
+import { resolveBackfillPublications, runBackfill } from './backfill/runBackfill.js';
 import { capturePdf } from './download/capturePdf.js';
-import { applyExcludeFilter } from './filters/applyFilters.js';
+import { applyExcludeFilter, DEFAULT_EXCLUDES } from './filters/applyFilters.js';
 import { extractRows } from './grid/extractRows.js';
 import { navigateGrid } from './grid/navigateGrid.js';
+import { EventBus } from './lib/eventBus.js';
+import { sendBackfillSummary } from './notify/backfillSummary.js';
 import { sendReportsSummary } from './notify/telegramSummary.js';
 import { isAlreadyStored, setTelegramMessageId, uploadPdf } from './persist/supabaseUpload.js';
 import { datePartsFromIso, parsePublishedDate } from './util/dates.js';
 import { slugify } from './util/slug.js';
-import { EventBus } from './lib/eventBus.js';
 
 await Actor.init();
 
@@ -25,6 +30,11 @@ const {
     dryRun = false,
     forceRedownload = false,
     telegramChatId,
+    mode = 'daily',
+    backfillFrom,
+    backfillTo,
+    backfillPublications = [],
+    backfillConcurrency = 3,
 } = input;
 
 const bus = new EventBus({
@@ -89,6 +99,88 @@ async function run() {
         } catch (_) { /* ignore */ }
         summary.type = 'error';
         summary.errors.push({ stage: 'login', message: loginResult.reason || 'unknown', detail: loginResult.error });
+        await Actor.pushData(summary);
+        return;
+    }
+
+    if (mode === 'backfill') {
+        if (!backfillFrom || !backfillTo) {
+            throw new Error('backfillFrom and backfillTo are required when mode=backfill');
+        }
+        if (!SB_URL) {
+            throw new Error('SUPABASE_URL is required in backfill mode — the dedup lookup runs even under dryRun');
+        }
+
+        const authState = attachAuthCapture(page);
+        const reportType = 'Market Reports';
+        await navigateGrid(page, reportType);
+        await waitForAuth(authState);
+
+        const publications = backfillPublications.length > 0
+            ? backfillPublications
+            : resolveBackfillPublications(await extractRows(page), excludeReportNames ?? DEFAULT_EXCLUDES);
+
+        log.info(`Backfill ${backfillFrom}..${backfillTo} over ${publications.length} publication(s)`);
+
+        const { fromDate, toDate } = isoWindow(backfillFrom, backfillTo);
+        // Refresh não é serializado por padrão: em concorrência 3, um token
+        // expirando faz os três workers baterem 401 quase juntos, e dois ou
+        // três page.goto() concorrentes na mesma page fazem o Playwright
+        // abortar os perdedores. Single-flight: quem chega primeiro dispara
+        // o refresh de verdade, os demais esperam a mesma promise. Em falha,
+        // restaura os headers antigos — do contrário um worker lendo
+        // auth.headers() enquanto ela é null manda `{...null, 'content-type':
+        // ...}`, ou seja, sem header de autorização nenhum.
+        let refreshing = null;
+        const auth = {
+            headers: () => authState.headers,
+            refresh: async () => {
+                if (!refreshing) {
+                    refreshing = (async () => {
+                        const stale = authState.headers;
+                        authState.headers = null;
+                        try {
+                            await navigateGrid(page, reportType);
+                            await waitForAuth(authState);
+                        } catch (e) {
+                            authState.headers = stale;
+                            throw e;
+                        }
+                    })().finally(() => { refreshing = null; });
+                }
+                await refreshing;
+            },
+        };
+        const api = createPlattsApi({
+            request: playwrightRequest(ctx),
+            auth,
+        });
+
+        const backfillSummary = await runBackfill({
+            api,
+            publications,
+            fromDate,
+            toDate,
+            reportType,
+            concurrency: backfillConcurrency,
+            isAlreadyStored,
+            uploadPdf,
+            dryRun,
+            now: () => Date.now(),
+            publicationsFromInput: backfillPublications.length > 0,
+        });
+
+        Object.assign(summary, backfillSummary);
+        summary.reportTypes = [reportType]; // o dataset dizia "Research Reports" tambem; backfill so faz Market Reports
+        if (!dryRun) {
+            try {
+                await sendBackfillSummary(TG_TOKEN, TG_CHAT, backfillSummary);
+            } catch (e) {
+                log.warning(`Telegram summary failed: ${e.message}`);
+                summary.errors.push({ stage: 'telegram-summary', message: e.message });
+                summary.type = 'partial';
+            }
+        }
         await Actor.pushData(summary);
         return;
     }
@@ -204,6 +296,9 @@ try {
 } catch (err) {
     const errName = err?.name ?? 'UnknownError';
     const errMsg = err?.message ?? String(err ?? '');
+    if (err?.summary) {
+        try { await Actor.pushData(err.summary); } catch { /* best effort */ }
+    }
     await bus.emit('cron_crashed', {
         label: `${errName}: ${errMsg.slice(0, 100)}`,
         detail: {
